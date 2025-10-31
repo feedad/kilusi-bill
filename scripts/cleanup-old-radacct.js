@@ -18,7 +18,7 @@
  */
 
 const path = require('path');
-const radiusDb = require('../config/radius-database');
+const radiusDb = require('../config/radius-postgres');
 const { logger } = require('../config/logger');
 
 // Ambil threshold dari args atau default 90 hari

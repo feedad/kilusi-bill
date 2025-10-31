@@ -1083,31 +1083,38 @@ router.get('/api/customers', adminAuth, async (req, res) => {
     const recordsFiltered = filtered.length;
     const page = filtered.slice(start, start + length);
 
-    const data = page.map(c => ({
-      phone: c.phone,
-      customer_id: c.id || '', // Fixed: use 'id' instead of 'customer_id'
-      name: c.name || '-',
-      area: c.area || '',
-      username: c.username || '-',
-      pppoe_username: c.pppoe_username || '',
-      pppoe_password: c.pppoe_password || '1234567',
-      package_name: c.package_name || 'Belum ada paket',
-      package_price: c.package_price || 0,
-      package_id: c.package_id || '',
-      address: c.address || '',
-      install_date: c.install_date || '',
-      payment_status: 'unpaid', // Default: payment_status not in customers table, should come from invoices
-      status: c.status || 'active',
-      isolir_status: c.isolir_status || 'normal',
-      connection_status: (c.isolir_status === 'isolated') ? 'suspended' : ((c.pppoe_username && activeSet.has(String(c.pppoe_username).toLowerCase())) ? 'online' : 'offline'),
-      created_at: c.created_at,
-      enable_isolir: c.enable_isolir === true,
-      isolir_scheduled_date: c.isolir_scheduled_date || ''
-    }));
+    const data = page.map(c => {
+      if (!c) {
+        logger.warn('Null customer found in data array');
+        return null;
+      }
+      return {
+        phone: c.phone || '',
+        customer_id: c.id || c.customer_id || '', // Fallback to customer_id if id doesn't exist
+        name: c.name || '-',
+        area: c.area || '',
+        username: c.username || '-',
+        pppoe_username: c.pppoe_username || '',
+        pppoe_password: c.pppoe_password || '1234567',
+        package_name: c.package_name || 'Belum ada paket',
+        package_price: c.package_price || 0,
+        package_id: c.package_id || '',
+        address: c.address || '',
+        install_date: c.install_date || '',
+        payment_status: 'unpaid', // Default: payment_status not in customers table, should come from invoices
+        status: c.status || 'active',
+        isolir_status: c.isolir_status || 'normal',
+        connection_status: (c.isolir_status === 'isolated') ? 'suspended' : ((c.pppoe_username && activeSet.has(String(c.pppoe_username).toLowerCase())) ? 'online' : 'offline'),
+        created_at: c.created_at,
+        enable_isolir: c.enable_isolir === true,
+        isolir_scheduled_date: c.isolir_scheduled_date || ''
+      };
+    }).filter(item => item !== null); // Remove any null entries
 
     console.log('[API /api/customers] Sending response:', { draw, recordsTotal, recordsFiltered, dataCount: data.length });
     res.json({ draw, recordsTotal, recordsFiltered, data });
   } catch (error) {
+    logger.error(`Error fetching customers (DT): ${error.message}`);
     res.json({ draw: 1, recordsTotal: 0, recordsFiltered: 0, data: [] });
   }
 });
@@ -1115,7 +1122,7 @@ router.get('/api/customers', adminAuth, async (req, res) => {
 // API: Get online users count by profile (for profiles page)
 router.get('/api/online-users-by-profile', adminAuth, async (req, res) => {
   try {
-    const radiusDb = require('../config/radius-database');
+    const radiusDb = require('../config/radius-postgres');
     const onlineUsers = await radiusDb.getOnlineUsersByGroup();
     
     res.json({
@@ -1400,12 +1407,12 @@ router.post('/customers/delete', adminAuth, async (req, res) => {
     
     // Delete customer and related invoices
     const normalizedPhone = normalizePhoneLocal(phone);
-    const result = billing.deleteCustomer(normalizedPhone);
+    const result = await billing.deleteCustomerByPhone(normalizedPhone);
     
-    if (result.success) {
+    if (result) {
       res.redirect('/admin/customers?success=' + encodeURIComponent(`Pelanggan ${phone} berhasil dihapus`));
     } else {
-      res.redirect('/admin/customers?error=' + encodeURIComponent(result.message || 'Gagal menghapus pelanggan'));
+      res.redirect('/admin/customers?error=' + encodeURIComponent('Gagal menghapus pelanggan'));
     }
   } catch (error) {
     logger.error(`Error deleting customer: ${error.message}`);
@@ -1429,12 +1436,12 @@ router.post('/customers/delete-multiple', adminAuth, async (req, res) => {
     for (const phone of phones) {
       try {
         const normalizedPhone = normalizePhoneLocal(phone);
-        const result = billing.deleteCustomer(normalizedPhone);
-        if (result.success) {
+        const result = await billing.deleteCustomerByPhone(normalizedPhone);
+        if (result) {
           successCount++;
         } else {
           errorCount++;
-          errors.push(`${phone}: ${result.message}`);
+          errors.push(`${phone}: Gagal menghapus pelanggan`);
         }
       } catch (error) {
         errorCount++;

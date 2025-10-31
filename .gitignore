@@ -49,6 +49,11 @@ dist/
 build/
 *.tgz
 
+# Backup files
+*.backup
+*.backup.*
+*.bak
+
 # Temporary files
 tmp/
 temp/

@@ -432,8 +432,16 @@
     background: linear-gradient(135deg, #4776e6 0%, #8e54e9 100%);
 }
 
-.stats-card.radius-active {
+.stats-card.radius-active,
+.widget-card.radius-active {
     background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+    color: white;
+}
+
+.stats-card.radius-online,
+.widget-card.radius-online {
+    background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+    color: white;
 }
 
 .stats-card.radius-inactive {

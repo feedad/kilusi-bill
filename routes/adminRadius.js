@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { logger } = require('../config/logger');
 const radiusServer = require('../config/radius-server');
-const radiusDb = require('../config/radius-database');
+const radiusDb = require('../config/radius-postgres');
 const radiusSync = require('../config/radius-sync');
 const { adminAuth } = require('./adminAuth');
 
@@ -327,7 +327,7 @@ router.post('/reload-nas', async (req, res) => {
  */
 router.get('/nas-clients', async (req, res) => {
   try {
-    const radiusDb = require('../config/radius-database');
+    const radiusDb = require('../config/radius-postgres');
     const nasClients = await radiusDb.getAllNasClients();
     
     res.json({
@@ -358,7 +358,7 @@ router.post('/nas-clients', async (req, res) => {
       });
     }
     
-    const radiusDb = require('../config/radius-database');
+    const radiusDb = require('../config/radius-postgres');
     const success = await radiusDb.addNasClient(
       nasname,
       shortname,
@@ -406,7 +406,7 @@ router.put('/nas-clients/:id', async (req, res) => {
       });
     }
     
-    const radiusDb = require('../config/radius-database');
+    const radiusDb = require('../config/radius-postgres');
     const success = await radiusDb.updateNasClient(
       parseInt(id),
       nasname,
@@ -448,7 +448,7 @@ router.delete('/nas-clients/:id', async (req, res) => {
     const { id } = req.params;
     logger.info(`📥 DELETE request for NAS client ID: ${id}`);
     
-    const radiusDb = require('../config/radius-database');
+    const radiusDb = require('../config/radius-postgres');
     
     // Check if this is the last NAS client (warning only, allow delete if user wants)
     const allClients = await radiusDb.getAllNasClients();

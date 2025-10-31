@@ -271,15 +271,51 @@ async function getCustomerByPPPoE(pppoeUsername) {
 }
 
 /**
+ * Generate 5-digit customer ID (00001-99999)
+ */
+async function generateCustomerId() {
+    try {
+        // Get the highest existing customer ID
+        const sql = 'SELECT CAST(username AS INTEGER) as max_id FROM customers WHERE username ~ \'^\\d{5}$\' ORDER BY CAST(username AS INTEGER) DESC LIMIT 1';
+        const result = await getAll(sql);
+
+        let nextId = 1;
+        if (result && result.length > 0 && result[0].max_id) {
+            nextId = result[0].max_id + 1;
+        }
+
+        // Ensure we don't exceed 99999
+        if (nextId > 99999) {
+            throw new Error('Maximum customer ID reached (99999)');
+        }
+
+        return nextId.toString().padStart(5, '0');
+    } catch (error) {
+        logger.error('Error generating customer ID:', error);
+        // Fallback to timestamp-based ID
+        return Date.now().toString().slice(-5).padStart(5, '0');
+    }
+}
+
+/**
  * Create new customer
  */
 async function createCustomer(customerData) {
     try {
         // Validate required fields
-        if (!customerData.username || !customerData.name || !customerData.phone) {
-            throw new Error('Missing required fields: username, name, and phone are required');
+        if (!customerData.name || !customerData.phone) {
+            throw new Error('Missing required fields: name and phone are required');
         }
-        
+
+        // Generate 5-digit customer ID if not provided
+        let customerId = customerData.username;
+        if (!customerId) {
+            customerId = await generateCustomerId();
+        } else {
+            // Ensure the provided ID is 5 digits
+            customerId = customerId.trim().padStart(5, '0');
+        }
+
         const sql = `
             INSERT INTO customers (
                 username, name, phone, pppoe_username, pppoe_password, email, address,
@@ -289,11 +325,11 @@ async function createCustomer(customerData) {
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
             RETURNING *
         `;
-        
+
         const normalizedPhone = normalizePhone(customerData.phone);
-        
+
         const values = [
-            customerData.username.trim(),
+            customerId,
             customerData.name.trim(),
             normalizedPhone,
             customerData.pppoe_username || null,
@@ -320,7 +356,7 @@ async function createCustomer(customerData) {
         // Auto-sync ke RADIUS jika ada pppoe_username
         if (customer.pppoe_username && customer.pppoe_password) {
             try {
-                const radiusDb = require('./radius-database');
+                const radiusDb = require('./radius-postgres');
                 
                 // 1. Insert ke radcheck (username/password)
                 await radiusDb.upsertRadiusUser(customer.pppoe_username, customer.pppoe_password);
@@ -416,6 +452,21 @@ async function deleteCustomer(id) {
         return true;
     } catch (error) {
         logger.error('Error deleting customer:', error);
+        throw error;
+    }
+}
+
+/**
+ * Delete customer by phone number
+ */
+async function deleteCustomerByPhone(phone) {
+    try {
+        const sql = 'DELETE FROM customers WHERE phone = $1';
+        const result = await query(sql, [phone]);
+        logger.info('Customer deleted by phone:', phone);
+        return true;
+    } catch (error) {
+        logger.error('Error deleting customer by phone:', error);
         throw error;
     }
 }
@@ -779,9 +830,11 @@ module.exports = {
     getCustomerById,
     getCustomerByPhone,
     getCustomerByPPPoE,
+    generateCustomerId,
     createCustomer,
     updateCustomer,
     deleteCustomer,
+    deleteCustomerByPhone,
     getAllCustomers, // alias
     getOverdueCustomers,
     getActiveCustomers,

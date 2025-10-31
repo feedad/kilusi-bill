@@ -6,13 +6,14 @@
 const { Pool } = require('pg');
 const path = require('path');
 
-// Database configuration
+// Database configuration from settings.json
+const { getSetting } = require('../config/settingsManager');
 const config = {
-    host: process.env.POSTGRES_HOST || 'localhost',
-    port: process.env.POSTGRES_PORT || 5432,
-    database: process.env.POSTGRES_DATABASE || 'kilusi_bill',
-    user: process.env.POSTGRES_USER || 'postgres',
-    password: process.env.POSTGRES_PASSWORD || '',
+    host: getSetting('postgres_host', 'localhost'),
+    port: parseInt(getSetting('postgres_port', '5432')),
+    database: getSetting('postgres_database', 'kilusi_bill'),
+    user: getSetting('postgres_user', 'postgres'),
+    password: getSetting('postgres_password', ''),
 };
 
 const pool = new Pool(config);

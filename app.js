@@ -133,25 +133,60 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Security headers
+// Get current origin for CSP configuration
+const currentOrigin = process.env.ALLOWED_ORIGINS ?
+    process.env.ALLOWED_ORIGINS.split(',')[0] :
+    `http://localhost:${process.env.PORT || 3001}`;
+
+// Extract hostname for wildcard matching
+const originHost = new URL(currentOrigin).hostname;
+
 app.use(helmet({
     contentSecurityPolicy: {
-        useDefaults: true,
+        useDefaults: false, // We'll define our own policies
         directives: {
             defaultSrc: ["'self'"],
-            // Allow inline styles and CDN styles (Bootstrap, DataTables, Leaflet, Cloudflare)
+            // Allow inline styles and CDN styles
             styleSrc: ["'self'", "'unsafe-inline'", 'cdn.jsdelivr.net', 'cdn.datatables.net', 'unpkg.com', 'cdnjs.cloudflare.com'],
-            // Allow inline scripts for event handlers (onclick) and CDN scripts (Bootstrap, jQuery, DataTables, Leaflet)
+            // Allow inline scripts for event handlers and CDN scripts
             scriptSrc: ["'self'", "'unsafe-inline'", 'cdn.jsdelivr.net', 'code.jquery.com', 'cdn.datatables.net', 'unpkg.com', 'cdnjs.cloudflare.com'],
-            // Explicitly allow inline script attributes (CSP Level 3)
+            // Allow inline script attributes
             scriptSrcAttr: ["'unsafe-inline'"],
-            // Images may include data URIs and https sources (including map tiles)
+            // Allow form submissions to same origin and subdomains
+            formAction: ["'self'", `http://${originHost}`, `https://${originHost}`],
+            // Images may include data URIs and external sources
             imgSrc: ["'self'", 'data:', 'https:', 'http:', '*.tile.openstreetmap.org', '*.openstreetmap.org'],
-            // Permit AJAX/fetch to same-origin and http/https endpoints
-            connectSrc: ["'self'", 'https:', 'http:'],
-            // Fonts loaded from CDN or data URIs (e.g., Bootstrap Icons)
-            fontSrc: ["'self'", 'data:', 'cdn.jsdelivr.net', 'cdnjs.cloudflare.com']
+            // Allow connections to APIs and services
+            connectSrc: ["'self'", 'https:', 'http:', 'ws:', 'wss:'],
+            // Fonts from CDN and data URIs
+            fontSrc: ["'self'", 'data:', 'cdn.jsdelivr.net', 'cdnjs.cloudflare.com'],
+            // Allow iframes for embedded content
+            frameSrc: ["'self'"],
+            // Allow media from various sources
+            mediaSrc: ["'self'"],
+            // Allow object sources
+            objectSrc: ["'none'"],
+            // Base URI restrictions
+            baseUri: ["'self'"],
+            // Allow manifest files
+            manifestSrc: ["'self'"],
+            // Allow prefetch
+            prefetchSrc: ["'self'"],
+            // Child sources
+            childSrc: ["'self'"],
+            // Worker sources
+            workerSrc: ["'self'", 'blob:'],
+            // Frame ancestors
+            frameAncestors: ["'self'"],
+            // Upgrade insecure requests in production
+            upgradeInsecureRequests: process.env.NODE_ENV === 'production' ? [] : null
         }
-    }
+    },
+    // Set consistent Origin-Agent-Cluster header
+    originAgentCluster: true,
+    crossOriginEmbedderPolicy: false, // Disable to avoid conflicts
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    crossOriginOpenerPolicy: { policy: "same-origin" }
 }));
 
 // CORS (allow configured origins or localhost default)
@@ -176,6 +211,11 @@ const authLimiter = rateLimit({
     message: 'Too many login attempts. Please try again later.'
 });
 app.use('/api', apiLimiter);
+
+// Input sanitization and security
+const { sanitizeInput, xssProtection } = require('./middleware/validation');
+app.use(sanitizeInput);
+app.use(xssProtection);
 
 // Session configuration (use ENV secret)
 const crypto = require('crypto');
@@ -218,6 +258,7 @@ const adminSnmpRouter = require('./routes/adminSnmp');
 const adminOLTRouter = require('./routes/adminOLT');
 const adminNASRouter = require('./routes/adminNAS');
 const adminMikrotikServersRouter = require('./routes/adminMikrotikServers');
+const adminPelangganOnlineRouter = require('./routes/adminPelangganOnline');
 
 // Mount routes dalam urutan yang benar
 app.use('/admin', adminAuthRouter);
@@ -233,6 +274,7 @@ app.use('/admin', adminSnmpRouter);
 app.use('/admin', adminOLTRouter);
 app.use('/admin/nas', adminNASRouter);
 app.use('/admin/mikrotik-servers', adminMikrotikServersRouter);
+app.use('/admin/pelanggan-online', adminPelangganOnlineRouter);
 
 // Test endpoint untuk memverifikasi mounting
 app.get('/admin/test-mount', (req, res) => {
@@ -243,240 +285,6 @@ app.get('/admin/test-mount', (req, res) => {
   });
 });
 
-// GET: Map Settings - Mendapatkan settings untuk Google Maps
-app.get('/admin/genieacs/map-settings', (req, res) => {
-  try {
-    const { getSetting } = require('./config/settingsManager');
-
-    const mapSettings = {
-      googleMapsApiKey: getSetting('google_maps_api_key', ''),
-      defaultCenter: {
-        lat: -6.2088,
-        lng: 106.8456
-      },
-      defaultZoom: 15,
-      jakartaCenter: {
-        lat: -6.2088,
-        lng: 106.8456
-      }
-    };
-
-    res.json({
-      success: true,
-      settings: mapSettings
-    });
-
-  } catch (error) {
-    logger.error('Error getting map settings:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Gagal mendapatkan settings peta'
-    });
-  }
-});
-
-// POST: Reverse Geocoding Proxy - untuk mengatasi CORS issue dengan Nominatim
-app.post('/admin/genieacs/reverse-geocode', async (req, res) => {
-  try {
-    const { lat, lng } = req.body;
-
-    if (!lat || !lng) {
-      return res.status(400).json({
-        success: false,
-        message: 'Latitude and longitude are required'
-      });
-    }
-
-    // Menggunakan Nominatim API untuk reverse geocoding
-    const axios = require('axios');
-    const nominatimUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`;
-
-        const response = await axios.get(nominatimUrl, {
-      headers: {
-        'User-Agent': 'Kilusi-Digital-Network/1.0'
-      }
-    });    res.json({
-      success: true,
-      data: response.data
-    });
-
-  } catch (error) {
-    logger.error('Error reverse geocoding:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error reverse geocoding',
-      error: error.message
-    });
-  }
-});
-
-// POST: Save Location ONU - untuk menyimpan lokasi ONU ke file JSON
-app.post('/admin/genieacs/save-location', adminAuth, async (req, res) => {
-  try {
-    logger.info('📍 Save location request received:', req.body);
-    
-    const { deviceId, serial, tag, lat, lng, address } = req.body;
-    
-    if (!deviceId || !lat || !lng) {
-      logger.warn('❌ Validation failed: missing required fields');
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Device ID, latitude, dan longitude wajib diisi' 
-      });
-    }
-
-    const fs = require('fs');
-    const path = require('path');
-    const locationsFile = path.join(__dirname, 'logs/onu-locations.json');
-    
-    logger.debug('📁 Locations file path:', locationsFile);
-    
-    // Pastikan direktori logs ada
-    const logsDir = path.dirname(locationsFile);
-    if (!fs.existsSync(logsDir)) {
-      logger.info('📁 Creating logs directory:', logsDir);
-      fs.mkdirSync(logsDir, { recursive: true });
-    }
-    
-    // Baca data lokasi yang sudah ada
-    let locationsData = {};
-    try {
-      if (fs.existsSync(locationsFile)) {
-        const fileContent = fs.readFileSync(locationsFile, 'utf8');
-        logger.debug('📖 Reading existing locations file, size:', fileContent.length);
-        locationsData = JSON.parse(fileContent);
-        logger.debug('📊 Existing locations count:', Object.keys(locationsData).length);
-      } else {
-        logger.debug('📝 Creating new locations file');
-      }
-    } catch (e) {
-      logger.error('❌ Error reading locations file:', e.message);
-      logger.debug('📝 Creating new locations data');
-      locationsData = {};
-    }
-    
-    // Validasi koordinat
-    const latitude = parseFloat(lat);
-    const longitude = parseFloat(lng);
-    
-    if (isNaN(latitude) || isNaN(longitude)) {
-      logger.warn('❌ Invalid coordinates:', { lat, lng, latitude, longitude });
-      return res.status(400).json({
-        success: false,
-        message: 'Koordinat tidak valid'
-      });
-    }
-    
-    if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
-      logger.warn('❌ Coordinates out of range:', { latitude, longitude });
-      return res.status(400).json({
-        success: false,
-        message: 'Koordinat di luar jangkauan yang valid'
-      });
-    }
-    
-    // Simpan/update lokasi device
-    const locationData = {
-      deviceId,
-      serial: serial || '',
-      tag: tag || '',
-      lat: latitude,
-      lng: longitude,
-      address: address || '',
-      lastUpdated: new Date().toISOString(),
-      updatedBy: 'admin'
-    };
-    
-    locationsData[deviceId] = locationData;
-    
-    logger.info('💾 Saving location data for device:', deviceId);
-    logger.debug('📍 Location data:', locationData);
-    
-    // Tulis kembali ke file dengan error handling yang lebih baik
-    try {
-      const jsonData = JSON.stringify(locationsData, null, 2);
-      fs.writeFileSync(locationsFile, jsonData, 'utf8');
-      logger.debug('✅ Location data written to file successfully');
-      
-      // Verify file was written
-      if (fs.existsSync(locationsFile)) {
-        const fileSize = fs.statSync(locationsFile).size;
-        logger.debug('📊 File written successfully, size:', fileSize, 'bytes');
-      } else {
-        throw new Error('File was not created');
-      }
-      
-    } catch (writeError) {
-      logger.error('❌ Error writing to file:', writeError.message);
-      throw new Error('Gagal menulis file lokasi: ' + writeError.message);
-    }
-    
-    logger.info(`✅ Location saved successfully for device ${deviceId}: ${latitude}, ${longitude}`);
-    
-    res.json({ 
-      success: true, 
-      message: 'Lokasi berhasil disimpan',
-      location: locationData
-    });
-    
-  } catch (err) {
-    logger.error('❌ Error saving location:', err.message);
-    logger.error('❌ Stack trace:', err.stack);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Gagal menyimpan lokasi: ' + err.message 
-    });
-  }
-});
-
-// GET: Get Location ONU - untuk mengambil lokasi ONU dari file JSON
-app.get('/admin/genieacs/get-location', adminAuth, async (req, res) => {
-  try {
-    const { deviceId } = req.query;
-    
-    if (!deviceId) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Device ID wajib diisi' 
-      });
-    }
-
-    const fs = require('fs');
-    const path = require('path');
-    const locationsFile = path.join(__dirname, 'logs/onu-locations.json');
-    
-    // Cek apakah file lokasi ada
-    if (!fs.existsSync(locationsFile)) {
-      return res.json({ 
-        success: false, 
-        message: 'No location data found' 
-      });
-    }
-    
-    // Baca data lokasi
-    const locationsData = JSON.parse(fs.readFileSync(locationsFile, 'utf8'));
-    
-    // Cari lokasi device
-    if (locationsData[deviceId]) {
-      res.json({ 
-        success: true, 
-        location: locationsData[deviceId]
-      });
-    } else {
-      res.json({ 
-        success: false, 
-        message: 'Location not found for this device' 
-      });
-    }
-    
-  } catch (err) {
-    logger.error('Error getting location:', err);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Gagal mengambil lokasi: ' + err.message 
-    });
-  }
-});
 
 // Import dan gunakan route adminHotspot
 const adminHotspotRouter = require('./routes/adminHotspot');

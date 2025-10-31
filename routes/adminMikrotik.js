@@ -18,7 +18,7 @@ const {
     getHotspotProfileDetail,
     kickPPPoEUser
 } = require('../config/mikrotik');
-const radiusDb = require('../config/radius-database');
+const radiusDb = require('../config/radius-postgres');
 const radiusSync = require('../config/radius-sync');
 const billing = require('../config/billing');
 const { getSetting } = require('../config/settingsManager');

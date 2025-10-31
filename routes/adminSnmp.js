@@ -1,53 +1,44 @@
 const express = require('express');
 const router = express.Router();
-const path = require('path');
-const sqlite3 = require('sqlite3').verbose();
 const { adminAuth } = require('./adminAuth');
 const { getSetting } = require('../config/settingsManager');
 const snmpMonitor = require('../config/snmp-monitor');
 const logger = require('../config/logger');
 const mikrotik = require('../config/mikrotik');
-
-// Helpers to read from billing.db for device lists
-const dbPath = path.join(__dirname, '../billing.db');
-function dbAll(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    const db = new sqlite3.Database(dbPath);
-    db.all(sql, params, (err, rows) => {
-      db.close();
-      if (err) reject(err);
-      else resolve(rows);
-    });
-  });
-}
+const { query, getAll, getOne } = require('../config/database');
 
 // Ensure SNMP columns exist on target tables so updates don't fail
 async function ensureSnmpColumns(tableName) {
   const valid = new Set(['nas_servers', 'mikrotik_servers']);
   if (!valid.has(tableName)) return;
-  // Read table info
-  const cols = await new Promise((resolve, reject) => {
-    const db = new sqlite3.Database(dbPath);
-    db.all(`PRAGMA table_info(${tableName})`, [], (err, rows) => {
-      db.close();
-      if (err) return reject(err);
-      resolve(rows.map(r => r.name));
-    });
-  });
-  const toAdd = [];
-  if (!cols.includes('snmp_community')) toAdd.push(`ALTER TABLE ${tableName} ADD COLUMN snmp_community TEXT`);
-  if (!cols.includes('snmp_version')) toAdd.push(`ALTER TABLE ${tableName} ADD COLUMN snmp_version TEXT DEFAULT '2c'`);
-  if (!cols.includes('snmp_port')) toAdd.push(`ALTER TABLE ${tableName} ADD COLUMN snmp_port INTEGER DEFAULT 161`);
-  for (const sql of toAdd) {
-    // Run individually and ignore duplicate column errors just in case of race
-    await new Promise((resolve, reject) => {
-      const db = new sqlite3.Database(dbPath);
-      db.run(sql, [], (err) => {
-        db.close();
-        if (err && !String(err.message || '').includes('duplicate column name')) return reject(err);
-        resolve();
-      });
-    });
+
+  try {
+    // Check existing columns in PostgreSQL
+    const result = await query(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_name = $1
+    `, [tableName]);
+
+    const cols = result.rows.map(r => r.column_name);
+    const toAdd = [];
+
+    if (!cols.includes('snmp_community')) toAdd.push(`ALTER TABLE ${tableName} ADD COLUMN snmp_community TEXT`);
+    if (!cols.includes('snmp_version')) toAdd.push(`ALTER TABLE ${tableName} ADD COLUMN snmp_version TEXT DEFAULT '2c'`);
+    if (!cols.includes('snmp_port')) toAdd.push(`ALTER TABLE ${tableName} ADD COLUMN snmp_port INTEGER DEFAULT 161`);
+
+    for (const sql of toAdd) {
+      try {
+        await query(sql);
+      } catch (err) {
+        // Ignore duplicate column errors
+        if (!err.message.includes('already exists')) {
+          logger.warn(`SNMP column add warning: ${err.message}`);
+        }
+      }
+    }
+  } catch (error) {
+    logger.error(`Error ensuring SNMP columns for ${tableName}: ${error.message}`);
   }
 }
 
@@ -436,7 +427,7 @@ router.get('/snmp/devices/json', adminAuth, async (req, res) => {
   try {
     // Try to include per-device SNMP columns; fallback if not present
     async function trySelect(sql, fallbackSql) {
-      try { return await dbAll(sql); } catch { return await dbAll(fallbackSql); }
+      try { return await getAll(sql); } catch { return await getAll(fallbackSql); }
     }
 
     const [nas, mt] = await Promise.all([
@@ -500,22 +491,13 @@ router.post('/snmp/devices/update-nas/:id', adminAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const { name, host, snmp_community, snmp_version, snmp_port } = req.body;
-    
+
     await ensureSnmpColumns('nas_servers');
-    const sqlite3 = require('sqlite3').verbose();
-    const db = new sqlite3.Database(dbPath);
-    
-    await new Promise((resolve, reject) => {
-      db.run(
-        'UPDATE nas_servers SET name=?, host=?, snmp_community=?, snmp_version=?, snmp_port=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
-        [name, host, snmp_community || null, snmp_version || '2c', snmp_port || 161, id],
-        (err) => {
-          db.close();
-          if (err) reject(err);
-          else resolve();
-        }
-      );
-    });
+
+    await query(
+      'UPDATE nas_servers SET name=$1, host=$2, snmp_community=$3, snmp_version=$4, snmp_port=$5, updated_at=CURRENT_TIMESTAMP WHERE id=$6',
+      [name, host, snmp_community || null, snmp_version || '2c', snmp_port || 161, id]
+    );
     
     res.json({ success: true, message: 'Device updated successfully' });
   } catch (error) {
@@ -529,22 +511,13 @@ router.post('/snmp/devices/update-mikrotik/:id', adminAuth, async (req, res) => 
   try {
     const { id } = req.params;
     const { name, host, snmp_community, snmp_version, snmp_port } = req.body;
-    
+
     await ensureSnmpColumns('mikrotik_servers');
-    const sqlite3 = require('sqlite3').verbose();
-    const db = new sqlite3.Database(dbPath);
-    
-    await new Promise((resolve, reject) => {
-      db.run(
-        'UPDATE mikrotik_servers SET name=?, host=?, snmp_community=?, snmp_version=?, snmp_port=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
-        [name, host, snmp_community || null, snmp_version || '2c', snmp_port || 161, id],
-        (err) => {
-          db.close();
-          if (err) reject(err);
-          else resolve();
-        }
-      );
-    });
+
+    await query(
+      'UPDATE mikrotik_servers SET name=$1, host=$2, snmp_community=$3, snmp_version=$4, snmp_port=$5, updated_at=CURRENT_TIMESTAMP WHERE id=$6',
+      [name, host, snmp_community || null, snmp_version || '2c', snmp_port || 161, id]
+    );
     
     res.json({ success: true, message: 'Device updated successfully' });
   } catch (error) {
@@ -557,33 +530,19 @@ router.post('/snmp/devices/update-mikrotik/:id', adminAuth, async (req, res) => 
 router.post('/snmp/devices/delete-nas/:id', adminAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    
-    const sqlite3 = require('sqlite3').verbose();
-    const db = new sqlite3.Database(dbPath);
-    
+
     // Check if device is being used
-    const count = await new Promise((resolve, reject) => {
-      db.get('SELECT COUNT(*) as count FROM customers WHERE nas_id=?', [id], (err, row) => {
-        if (err) return reject(err);
-        resolve(row.count);
-      });
-    });
+    const countResult = await getOne('SELECT COUNT(*) as count FROM customers WHERE nas_id=$1', [id]);
+    const count = parseInt(countResult.count);
 
     if (count > 0) {
-      db.close();
-      return res.json({ 
-        success: false, 
-        message: `Tidak dapat menghapus. ${count} customer menggunakan NAS ini.` 
+      return res.json({
+        success: false,
+        message: `Tidak dapat menghapus. ${count} customer menggunakan NAS ini.`
       });
     }
 
-    await new Promise((resolve, reject) => {
-      db.run('DELETE FROM nas_servers WHERE id=?', [id], (err) => {
-        db.close();
-        if (err) reject(err);
-        else resolve();
-      });
-    });
+    await query('DELETE FROM nas_servers WHERE id=$1', [id]);
     
     res.json({ success: true, message: 'NAS device deleted successfully' });
   } catch (error) {
@@ -596,33 +555,19 @@ router.post('/snmp/devices/delete-nas/:id', adminAuth, async (req, res) => {
 router.post('/snmp/devices/delete-mikrotik/:id', adminAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    
-    const sqlite3 = require('sqlite3').verbose();
-    const db = new sqlite3.Database(dbPath);
-    
+
     // Check if device is being used
-    const count = await new Promise((resolve, reject) => {
-      db.get('SELECT COUNT(*) as count FROM customers WHERE mikrotik_server_id=?', [id], (err, row) => {
-        if (err) return reject(err);
-        resolve(row.count);
-      });
-    });
+    const countResult = await getOne('SELECT COUNT(*) as count FROM customers WHERE mikrotik_server_id=$1', [id]);
+    const count = parseInt(countResult.count);
 
     if (count > 0) {
-      db.close();
-      return res.json({ 
-        success: false, 
-        message: `Tidak dapat menghapus. ${count} customer menggunakan server ini.` 
+      return res.json({
+        success: false,
+        message: `Tidak dapat menghapus. ${count} customer menggunakan server ini.`
       });
     }
 
-    await new Promise((resolve, reject) => {
-      db.run('DELETE FROM mikrotik_servers WHERE id=?', [id], (err) => {
-        db.close();
-        if (err) reject(err);
-        else resolve();
-      });
-    });
+    await query('DELETE FROM mikrotik_servers WHERE id=$1', [id]);
     
     res.json({ success: true, message: 'Mikrotik device deleted successfully' });
   } catch (error) {

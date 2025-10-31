@@ -5,7 +5,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const radiusDb = require('../config/radius-database');
+const radiusDb = require('../config/radius-postgres');
 
 async function migrateNasClients() {
   console.log('🔄 Starting NAS clients migration...');

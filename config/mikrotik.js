@@ -12,7 +12,7 @@ if (useMikrotikApi) {
         RouterOSAPI = null;
     }
 }
-const mysql = require('mysql2/promise');
+// MySQL connection replaced with SQLite RADIUS database
 const fs = require('fs');
 const path = require('path');
 
@@ -209,36 +209,39 @@ async function rosWrite(command, params = []) {
     return task;
 }
 
-// Fungsi untuk koneksi ke database RADIUS (MySQL)
+// Fungsi untuk koneksi ke database RADIUS (PostgreSQL)
 async function getRadiusConnection() {
-    const host = getSetting('radius_host', 'localhost');
-    const user = getSetting('radius_user', 'radius');
-    const password = getSetting('radius_password', 'radius');
-    const database = getSetting('radius_database', 'radius');
-    // Guard: prevent unresolved placeholder causing ENOTFOUND
-    if (!host || host === 'IP_SERVER_RADIUS') {
-        throw new Error('RADIUS host is not configured. Please set "radius_host" in settings.json');
-    }
-    return await mysql.createConnection({ host, user, password, database });
+    const radiusDb = require('./radius-postgres');
+    // Initialize RADIUS tables if needed
+    await radiusDb.initializeRadiusTables();
+    return radiusDb; // Return the PostgreSQL RADIUS module
 }
 
-// Fungsi untuk mendapatkan seluruh user PPPoE dari RADIUS
+// Fungsi untuk mendapatkan seluruh user PPPoE dari RADIUS (PostgreSQL version)
 async function getPPPoEUsersRadius() {
-    const conn = await getRadiusConnection();
-    const [rows] = await conn.execute("SELECT username, value as password FROM radcheck WHERE attribute='Cleartext-Password'");
-    await conn.end();
-    return rows.map(row => ({ name: row.username, password: row.password }));
+    const radiusDb = await getRadiusConnection();
+    try {
+        const rows = await radiusDb.query("SELECT username, value as password FROM radcheck WHERE attribute='Cleartext-Password'");
+        return rows.map(row => ({ name: row.username, password: row.password }));
+    } catch (error) {
+        logger.error(`Error getting PPPoE users from RADIUS: ${error.message}`);
+        return [];
+    }
 }
 
-// Fungsi untuk menambah user PPPoE ke RADIUS
+// Fungsi untuk menambah user PPPoE ke RADIUS (PostgreSQL version)
 async function addPPPoEUserRadius({ username, password }) {
-    const conn = await getRadiusConnection();
-    await conn.execute(
-        "INSERT INTO radcheck (username, attribute, op, value) VALUES (?, 'Cleartext-Password', ':=', ?)",
-        [username, password]
-    );
-    await conn.end();
-    return { success: true };
+    const radiusDb = await getRadiusConnection();
+    try {
+        await radiusDb.query(
+            "INSERT INTO radcheck (username, attribute, op, value) VALUES (?, 'Cleartext-Password', ':=', ?)",
+            [username, password]
+        );
+        return { success: true };
+    } catch (error) {
+        logger.error(`Error adding PPPoE user to RADIUS: ${error.message}`);
+        return { success: false, message: error.message };
+    }
 }
 
 // Wrapper: Pilih mode autentikasi dari settings
@@ -304,10 +307,14 @@ async function getActivePPPoEConnections() {
     try {
         const mode = String(getSetting('user_auth_mode', 'mikrotik')).toLowerCase();
         if (mode === 'radius' || !useMikrotikApi) {
-            const conn = await getRadiusConnection();
-            const [rows] = await conn.execute("SELECT username AS name, nasipaddress AS address, acctsessiontime AS uptime FROM radacct WHERE acctstoptime IS NULL");
-            await conn.end();
-            return { success: true, message: `Ditemukan ${rows.length} koneksi PPPoE aktif (RADIUS)`, data: rows };
+            const radiusDb = await getRadiusConnection();
+            try {
+                const rows = await radiusDb.query("SELECT username AS name, nasipaddress AS address, acctsessiontime AS uptime FROM radacct WHERE acctstoptime IS NULL");
+                return { success: true, message: `Ditemukan ${rows.length} koneksi PPPoE aktif (RADIUS)`, data: rows };
+            } catch (error) {
+                logger.error(`Error getting active PPPoE connections from RADIUS: ${error.message}`);
+                return { success: false, message: error.message, data: [] };
+            }
         } else {
             // Aggregate from all configured routers if available
             const routers = getRouterConfigs();
@@ -370,19 +377,30 @@ async function getInactivePPPoEUsers() {
     try {
         const mode = String(getSetting('user_auth_mode', 'mikrotik')).toLowerCase();
         if (mode === 'radius' || !useMikrotikApi) {
-            const conn = await getRadiusConnection();
-            const [allUsers] = await conn.execute("SELECT username FROM radcheck WHERE attribute='Cleartext-Password'");
-            const [active] = await conn.execute("SELECT DISTINCT username FROM radacct WHERE acctstoptime IS NULL");
-            await conn.end();
-            const activeSet = new Set(active.map(r => r.username));
-            const inactive = allUsers.filter(u => !activeSet.has(u.username));
-            return {
-                success: true,
-                totalSecrets: allUsers.length,
-                totalActive: activeSet.size,
-                totalInactive: inactive.length,
-                data: inactive.map(u => ({ name: u.username, comment: '', profile: 'RADIUS', lastLogout: 'N/A' }))
-            };
+            const radiusDb = await getRadiusConnection();
+            try {
+                const allUsers = await radiusDb.getAllRadiusUsers();
+                const activeConnections = await radiusDb.getActivePPPoEConnections();
+                const activeSet = new Set(activeConnections.map(r => r.name));
+                const inactive = allUsers.filter(u => !activeSet.has(u.username));
+                return {
+                    success: true,
+                    totalSecrets: allUsers.length,
+                    totalActive: activeSet.size,
+                    totalInactive: inactive.length,
+                    data: inactive.map(u => ({ name: u.username, comment: '', profile: 'RADIUS', lastLogout: 'N/A' }))
+                };
+            } catch (error) {
+                logger.error(`Error getting inactive PPPoE users from RADIUS: ${error.message}`);
+                return {
+                    success: false,
+                    message: error.message,
+                    totalSecrets: 0,
+                    totalActive: 0,
+                    totalInactive: 0,
+                    data: []
+                };
+            }
         } else {
             const pppSecrets = await rosWrite('/ppp/secret/print');
             let activeUsers = [];
@@ -627,28 +645,40 @@ async function getResourceInfo() {
     }
 }
 
-// Fungsi untuk mendapatkan daftar user hotspot aktif dari RADIUS
+// Fungsi untuk mendapatkan daftar user hotspot aktif dari RADIUS (PostgreSQL version)
 async function getActiveHotspotUsersRadius() {
-    const conn = await getRadiusConnection();
-    // Ambil user yang sedang online dari radacct (acctstoptime IS NULL)
-    const [rows] = await conn.execute("SELECT DISTINCT username FROM radacct WHERE acctstoptime IS NULL");
-    await conn.end();
-    return {
-        success: true,
-        message: `Ditemukan ${rows.length} user hotspot aktif (RADIUS)` ,
-        data: rows.map(row => ({ name: row.username }))
-    };
+    const radiusDb = await getRadiusConnection();
+    try {
+        // Ambil user yang sedang online dari radacct (acctstoptime IS NULL)
+        const rows = await radiusDb.query("SELECT DISTINCT username FROM radacct WHERE acctstoptime IS NULL");
+        return {
+            success: true,
+            message: `Ditemukan ${rows.length} user hotspot aktif (RADIUS)` ,
+            data: rows.map(row => ({ name: row.username }))
+        };
+    } catch (error) {
+        logger.error(`Error getting active hotspot users from RADIUS: ${error.message}`);
+        return {
+            success: false,
+            message: error.message,
+            data: []
+        };
+    }
 }
 
-// Fungsi untuk menambah user hotspot ke RADIUS
+// Fungsi untuk menambah user hotspot ke RADIUS (PostgreSQL version)
 async function addHotspotUserRadius(username, password, profile) {
-    const conn = await getRadiusConnection();
-    await conn.execute(
-        "INSERT INTO radcheck (username, attribute, op, value) VALUES (?, 'Cleartext-Password', ':=', ?)",
-        [username, password]
-    );
-    await conn.end();
-    return { success: true, message: 'User hotspot berhasil ditambahkan ke RADIUS' };
+    const radiusDb = await getRadiusConnection();
+    try {
+        await radiusDb.query(
+            "INSERT INTO radcheck (username, attribute, op, value) VALUES (?, 'Cleartext-Password', ':=', ?)",
+            [username, password]
+        );
+        return { success: true, message: 'User hotspot berhasil ditambahkan ke RADIUS' };
+    } catch (error) {
+        logger.error(`Error adding hotspot user to RADIUS: ${error.message}`);
+        return { success: false, message: error.message };
+    }
 }
 
 // Wrapper: Pilih mode autentikasi dari settings

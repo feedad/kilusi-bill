@@ -1,5 +1,5 @@
 const { logger } = require('./logger');
-const radiusDb = require('./radius-database');
+const radiusDb = require('./radius-postgres');
 const billing = require('./billing');
 
 /**

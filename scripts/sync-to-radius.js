@@ -3,7 +3,7 @@
  * Run: node scripts/sync-to-radius.js
  */
 
-const radiusDb = require('../config/radius-database');
+const radiusDb = require('../config/radius-postgres');
 const radiusSync = require('../config/radius-sync');
 const { logger } = require('../config/logger');
 

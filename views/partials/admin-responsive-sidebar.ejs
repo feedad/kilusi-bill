@@ -65,6 +65,9 @@
                         <div class="submenu" id="pppoeMenu">
                             <a href="/admin/packages" class="<%= typeof page !== 'undefined' && page === 'packages' ? 'active' : '' %> sidebar-sub-link">Profile Paket</a>
                             <a href="/admin/customers" class="<%= typeof page !== 'undefined' && page === 'customers' ? 'active' : '' %> sidebar-sub-link">Data Pelanggan</a>
+                            <% if (typeof settings !== 'undefined' && settings.app_mode === 'radius') { %>
+                            <a href="/admin/pelanggan-online" class="<%= typeof page !== 'undefined' && page === 'pelanggan-online' ? 'active' : '' %> sidebar-sub-link">Pelanggan Online</a>
+                            <% } %>
                             <a href="/admin/mikrotik" class="<%= typeof page !== 'undefined' && page === 'mikrotik' ? 'active' : '' %> sidebar-sub-link">PPPoE Online</a>
                         </div>
                     </div>

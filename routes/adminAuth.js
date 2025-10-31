@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getSetting } = require('../config/settingsManager');
 const rateLimit = require('express-rate-limit');
-const { authValidation, validate } = require('../middleware/validation');
+const { adminAuthValidation, validate } = require('../middleware/validation');
 
 // Rate limiter khusus untuk POST /admin/login
 const loginLimiter = rateLimit({
@@ -36,7 +36,7 @@ router.get('/login', (req, res) => {
 });
 
 // POST: Proses login admin
-router.post('/login', loginLimiter, authValidation, validate, async (req, res) => {
+router.post('/login', loginLimiter, adminAuthValidation, validate, async (req, res) => {
   // Handle validation errors for form submit (non-JSON)
   if (req.validationErrors && req.validationErrors.length) {
     const firstError = req.validationErrors[0]?.msg || 'Input tidak valid';

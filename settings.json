@@ -60,7 +60,7 @@
   "postgres_pool_max": "20",
   "postgres_idle_timeout": "30000",
   "postgres_connection_timeout": "5000",
-  "radius_host": "IP_SERVER_RADIUS",
+  "radius_host": "localhost",
   "radius_user": "user_mysql_radius",
   "radius_password": "password_mysql_radius",
   "radius_database": "radius",

@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <title>Pelanggan Online - Admin</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="/css/responsive-admin.css" rel="stylesheet">
+    <link href="/css/dark-theme.css" rel="stylesheet">
+    <link href="/css/widgets.css" rel="stylesheet">
+    <style>
+        /* Mobile responsive fixes */
+        @media (max-width: 767.98px) {
+            .main-content {
+                margin-top: 70px !important;
+                padding-top: 10px !important;
+                z-index: 1;
+            }
+            .card {
+                z-index: 1;
+            }
+            .row.widget-row:first-of-type {
+                margin-top: 10px;
+            }
+        }
+
+        /* Custom styles for checkbox and actions */
+        .bulk-actions {
+            background: #2d3348;
+            border: 1px solid #3a4052;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            display: none;
+        }
+
+        .bulk-actions.show {
+            display: block;
+        }
+
+        .custom-checkbox {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+
+        .session-table th:first-child,
+        .session-table td:first-child {
+            width: 50px;
+            text-align: center;
+        }
+
+        .session-table tr.selected {
+            background: #2d3348 !important;
+        }
+
+        .btn-kick {
+            background: #dc3545;
+            border-color: #dc3545;
+            color: white;
+        }
+
+        .btn-kick:hover {
+            background: #c82333;
+            border-color: #bd2130;
+            color: white;
+        }
+
+        .refresh-indicator {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .refresh-indicator.show {
+            opacity: 1;
+        }
+
+        .connection-status {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+
+        .connection-status.online {
+            background: #28a745;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .session-table code {
+            background: #2d3348;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.85rem;
+        }
+
+        .loading-spinner {
+            text-align: center;
+            padding: 2rem;
+        }
+
+        /* Fix table background color for dark theme */
+        .session-table {
+            background: #252a3d !important;
+            color: #e0e0e0 !important;
+        }
+
+        .session-table thead th {
+            background: #2d3348 !important;
+            color: #ffffff !important;
+            border-color: #3a4052 !important;
+        }
+
+        .session-table tbody tr {
+            background: #252a3d !important;
+            border-color: #3a4052 !important;
+            color: #e0e0e0 !important;
+        }
+
+        .session-table tbody tr:nth-of-type(even) {
+            background: #2a2f42 !important;
+        }
+
+        .session-table tbody tr:hover {
+            background: #2d3348 !important;
+        }
+
+        .session-table td, .session-table th {
+            border-color: #3a4052 !important;
+            color: #e0e0e0 !important;
+        }
+
+        .session-table td[colspan] {
+            background: #252a3d !important;
+            color: #b8b8b8 !important;
+        }
+
+        /* Override Bootstrap table styles with higher specificity */
+        body .table-responsive {
+            background: #252a3d !important;
+            border-radius: 8px !important;
+            border: 1px solid #3a4052 !important;
+        }
+
+        body .table {
+            background: #252a3d !important;
+            color: #e0e0e0 !important;
+            margin-bottom: 0 !important;
+        }
+
+        body .table thead th {
+            background: #2d3348 !important;
+            color: #ffffff !important;
+            border-color: #3a4052 !important;
+        }
+
+        body .table tbody tr {
+            background: #252a3d !important;
+            color: #e0e0e0 !important;
+        }
+
+        body .table tbody tr:nth-of-type(odd) {
+            background: #252a3d !important;
+        }
+
+        body .table tbody tr:nth-of-type(even) {
+            background: #2a2f42 !important;
+        }
+
+        body .table tbody tr:hover {
+            background: #2d3348 !important;
+        }
+
+        body .table td,
+        body .table th {
+            border-color: #3a4052 !important;
+            color: #e0e0e0 !important;
+        }
+
+        body .table td[colspan] {
+            background: #252a3d !important;
+            color: #b8b8b8 !important;
+        }
+
+        /* Override Bootstrap striped and hover classes */
+        body .table-striped tbody tr:nth-of-type(odd) {
+            background: #252a3d !important;
+        }
+
+        body .table-striped tbody tr:nth-of-type(even) {
+            background: #2a2f42 !important;
+        }
+
+        body .table-hover tbody tr:hover {
+            background: #2d3348 !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Include Responsive Admin Sidebar -->
+            <%- include('partials/admin-responsive-sidebar') %>
+
+            <main class="col-md-10 ms-sm-auto main-content">
+                <!-- Page Header -->
+                <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+                    <h1 class="h2">
+                        <i class="bi bi-wifi text-primary"></i> Pelanggan Online
+                        <small class="text-muted">- Active PPPoE Sessions</small>
+                    </h1>
+                    <div class="btn-toolbar mb-2 mb-md-0">
+                        <div class="btn-group me-2">
+                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="refreshData()">
+                                <i class="bi bi-arrow-clockwise"></i> Refresh
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-success" onclick="toggleAutoRefresh()" id="autoRefreshBtn">
+                                <i class="bi bi-play-circle"></i> Auto Refresh
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Statistics Widgets -->
+                <div class="row widget-row">
+                    <div class="col-md-3 mb-3">
+                        <div class="widget-card radius-active">
+                            <div>
+                                <i class="bi bi-wifi widget-icon"></i>
+                                <div class="widget-label">Total Online</div>
+                            </div>
+                            <div>
+                                <div class="widget-value" id="totalOnline">-</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <div class="widget-card success">
+                            <div>
+                                <i class="bi bi-download widget-icon"></i>
+                                <div class="widget-label">Total Download</div>
+                            </div>
+                            <div>
+                                <div class="widget-value" id="totalDownload">-</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <div class="widget-card warning">
+                            <div>
+                                <i class="bi bi-upload widget-icon"></i>
+                                <div class="widget-label">Total Upload</div>
+                            </div>
+                            <div>
+                                <div class="widget-value" id="totalUpload">-</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <div class="widget-card info">
+                            <div>
+                                <i class="bi bi-clock widget-icon"></i>
+                                <div class="widget-label">Avg Duration</div>
+                            </div>
+                            <div>
+                                <div class="widget-value" id="avgDuration">-</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            <!-- Bulk Actions -->
+            <div class="bulk-actions" id="bulkActions">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <span id="selectedCount">0</span> user(s) selected
+                    </div>
+                    <div class="btn-group">
+                        <button type="button" class="btn btn-sm btn-kick" onclick="kickSelectedUsers()">
+                            <i class="bi bi-stop-circle"></i> Kick Selected
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearSelection()">
+                            <i class="bi bi-x-square"></i> Clear Selection
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Active Sessions Table -->
+            <div class="card mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center">
+                        <h5 class="mb-0 me-3">
+                            <i class="bi bi-list-ul"></i> Active Sessions
+                            <span class="connection-status online"></span>
+                        </h5>
+                        <input type="checkbox" class="form-check-input me-2" id="selectAll" onchange="toggleSelectAll()">
+                        <label for="selectAll" class="form-check-label mb-0">Select All</label>
+                    </div>
+                    <span class="badge bg-primary" id="sessionCount">0</span>
+                </div>
+                <div class="card-body">
+                    <div class="loading-spinner" id="loadingSpinner">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2">Loading sessions...</p>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover session-table">
+                            <thead>
+                                <tr>
+                                    <th>Select</th>
+                                    <th>Username</th>
+                                    <th>MAC Address</th>
+                                    <th>IP Address</th>
+                                    <th>NAS Name</th>
+                                    <th>Start Time</th>
+                                    <th>Duration</th>
+                                    <th>Download</th>
+                                    <th>Upload</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="sessionsTableBody">
+                                <tr>
+                                    <td colspan="10" class="text-center text-muted">No active sessions</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Statistics by Group -->
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-pie-chart"></i> Statistics by Group</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row" id="groupStats">
+                        <div class="col-md-12 text-center text-muted">
+                            <i class="bi bi-hourglass-split"></i> Loading statistics...
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Refresh Indicator -->
+    <div class="refresh-indicator" id="refreshIndicator">
+        <div class="alert alert-info py-2 px-3 mb-0">
+            <i class="bi bi-arrow-clockwise"></i> Refreshing...
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let autoRefreshInterval = null;
+        let autoRefreshEnabled = false;
+
+        // Utility functions
+        function escapeHtml(text) {
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return text.replace(/[&<>"']/g, m => map[m]);
+        }
+
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        function formatDate(dateString) {
+            if (!dateString) return '-';
+            const date = new Date(dateString);
+            return date.toLocaleString('id-ID', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+
+        function formatDuration(seconds) {
+            if (!seconds) return '-';
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = seconds % 60;
+
+            if (hours > 0) {
+                return `${hours}j ${minutes}m ${secs}s`;
+            } else if (minutes > 0) {
+                return `${minutes}m ${secs}s`;
+            } else {
+                return `${secs}s`;
+            }
+        }
+
+        // Generate MAC address from session ID (for simulation)
+        function generateMacAddress(sessionId) {
+            if (!sessionId) return '00:00:00:00:00:00';
+
+            // Use session ID to generate consistent MAC address
+            const hash = sessionId.toString().split('').reduce((a, b) => {
+                a = ((a << 5) - a) + b.charCodeAt(0);
+                return a & a;
+            }, 0);
+
+            const hex = Math.abs(hash).toString(16).padStart(12, '0').slice(0, 12);
+            return hex.match(/.{2}/g).join(':').toUpperCase();
+        }
+
+        // Show refresh indicator
+        function showRefreshIndicator() {
+            const indicator = document.getElementById('refreshIndicator');
+            indicator.classList.add('show');
+            setTimeout(() => {
+                indicator.classList.remove('show');
+            }, 1000);
+        }
+
+        // Load sessions data
+        async function loadSessions() {
+            try {
+                const response = await fetch('/admin/pelanggan-online/sessions');
+                const data = await response.json();
+
+                if (data.success) {
+                    updateSessionsTable(data.sessions);
+                    updateStatistics(data.sessions);
+                } else {
+                    console.error('Error loading sessions:', data.message);
+                }
+            } catch (error) {
+                console.error('Error loading sessions:', error);
+            }
+        }
+
+        // Load statistics by group
+        async function loadStatistics() {
+            try {
+                const response = await fetch('/admin/pelanggan-online/statistics');
+                const data = await response.json();
+
+                if (data.success) {
+                    updateGroupStatistics(data.statistics.onlineUsersByGroup);
+                } else {
+                    console.error('Error loading statistics:', data.message);
+                }
+            } catch (error) {
+                console.error('Error loading statistics:', error);
+            }
+        }
+
+        // Update sessions table
+        function updateSessionsTable(sessions) {
+            const tbody = document.getElementById('sessionsTableBody');
+            const loadingSpinner = document.getElementById('loadingSpinner');
+            const sessionCount = document.getElementById('sessionCount');
+
+            // Hide loading spinner
+            loadingSpinner.style.display = 'none';
+
+            // Update session count
+            sessionCount.textContent = sessions.length;
+
+            if (sessions.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted">No active sessions</td></tr>';
+                updateSelectAllCheckbox();
+                return;
+            }
+
+            tbody.innerHTML = sessions.map(session => `
+                <tr data-username="${escapeHtml(session.username)}" data-session="${escapeHtml(session.acctSessionId)}" data-nas="${escapeHtml(session.nasIpAddress)}">
+                    <td>
+                        <input type="checkbox" class="form-check-input custom-checkbox user-checkbox"
+                               onchange="updateBulkActions()"
+                               data-username="${escapeHtml(session.username)}"
+                               data-session="${escapeHtml(session.acctSessionId)}"
+                               data-nas="${escapeHtml(session.nasIpAddress)}">
+                    </td>
+                    <td><strong>${escapeHtml(session.name || session.username)}</strong></td>
+                    <td><code>${generateMacAddress(session.acctSessionId)}</code></td>
+                    <td>${escapeHtml(session.framedIpAddress || '-')}</td>
+                    <td>${escapeHtml(session.nasShortName || session.nasName || session.nasIpAddress || '-')}</td>
+                    <td>${formatDate(session.acctStartTime)}</td>
+                    <td>${session.acctSessionTime ? formatDuration(session.acctSessionTime) : '-'}</td>
+                    <td>${session.acctInputOctets ? formatBytes(session.acctInputOctets) : '0'}</td>
+                    <td>${session.acctOutputOctets ? formatBytes(session.acctOutputOctets) : '0'}</td>
+                    <td>
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-kick btn-sm" onclick="kickSingleUser('${escapeHtml(session.username)}', '${escapeHtml(session.acctSessionId)}', '${escapeHtml(session.nasIpAddress)}')" title="Kick User">
+                                <i class="bi bi-stop-circle"></i>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `).join('');
+
+            updateSelectAllCheckbox();
+        }
+
+        // Update statistics cards
+        function updateStatistics(sessions) {
+            const totalOnline = document.getElementById('totalOnline');
+            const totalDownload = document.getElementById('totalDownload');
+            const totalUpload = document.getElementById('totalUpload');
+            const avgDuration = document.getElementById('avgDuration');
+
+            totalOnline.textContent = sessions.length;
+
+            const totalDownloadBytes = sessions.reduce((total, session) =>
+                total + (session.acctInputOctets || 0), 0);
+            const totalUploadBytes = sessions.reduce((total, session) =>
+                total + (session.acctOutputOctets || 0), 0);
+
+            totalDownload.textContent = formatBytes(totalDownloadBytes);
+            totalUpload.textContent = formatBytes(totalUploadBytes);
+
+            const avgDurationSeconds = sessions.length > 0
+                ? sessions.reduce((total, session) => total + (session.acctSessionTime || 0), 0) / sessions.length
+                : 0;
+            avgDuration.textContent = formatDuration(Math.round(avgDurationSeconds));
+        }
+
+        // Update group statistics
+        function updateGroupStatistics(groupStats) {
+            const groupStatsDiv = document.getElementById('groupStats');
+
+            if (!groupStats || Object.keys(groupStats).length === 0) {
+                groupStatsDiv.innerHTML = '<div class="col-md-12 text-center text-muted">No group statistics available</div>';
+                return;
+            }
+
+            const statsHtml = Object.entries(groupStats).map(([groupName, count]) => `
+                <div class="col-md-3 mb-3">
+                    <div class="card text-center">
+                        <div class="card-body">
+                            <h6 class="card-title text-capitalize">${escapeHtml(groupName)}</h6>
+                            <h3 class="text-primary">${count}</h3>
+                            <p class="card-text text-muted">users online</p>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+
+            groupStatsDiv.innerHTML = statsHtml;
+        }
+
+        // Checkbox functions
+        function toggleSelectAll() {
+            const selectAll = document.getElementById('selectAll');
+            const checkboxes = document.querySelectorAll('.user-checkbox');
+
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = selectAll.checked;
+                const row = checkbox.closest('tr');
+                if (selectAll.checked) {
+                    row.classList.add('selected');
+                } else {
+                    row.classList.remove('selected');
+                }
+            });
+
+            updateBulkActions();
+        }
+
+        function updateSelectAllCheckbox() {
+            const selectAll = document.getElementById('selectAll');
+            const checkboxes = document.querySelectorAll('.user-checkbox');
+
+            if (checkboxes.length === 0) {
+                selectAll.checked = false;
+                selectAll.disabled = true;
+            } else {
+                selectAll.disabled = false;
+                const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+                const someChecked = Array.from(checkboxes).some(cb => cb.checked);
+
+                selectAll.checked = allChecked;
+                selectAll.indeterminate = someChecked && !allChecked;
+            }
+        }
+
+        function updateBulkActions() {
+            const selectedCheckboxes = document.querySelectorAll('.user-checkbox:checked');
+            const bulkActions = document.getElementById('bulkActions');
+            const selectedCount = document.getElementById('selectedCount');
+
+            selectedCount.textContent = selectedCheckboxes.length;
+
+            if (selectedCheckboxes.length > 0) {
+                bulkActions.classList.add('show');
+            } else {
+                bulkActions.classList.remove('show');
+            }
+
+            updateSelectAllCheckbox();
+        }
+
+        function clearSelection() {
+            const checkboxes = document.querySelectorAll('.user-checkbox');
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = false;
+                checkbox.closest('tr').classList.remove('selected');
+            });
+
+            document.getElementById('selectAll').checked = false;
+            updateBulkActions();
+        }
+
+        // Get selected users
+        function getSelectedUsers() {
+            const selectedCheckboxes = document.querySelectorAll('.user-checkbox:checked');
+            return Array.from(selectedCheckboxes).map(checkbox => ({
+                username: checkbox.dataset.username,
+                sessionId: checkbox.dataset.session,
+                nasIp: checkbox.dataset.nas
+            }));
+        }
+
+        // Kick single user
+        async function kickSingleUser(username, sessionId, nasIp) {
+            if (!confirm(`Are you sure you want to kick ${username}?`)) {
+                return;
+            }
+
+            await performKick([{
+                username: username,
+                sessionId: sessionId,
+                nasIp: nasIp
+            }]);
+        }
+
+        // Kick selected users
+        async function kickSelectedUsers() {
+            const selectedUsers = getSelectedUsers();
+
+            if (selectedUsers.length === 0) {
+                alert('No users selected');
+                return;
+            }
+
+            if (!confirm(`Are you sure you want to kick ${selectedUsers.length} user(s)?`)) {
+                return;
+            }
+
+            await performKick(selectedUsers);
+        }
+
+        // Perform kick action
+        async function performKick(users) {
+            const kickPromises = users.map(async (user) => {
+                try {
+                    const response = await fetch('/admin/pelanggan-online/disconnect', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            username: user.username,
+                            sessionId: user.sessionId,
+                            nasIp: user.nasIp
+                        })
+                    });
+
+                    const data = await response.json();
+                    return {
+                        username: user.username,
+                        success: data.success,
+                        message: data.message
+                    };
+                } catch (error) {
+                    return {
+                        username: user.username,
+                        success: false,
+                        message: error.message
+                    };
+                }
+            });
+
+            const results = await Promise.all(kickPromises);
+
+            const successful = results.filter(r => r.success);
+            const failed = results.filter(r => !r.success);
+
+            if (successful.length > 0) {
+                const successMessage = successful.length === 1
+                    ? `User ${successful[0].username} kicked successfully`
+                    : `${successful.length} users kicked successfully`;
+
+                // Show success notification
+                showNotification(successMessage, 'success');
+            }
+
+            if (failed.length > 0) {
+                const failedUsernames = failed.map(f => f.username).join(', ');
+                console.error('Failed to kick users:', failedUsernames);
+
+                if (successful.length === 0) {
+                    // Show error notification if all failed
+                    showNotification(`Failed to kick ${failed.length} user(s)`, 'danger');
+                } else {
+                    // Show warning notification if some failed
+                    showNotification(`${failed.length} user(s) failed to kick`, 'warning');
+                }
+            }
+
+            // Clear selection and refresh data
+            clearSelection();
+            refreshData();
+        }
+
+        // Show notification
+        function showNotification(message, type = 'info') {
+            const notification = document.createElement('div');
+            notification.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
+            notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+            notification.innerHTML = `
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+
+            document.body.appendChild(notification);
+
+            // Auto remove after 5 seconds
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.remove();
+                }
+            }, 5000);
+        }
+
+        // Legacy disconnect function (renamed from disconnectSession)
+        async function disconnectSession(username, sessionId, nasIp) {
+            await kickSingleUser(username, sessionId, nasIp);
+        }
+
+        // Refresh data
+        function refreshData() {
+            showRefreshIndicator();
+            loadSessions();
+            loadStatistics();
+        }
+
+        // Toggle auto refresh
+        function toggleAutoRefresh() {
+            const btn = document.getElementById('autoRefreshBtn');
+            autoRefreshEnabled = !autoRefreshEnabled;
+
+            if (autoRefreshEnabled) {
+                btn.innerHTML = '<i class="bi bi-pause-circle"></i> Stop Refresh';
+                btn.classList.remove('btn-outline-success');
+                btn.classList.add('btn-outline-danger');
+
+                autoRefreshInterval = setInterval(refreshData, 30000); // Refresh every 30 seconds
+                refreshData(); // Initial refresh
+            } else {
+                btn.innerHTML = '<i class="bi bi-play-circle"></i> Auto Refresh';
+                btn.classList.remove('btn-outline-danger');
+                btn.classList.add('btn-outline-success');
+
+                if (autoRefreshInterval) {
+                    clearInterval(autoRefreshInterval);
+                    autoRefreshInterval = null;
+                }
+            }
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            loadSessions();
+            loadStatistics();
+        });
+    </script>
+</body>
+</html>

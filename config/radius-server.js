@@ -2,7 +2,7 @@ const dgram = require('dgram');
 const radius = require('radius');
 const crypto = require('crypto');
 const { logger } = require('./logger');
-const radiusDb = require('./radius-database');
+const radiusDb = require('./radius-postgres');
 const { getSetting } = require('./settingsManager');
 
 // Konfigurasi RADIUS server

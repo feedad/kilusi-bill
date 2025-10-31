@@ -259,9 +259,13 @@ router.get('/analytics', adminAuth, async (req, res) => {
     // Trend data untuk 30 hari terakhir
     const trendData = generateTrendData(invoices, troubleReports);
 
+    // Baca settings.json untuk sidebar
+    const settings = JSON.parse(fs.readFileSync(path.join(__dirname, '../settings.json'), 'utf8'));
+
     res.render('adminAnalytics', {
       title: 'Advanced Analytics',
       page: 'analytics',
+      settings: settings,
       genieacs: genieacsAnalytics,
       mikrotik: mikrotikAnalytics,
       billing: billingAnalytics,

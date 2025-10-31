@@ -7,9 +7,6 @@ class BackupSystem {
     constructor() {
         this.backupDir = path.join(__dirname, '../backups');
         this.dataFiles = [
-            'logs/packages.json',
-            'logs/customers.json', 
-            'logs/invoices.json',
             'logs/trouble_reports.json',
             'logs/onu-locations.json',
             'settings.json'
