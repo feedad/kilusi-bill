@@ -1,0 +1,135 @@
+<!-- Sidebar Admin -->
+<div class="d-flex flex-column flex-shrink-0 p-3 bg-light" style="width: 250px; min-height: 100vh;">
+  <a href="/admin/dashboard" class="d-flex align-items-center mb-3 mb-md-0 me-md-auto link-dark text-decoration-none">
+    <span class="fs-4">Admin Panel</span>
+  </a>
+  <hr>
+  <ul class="nav nav-pills flex-column mb-auto">
+    <!-- Overview -->
+    <li class="mt-2 mb-1"><span class="text-muted small text-uppercase">Overview</span></li>
+    <li class="nav-item">
+      <a href="/admin/dashboard" class="nav-link <%= page === 'dashboard' ? 'active' : 'link-dark' %>">
+        <i class="bi bi-speedometer2"></i> Dashboard
+      </a>
+    </li>
+
+    <!-- Billing & Finance -->
+    <li class="mt-3 mb-1"><span class="text-muted small text-uppercase">Billing & Finance</span></li>
+    <li>
+      <a href="/admin/billing" class="nav-link <%= page === 'billing' ? 'active' : 'link-dark' %>">
+        <i class="bi bi-receipt"></i> Billing & Invoice
+      </a>
+    </li>
+
+    <!-- User Management -->
+    <li class="mt-3 mb-1"><span class="text-muted small text-uppercase">User Management</span></li>
+    <li>
+      <a href="/admin/customers" class="nav-link <%= page === 'customers' ? 'active' : 'link-dark' %>">
+        <i class="bi bi-people"></i> Data Pelanggan
+      </a>
+    </li>
+    <% if (typeof settings !== 'undefined' && settings.app_mode === 'radius') { %>
+    <li>
+      <a href="/admin/radius/users-page" class="nav-link <%= page === 'radius-users' ? 'active' : 'link-dark' %>">
+        <i class="bi bi-person-badge"></i> PPPoE Users (RADIUS)
+      </a>
+    </li>
+    <% } %>
+
+    <!-- Support -->
+    <li class="mt-3 mb-1"><span class="text-muted small text-uppercase">Support</span></li>
+    <li>
+      <a href="/admin/trouble" class="nav-link <%= page === 'trouble' ? 'active' : 'link-dark' %>">
+        <i class="bi bi-exclamation-triangle"></i> Laporan Gangguan
+      </a>
+    </li>
+
+    <!-- Authentication -->
+    <% if (typeof settings !== 'undefined' && settings.app_mode === 'radius') { %>
+    <li class="mt-3 mb-1"><span class="text-muted small text-uppercase">Authentication</span></li>
+    <li>
+      <a href="/admin/radius" class="nav-link <%= page === 'radius' ? 'active' : 'link-dark' %>">
+        <i class="bi bi-shield-lock"></i> RADIUS Server
+      </a>
+    </li>
+    <% } %>
+
+    <!-- Device Management -->
+    <li class="mt-3 mb-1"><span class="text-muted small text-uppercase">Device Management</span></li>
+    <% if (typeof settings !== 'undefined' && settings.app_mode === 'api') { %>
+    <li>
+      <a href="/admin/mikrotik" class="nav-link <%= page === 'mikrotik' ? 'active' : 'link-dark' %>">
+        <i class="bi bi-router"></i> MikroTik
+      </a>
+    </li>
+    <% } %>
+    <li>
+      <a href="/admin/genieacs" class="nav-link <%= page === 'genieacs' ? 'active' : 'link-dark' %>">
+        <i class="bi bi-hdd-network"></i> GenieACS (ONU)
+      </a>
+    </li>
+    <li>
+      <a href="/admin/hotspot" class="nav-link <%= page === 'hotspot' ? 'active' : 'link-dark' %>">
+        <i class="bi bi-wifi"></i> Hotspot
+      </a>
+    </li>
+    <li>
+      <a href="/admin/hotspot/voucher" class="nav-link <%= page === 'voucher' ? 'active' : 'link-dark' %>">
+        <i class="bi bi-ticket-perforated"></i> Voucher Hotspot
+      </a>
+    </li>
+
+    <!-- Network Monitoring -->
+    <li class="mt-3 mb-1"><span class="text-muted small text-uppercase">Network Monitoring</span></li>
+    <li>
+      <a href="/admin/analytics" class="nav-link <%= page === 'analytics' ? 'active' : 'link-dark' %>">
+        <i class="bi bi-graph-up"></i> Analytics
+      </a>
+    </li>
+
+    <!-- System & Setting -->
+    <li class="mt-3 mb-1"><span class="text-muted small text-uppercase">System & Setting</span></li>
+    <li>
+      <a href="/admin/backup" class="nav-link <%= page === 'backup' ? 'active' : 'link-dark' %>">
+        <i class="bi bi-database"></i> Backup & Restore
+      </a>
+    </li>
+    <li>
+      <a href="/admin/setting" class="nav-link <%= page === 'setting' ? 'active' : 'link-dark' %>">
+        <i class="bi bi-gear"></i> Settings
+      </a>
+    </li>
+
+    <!-- Developer -->
+    <li class="mt-3 mb-1"><span class="text-muted small text-uppercase">Developer</span></li>
+    <li>
+      <a href="/api-docs" target="_blank" class="nav-link <%= page === 'api' ? 'active' : 'link-dark' %>">
+        <i class="bi bi-code-slash"></i> API Docs
+      </a>
+    </li>
+    <li>
+      <a href="/mobile" target="_blank" class="nav-link <%= page === 'mobile' ? 'active' : 'link-dark' %>">
+        <i class="bi bi-phone"></i> Mobile App
+      </a>
+    </li>
+
+    <!-- Logout -->
+    <li class="mt-3">
+      <a href="/admin/logout" class="nav-link link-dark">
+        <i class="bi bi-box-arrow-right"></i> Logout
+      </a>
+    </li>
+  </ul>
+  <hr>
+  <div class="dropdown">
+    <a href="#" class="d-flex align-items-center link-dark text-decoration-none dropdown-toggle" id="dropdownUser" data-bs-toggle="dropdown" aria-expanded="false">
+      <img src="/public/img/admin.png" alt="" width="32" height="32" class="rounded-circle me-2">
+      <strong>Admin</strong>
+    </a>
+    <ul class="dropdown-menu text-small shadow" aria-labelledby="dropdownUser">
+      <li><a class="dropdown-item" href="/admin/setting">Settings</a></li>
+      <li><hr class="dropdown-divider"></li>
+      <li><a class="dropdown-item" href="/admin/logout">Sign out</a></li>
+    </ul>
+  </div>
+</div>

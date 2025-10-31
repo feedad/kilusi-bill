@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Dashboard API</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .test-section {
+            margin: 30px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        h2 {
+            color: #333;
+        }
+        pre {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        .success {
+            color: green;
+        }
+        .error {
+            color: red;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <h1>Dashboard API Test</h1>
+    <p>Login dulu ke <a href="http://localhost:3000/admin/login" target="_blank">http://localhost:3000/admin/login</a>, lalu kembali ke halaman ini dan klik tombol test.</p>
+    
+    <div class="test-section">
+        <h2>1. Revenue Chart API</h2>
+        <button onclick="testRevenueChart()">Test Revenue Chart (7 days)</button>
+        <button onclick="testRevenueChart(30)">Test Revenue Chart (30 days)</button>
+        <pre id="revenue-result">Klik tombol untuk test...</pre>
+    </div>
+
+    <div class="test-section">
+        <h2>2. Activity Log API</h2>
+        <button onclick="testActivityLog()">Test Activity Log (limit 50)</button>
+        <button onclick="testActivityLog(10)">Test Activity Log (limit 10)</button>
+        <pre id="activity-result">Klik tombol untuk test...</pre>
+    </div>
+
+    <script>
+        async function testRevenueChart(days = 7) {
+            const resultEl = document.getElementById('revenue-result');
+            resultEl.textContent = 'Loading...';
+            
+            try {
+                const response = await fetch(`/api/dashboard/revenue-chart?days=${days}`, {
+                    credentials: 'include'
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    let output = `✅ SUCCESS (${days} days)\n\n`;
+                    output += `Dates: ${data.dates.join(', ')}\n\n`;
+                    output += `Revenues (IDR):\n`;
+                    data.revenues.forEach((rev, i) => {
+                        output += `  ${data.dates[i]}: Rp ${rev.toLocaleString('id-ID')}\n`;
+                    });
+                    const total = data.revenues.reduce((a, b) => a + b, 0);
+                    output += `\nTotal: Rp ${total.toLocaleString('id-ID')}`;
+                    
+                    resultEl.className = 'success';
+                    resultEl.textContent = output;
+                } else {
+                    throw new Error(data.error || 'Unknown error');
+                }
+            } catch (error) {
+                resultEl.className = 'error';
+                resultEl.textContent = `❌ ERROR: ${error.message}\n\nMungkin belum login? Silakan login dulu.`;
+            }
+        }
+
+        async function testActivityLog(limit = 50) {
+            const resultEl = document.getElementById('activity-result');
+            resultEl.textContent = 'Loading...';
+            
+            try {
+                const response = await fetch(`/api/dashboard/activity-log?limit=${limit}`, {
+                    credentials: 'include'
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    let output = `✅ SUCCESS\n\n`;
+                    output += `Total activities: ${data.activities.length}\n\n`;
+                    
+                    if (data.activities.length > 0) {
+                        output += `Recent activities:\n`;
+                        data.activities.slice(0, 10).forEach((activity, i) => {
+                            const icon = activity.type === 'payment' ? '💰' : activity.type === 'invoice' ? '📋' : '👤';
+                            const timestamp = new Date(activity.timestamp).toLocaleString('id-ID');
+                            output += `\n${i + 1}. ${icon} ${activity.title}\n`;
+                            output += `   ${activity.description}\n`;
+                            output += `   By: ${activity.user} | ${timestamp}\n`;
+                        });
+                    } else {
+                        output += 'Belum ada aktivitas.';
+                    }
+                    
+                    resultEl.className = 'success';
+                    resultEl.textContent = output;
+                } else {
+                    throw new Error(data.error || 'Unknown error');
+                }
+            } catch (error) {
+                resultEl.className = 'error';
+                resultEl.textContent = `❌ ERROR: ${error.message}\n\nMungkin belum login? Silakan login dulu.`;
+            }
+        }
+    </script>
+</body>
+</html>

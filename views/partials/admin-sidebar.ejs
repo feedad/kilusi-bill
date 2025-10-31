@@ -1,0 +1,82 @@
+<nav class="col-md-2 sidebar d-flex flex-column" id="adminSidebar">
+    <div class="sidebar-header mb-4 text-center">
+        <img src="/img/<%= typeof settings !== 'undefined' && settings.logo_filename ? settings.logo_filename : 'logo.png' %>?ts=<%= Date.now() %>" alt="Logo" style="max-width:200px;max-height:100px;">
+    </div>
+    <a href="/admin/dashboard" class="<%= typeof page !== 'undefined' && page === 'dashboard' ? 'active' : '' %>"><i class="bi bi-speedometer2"></i> Dashboard</a>
+    <a href="/admin/analytics" class="<%= typeof page !== 'undefined' && page === 'analytics' ? 'active' : '' %>"><i class="bi bi-graph-up-arrow"></i> Analytics</a>
+    <a href="/admin/genieacs" class="<%= typeof page !== 'undefined' && page === 'genieacs' ? 'active' : '' %>"><i class="bi bi-modem"></i> GenieACS</a>
+    <a href="/admin/map" class="<%= typeof page !== 'undefined' && page === 'map' ? 'active' : '' %>"><i class="bi bi-map"></i> Map Monitoring</a>
+    <a href="/admin/odp" class="<%= typeof page !== 'undefined' && page === 'odp' ? 'active' : '' %>"><i class="bi bi-ethernet"></i> Manajemen ODP</a>
+    <a href="/admin/mikrotik" class="<%= typeof page !== 'undefined' && page === 'mikrotik' ? 'active' : '' %>"><i class="bi bi-people"></i> PPPoE</a>
+    <a href="/admin/mikrotik/profiles" class="<%= typeof page !== 'undefined' && page === 'mikrotik-profiles' ? 'active' : '' %>"><i class="bi bi-person-badge-fill"></i> Profile PPPoE</a>
+    <a href="/admin/mikrotik/hotspot-profiles" class="<%= typeof page !== 'undefined' && page === 'hotspot-profiles' ? 'active' : '' %>"><i class="bi bi-wifi-off"></i> Profile Hotspot</a>
+    <a href="/admin/hotspot" class="<%= typeof page !== 'undefined' && page === 'hotspot' ? 'active' : '' %>"><i class="bi bi-wifi"></i> Hotspot</a>
+    <a href="/admin/radius" class="<%= typeof page !== 'undefined' && page === 'radius' ? 'active' : '' %>"><i class="bi bi-shield-fill-check"></i> RADIUS Server</a>
+    <a href="/admin/snmp/devices" class="<%= typeof page !== 'undefined' && page === 'snmp' ? 'active' : '' %>"><i class="bi bi-hdd"></i> SNMP Devices</a>
+    <a href="/admin/billing" class="<%= typeof page !== 'undefined' && page === 'billing' ? 'active' : '' %>"><i class="bi bi-file-earmark-text"></i> Billing</a>
+    <a href="/admin/trouble" class="<%= typeof page !== 'undefined' && page === 'trouble' ? 'active' : '' %>"><i class="bi bi-bug"></i> Laporan Gangguan</a>
+    <a href="/admin/backup" class="<%= typeof page !== 'undefined' && page === 'backup' ? 'active' : '' %>"><i class="bi bi-cloud-arrow-down"></i> Backup</a>
+    <a href="/admin/setting" class="<%= typeof page !== 'undefined' && page === 'setting' ? 'active' : '' %>"><i class="bi bi-sliders"></i> Setting</a>
+    <a href="/admin/logout"><i class="bi bi-power"></i> Logout</a>
+    <a href="#" id="restartMikrotikBtn"><i class="bi bi-arrow-clockwise"></i> Restart Mikrotik</a>
+</nav>
+
+<style>
+/* Sidebar styles for regular sidebar */
+.sidebar {
+    min-height: 100vh;
+    background: #2c3e50;
+    color: #ecf0f1;
+    padding-top: 32px;
+}
+
+.sidebar a {
+    color: #ecf0f1;
+    text-decoration: none;
+    display: block;
+    padding: 12px 20px;
+    border-radius: 4px;
+    margin-bottom: 5px;
+    transition: all 0.3s ease;
+    font-size: 16px;
+}
+
+.sidebar a.active,
+.sidebar a:hover {
+    background: #34495e;
+    color: #fff;
+    padding-left: 24px;
+}
+
+.sidebar a.active {
+    border-left: 3px solid #3498db;
+}
+
+.sidebar a i {
+    margin-right: 12px;
+    width: 24px;
+    text-align: center;
+    font-size: 18px;
+}
+
+/* Sidebar Header */
+.sidebar .sidebar-header {
+    font-size: 1.3rem;
+    font-weight: 600;
+    letter-spacing: 1px;
+    padding: 0 24px 24px 24px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    margin-bottom: 1rem;
+}
+
+.sidebar-header img {
+    max-width: 200px !important;
+    max-height: 100px !important;
+    border-radius: 16px !important;
+    transition: transform 0.3s ease;
+}
+
+.sidebar-header img:hover {
+    transform: scale(1.05);
+}
+</style>

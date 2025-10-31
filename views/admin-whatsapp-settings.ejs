@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WhatsApp Settings - Admin</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="/css/responsive-admin.css">
+  <link href="/css/dark-theme.css" rel="stylesheet">
+  <link href="/css/theme-unify.css" rel="stylesheet">
+  <link href="/css/dark-theme.css" rel="stylesheet">
+  <style>
+    /* Dark Theme */
+    body { 
+      background: #1a1d29 !important;
+      color: #e0e0e0;
+    }
+    
+    .main-content {
+      background: #1a1d29;
+    }
+    
+    /* Mobile responsive fixes */
+    @media (max-width: 767.98px) {
+      .main-content {
+        margin-top: 70px !important;
+        padding-top: 10px !important;
+        z-index: 1;
+      }
+    }
+    
+    /* Card Dark Theme */
+    .card {
+      background: #252a3d !important;
+      border: 1px solid #3a4052;
+      color: #e0e0e0;
+    }
+    
+    .card-header {
+      background: #2d3348 !important;
+      border-bottom: 1px solid #3a4052;
+      color: #e0e0e0;
+    }
+    
+    .card-body {
+      color: #e0e0e0;
+    }
+    
+    /* Text Colors */
+    h2, h3, h4, h5, h6 {
+      color: #ffffff !important;
+    }
+    
+    p, span, label, .text-muted {
+      color: #b8b8b8 !important;
+    }
+    
+    strong {
+      color: #e0e0e0;
+    }
+    
+    /* Form controls dark theme */
+    .form-control, .form-select, textarea {
+      background-color: #1a1d29;
+      border-color: #3a4052;
+      color: #e0e0e0;
+    }
+    
+    .form-control:focus, .form-select:focus, textarea:focus {
+      background-color: #1a1d29;
+      border-color: #4a5fc1;
+      color: #e0e0e0;
+    }
+    
+    .form-check-input {
+      background-color: #1a1d29;
+      border-color: #3a4052;
+    }
+    
+    .form-check-input:checked {
+      background-color: #4a5fc1;
+      border-color: #4a5fc1;
+    }
+  </style>
+</head>
+<body>
+  <div class="container-fluid">
+    <div class="row">
+      <%- include('partials/admin-responsive-sidebar', { page: 'whatsapp-settings', settings: settings }) %>
+      
+      <main class="col-md-10 main-content ms-sm-auto">
+        <div class="container-fluid p-4">
+          <div class="row mb-4">
+            <div class="col-12">
+              <h2><i class="bi bi-whatsapp text-success"></i> Pengaturan WhatsApp</h2>
+              <p class="text-muted">Konfigurasi integrasi WhatsApp untuk notifikasi dan customer service</p>
+            </div>
+          </div>
+
+          <% if (success) { %>
+            <div class="alert alert-success alert-dismissible fade show" role="alert">
+              <i class="bi bi-check-circle"></i> <%= success %>
+              <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+          <% } %>
+          <% if (error) { %>
+            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+              <i class="bi bi-exclamation-triangle"></i> <%= error %>
+              <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+          <% } %>
+
+          <form method="POST" action="/admin/whatsapp-settings/update">
+            <div class="row">
+              <!-- Connection Settings -->
+              <div class="col-md-6">
+                <div class="card mb-4">
+                  <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-gear"></i> Konfigurasi Koneksi</h5>
+                  </div>
+                  <div class="card-body">
+                    <div class="mb-3">
+                      <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" name="whatsapp_enabled" id="whatsapp_enabled" <%= settings.whatsapp_enabled ? 'checked' : '' %>>
+                        <label class="form-check-label" for="whatsapp_enabled">
+                          Aktifkan WhatsApp
+                        </label>
+                      </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                      <label class="form-label">Nomor WhatsApp</label>
+                      <input type="text" class="form-control" name="whatsapp_number" value="<%= settings.whatsapp_number || '' %>" placeholder="628123456789">
+                      <div class="form-text">Format: 628xxx (tanpa +, tanpa spasi)</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                      <label class="form-label">API URL</label>
+                      <input type="text" class="form-control" name="whatsapp_api_url" value="<%= settings.whatsapp_api_url || '' %>" placeholder="http://localhost:3001">
+                      <div class="form-text">URL WhatsApp API Gateway</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                      <label class="form-label">API Key</label>
+                      <input type="password" class="form-control" name="whatsapp_api_key" value="<%= settings.whatsapp_api_key || '' %>" placeholder="Your API Key">
+                      <div class="form-text">Jika menggunakan API key authentication</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                      <label class="form-label">Session Name</label>
+                      <input type="text" class="form-control" name="whatsapp_session_name" value="<%= settings.whatsapp_session_name || 'kilusi-bill' %>" placeholder="kilusi-bill">
+                      <div class="form-text">Nama session untuk multi-device</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                      <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" name="whatsapp_auto_reply" id="whatsapp_auto_reply" <%= settings.whatsapp_auto_reply ? 'checked' : '' %>>
+                        <label class="form-check-label" for="whatsapp_auto_reply">
+                          Auto Reply Command
+                        </label>
+                      </div>
+                      <div class="form-text">Balas otomatis perintah dari customer</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                      <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" name="whatsapp_keep_alive" id="whatsapp_keep_alive" value="true" <%= settings.whatsapp_keep_alive === 'true' || settings.whatsapp_keep_alive === true ? 'checked' : '' %>>
+                        <label class="form-check-label" for="whatsapp_keep_alive">
+                          Keep Connection Alive
+                        </label>
+                      </div>
+                      <div class="form-text">Pertahankan koneksi WhatsApp tetap aktif</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Message Templates -->
+              <div class="col-md-6">
+                <div class="card mb-4">
+                  <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-chat-text"></i> Template Pesan</h5>
+                  </div>
+                  <div class="card-body">
+                    <div class="mb-3">
+                      <label class="form-label">Pesan Selamat Datang</label>
+                      <textarea class="form-control" name="whatsapp_welcome_message" rows="3" placeholder="Halo! Selamat datang di layanan kami..."><%= settings.whatsapp_welcome_message || 'Halo! Selamat datang di customer service Kilusi Bill.\n\nKetik *MENU* untuk melihat daftar perintah yang tersedia.' %></textarea>
+                      <div class="form-text">Pesan saat customer pertama kali chat</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                      <label class="form-label">Template Tagihan</label>
+                      <textarea class="form-control" name="whatsapp_invoice_template" rows="4" placeholder="Tagihan Anda..."><%= settings.whatsapp_invoice_template || '🧾 *TAGIHAN INTERNET*\n\nNama: {{customer_name}}\nPaket: {{package_name}}\nJumlah: Rp {{amount}}\nJatuh Tempo: {{due_date}}\n\nSilakan lakukan pembayaran sebelum jatuh tempo.' %></textarea>
+                      <div class="form-text">Variabel: {{customer_name}}, {{package_name}}, {{amount}}, {{due_date}}, {{invoice_number}}</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                      <label class="form-label">Reminder Pembayaran</label>
+                      <textarea class="form-control" name="whatsapp_payment_reminder" rows="3" placeholder="Pengingat pembayaran..."><%= settings.whatsapp_payment_reminder || '⚠️ *PENGINGAT PEMBAYARAN*\n\nYth. {{customer_name}},\nTagihan internet Anda sebesar Rp {{amount}} akan jatuh tempo pada {{due_date}}.\n\nMohon segera lakukan pembayaran untuk menghindari penonaktifan layanan.' %></textarea>
+                    </div>
+                    
+                    <div class="mb-3">
+                      <label class="form-label">Konfirmasi Pembayaran</label>
+                      <textarea class="form-control" name="whatsapp_payment_confirmation" rows="3" placeholder="Terima kasih atas pembayaran..."><%= settings.whatsapp_payment_confirmation || '✅ *PEMBAYARAN DITERIMA*\n\nTerima kasih {{customer_name}},\nPembayaran Rp {{amount}} untuk tagihan {{invoice_number}} telah diterima.\n\nLayanan Anda tetap aktif.' %></textarea>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="col-12">
+                <div class="card">
+                  <div class="card-body">
+                    <button type="submit" class="btn btn-primary">
+                      <i class="bi bi-save"></i> Simpan Pengaturan
+                    </button>
+                    <a href="/admin/setting" class="btn btn-secondary">
+                      <i class="bi bi-arrow-left"></i> Kembali
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </form>
+
+          <!-- WhatsApp Gateway Section -->
+          <div class="row mt-4">
+            <div class="col-lg-6 mb-4">
+              <div class="card">
+                <div class="card-header">
+                  <h5 class="mb-0"><i class="bi bi-qr-code"></i> WhatsApp Gateway Status</h5>
+                </div>
+                <div class="card-body">
+                  <!-- Status WhatsApp -->
+                  <div class="text-center mb-3">
+                    <div id="wa-status" class="mb-2"></div>
+                    <div id="wa-qr-container" class="d-flex justify-content-center mb-2 d-none">
+                      <div class="position-relative">
+                        <img id="wa-qr" src="#" alt="QR Code WhatsApp" class="img-fluid rounded shadow" style="max-width: 100%; height: auto; display: none;">
+                        <div id="wa-qr-div" class="d-flex justify-content-center"></div>
+                      </div>
+                    </div>
+                    <div class="d-flex gap-2 justify-content-center">
+                      <button class="btn btn-success btn-sm" id="btnRefreshQR">
+                        <i class="bi bi-arrow-clockwise"></i> Refresh QR
+                      </button>
+                      <button class="btn btn-outline-danger btn-sm" id="btnDeleteSession">
+                        <i class="bi bi-trash"></i> Hapus Session
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <!-- Peringatan Scan QR Code -->
+                  <div class="alert alert-warning mb-3">
+                    <div class="d-flex align-items-start">
+                      <i class="bi bi-exclamation-triangle-fill me-2 mt-1"></i>
+                      <div>
+                        <strong>⚠️ PENTING!</strong>
+                        <br>
+                        <small>
+                          Gunakan nomor WhatsApp <strong>BUKAN nomor admin</strong> untuk scan QR code ini. 
+                          Nomor yang digunakan untuk scan akan menjadi bot yang menerima dan memproses pesan WhatsApp.
+                          <br><br>
+                          <strong>Nomor Admin:</strong> Hanya untuk mengirim perintah, tidak untuk scan QR code.
+                        </small>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- WhatsApp Groups Management -->
+              <div class="card mt-4">
+                <div class="card-header">
+                  <h5 class="mb-0"><i class="bi bi-people-fill"></i> WhatsApp Groups Management</h5>
+                </div>
+                <div class="card-body">
+                  <div class="mb-3">
+                    <div class="d-flex gap-2 flex-wrap">
+                      <button class="btn btn-success btn-sm" id="btnLoadGroups">
+                        <i class="bi bi-arrow-clockwise"></i> Load Groups
+                      </button>
+                      <button class="btn btn-outline-primary btn-sm" id="btnRefreshGroups">
+                        <i class="bi bi-refresh"></i> Refresh
+                      </button>
+                      <button class="btn btn-outline-info btn-sm" id="btnTestConnection">
+                        <i class="bi bi-wifi"></i> Test Connection
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- WhatsApp Groups Status -->
+                  <div id="waGroupsStatus" class="mb-3">
+                    <div class="alert alert-info">
+                      <i class="bi bi-info-circle"></i> <strong>Cara menggunakan:</strong>
+                      <br>• Klik "Load Groups" untuk melihat daftar grup WhatsApp
+                      <br>• Pastikan WhatsApp sudah terkoneksi (lihat status di atas)
+                      <br>• Pastikan bot sudah ditambahkan ke grup yang diinginkan
+                      <br><br><strong>Jika tidak ada grup yang ditemukan:</strong>
+                      <br>• Klik "Test Connection" untuk memeriksa status koneksi
+                      <br>• Buka console browser (F12) untuk melihat informasi debug
+                      <br>• Pastikan bot sudah menjadi admin di grup
+                      <br>• Restart aplikasi jika diperlukan
+                    </div>
+                  </div>
+
+                  <!-- WhatsApp Groups List -->
+                  <div id="waGroupsList" class="mb-3" style="display: none;">
+                    <div class="card">
+                      <div class="card-header d-flex justify-content-between align-items-center">
+                        <h6 class="mb-0"><i class="bi bi-people-fill"></i> Daftar Grup WhatsApp</h6>
+                        <span class="badge bg-primary" id="groupsCount">0</span>
+                      </div>
+                      <div class="card-body p-0">
+                        <div id="groupsContainer">
+                          <!-- Groups will be loaded here -->
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- WhatsApp Command Reference -->
+            <div class="col-lg-6 mb-4">
+              <div class="card">
+                <div class="card-header">
+                  <h5 class="mb-0"><i class="bi bi-info-circle"></i> Perintah Admin WhatsApp</h5>
+                </div>
+                <div class="card-body" style="max-height: 800px; overflow-y: auto;">
+                  
+                  <style>
+                    .command-card {
+                      background: #1a1d29;
+                      border: 1px solid #3a4052;
+                      border-radius: 8px;
+                      padding: 15px;
+                      margin-bottom: 15px;
+                      transition: all 0.3s ease;
+                    }
+                    .command-card:hover {
+                      box-shadow: 0 4px 12px rgba(74, 95, 193, 0.2);
+                      transform: translateY(-2px);
+                    }
+                    .command-title {
+                      font-weight: 600;
+                      margin-bottom: 10px;
+                      display: flex;
+                      align-items: center;
+                      gap: 8px;
+                      color: #ffffff;
+                    }
+                    .command-list {
+                      font-size: 0.85rem;
+                      line-height: 1.6;
+                    }
+                    .command-list code {
+                      background: #252a3d;
+                      padding: 2px 6px;
+                      border-radius: 3px;
+                      font-size: 0.8rem;
+                      color: #4a5fc1;
+                      border: 1px solid #3a4052;
+                    }
+                    .command-list li {
+                      color: #b8b8b8;
+                      margin-bottom: 4px;
+                    }
+                  </style>
+
+                  <!-- GenieACS Commands -->
+                  <div class="command-card">
+                    <div class="command-title text-success">
+                      <i class="bi bi-hdd-network"></i> GenieACS
+                    </div>
+                    <div class="command-list">
+                      <ul class="list-unstyled mb-0 small">
+                        <li><code>devices</code> - Daftar perangkat</li>
+                        <li><code>cekall</code> - Cek semua perangkat</li>
+                        <li><code>search [nomor]</code> - Cari perangkat</li>
+                        <li><code>cek [nomor]</code> - Cek status ONU</li>
+                        <li><code>cekstatus [nomor]</code> - Cek status pelanggan</li>
+                        <li><code>admincheck [nomor]</code> - Cek perangkat admin</li>
+                        <li><code>gantissid [nomor] [ssid]</code> - Ubah SSID</li>
+                        <li><code>gantipass [nomor] [pass]</code> - Ubah password</li>
+                        <li><code>reboot [nomor]</code> - Restart ONU</li>
+                        <li><code>factory reset [nomor]</code> - Reset factory</li>
+                        <li><code>refresh</code> - Refresh data perangkat</li>
+                        <li><code>tag [nomor] [tag]</code> - Tambah tag pelanggan</li>
+                        <li><code>untag [nomor] [tag]</code> - Hapus tag</li>
+                        <li><code>tags [nomor]</code> - Lihat tags</li>
+                        <li><code>adminssid [nomor] [ssid]</code> - Admin ubah SSID</li>
+                        <li><code>adminrestart [nomor]</code> - Admin restart ONU</li>
+                        <li><code>adminfactory [nomor]</code> - Admin factory reset</li>
+                        <li><code>confirm admin factory reset [nomor]</code> - Konfirmasi factory reset</li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  <!-- PPPoE Commands -->
+                  <div class="command-card">
+                    <div class="command-title text-primary">
+                      <i class="bi bi-router"></i> PPPoE & Mikrotik
+                    </div>
+                    <div class="command-list">
+                      <ul class="list-unstyled mb-0 small">
+                        <li><code>interfaces</code> - Daftar interface</li>
+                        <li><code>interface [nama]</code> - Detail interface</li>
+                        <li><code>enableif [nama]</code> - Aktifkan interface</li>
+                        <li><code>disableif [nama]</code> - Nonaktifkan interface</li>
+                        <li><code>ipaddress</code> - Alamat IP</li>
+                        <li><code>routes</code> - Tabel routing</li>
+                        <li><code>dhcp</code> - DHCP leases</li>
+                        <li><code>ping [ip] [count]</code> - Test ping</li>
+                        <li><code>logs [topics] [count]</code> - Log Mikrotik</li>
+                        <li><code>firewall [chain]</code> - Status firewall</li>
+                        <li><code>users</code> - Daftar semua user</li>
+                        <li><code>profiles [type]</code> - Daftar profile</li>
+                        <li><code>identity [nama]</code> - Info router</li>
+                        <li><code>clock</code> - Waktu router</li>
+                        <li><code>resource</code> - Info resource</li>
+                        <li><code>reboot</code> - Restart router</li>
+                        <li><code>confirm restart</code> - Konfirmasi restart</li>
+                        <li><code>addtag [device_id] [nomor]</code> - Tambah tag perangkat</li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  <!-- Hotspot & PPPoE Management -->
+                  <div class="command-card">
+                    <div class="command-title text-warning">
+                      <i class="bi bi-wifi"></i> Hotspot & PPPoE Management
+                    </div>
+                    <div class="command-list">
+                      <ul class="list-unstyled mb-0 small">
+                        <li><code>vcr [user] [profile] [nomor]</code> - Buat voucher</li>
+                        <li><code>hotspot</code> - User hotspot aktif</li>
+                        <li><code>pppoe</code> - User PPPoE aktif</li>
+                        <li><code>offline</code> - User PPPoE offline</li>
+                        <li><code>addhotspot [user] [pass] [profile]</code> - Tambah user</li>
+                        <li><code>addpppoe [user] [pass] [profile] [ip]</code> - Tambah PPPoE</li>
+                        <li><code>setprofile [user] [profile]</code> - Ubah profile</li>
+                        <li><code>delhotspot [username]</code> - Hapus user hotspot</li>
+                        <li><code>delpppoe [username]</code> - Hapus user PPPoE</li>
+                        <li><code>addpppoe_tag [user] [nomor]</code> - Tambah tag PPPoE</li>
+                        <li><code>member [username] [profile] [nomor]</code> - Tambah member</li>
+                        <li><code>list</code> - Daftar semua user</li>
+                        <li><code>remove [username]</code> - Hapus user (generic)</li>
+                        <li><code>addadmin [nomor]</code> - Tambah nomor admin</li>
+                        <li><code>removeadmin [nomor]</code> - Hapus nomor admin</li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  <!-- Sistem & Admin -->
+                  <div class="command-card">
+                    <div class="command-title text-info">
+                      <i class="bi bi-shield-check"></i> Sistem & Admin
+                    </div>
+                    <div class="command-list">
+                      <ul class="list-unstyled mb-0 small">
+                        <li><code>otp [nomor]</code> - Kirim OTP</li>
+                        <li><code>status</code> - Status sistem</li>
+                        <li><code>logs</code> - Log aplikasi</li>
+                        <li><code>restart</code> - Restart aplikasi</li>
+                        <li><code>debug resource</code> - Debug resource</li>
+                        <li><code>checkgroup</code> - Cek status group</li>
+                        <li><code>setadmin [nomor]</code> - Set nomor admin</li>
+                        <li><code>settechnician [nomor]</code> - Set nomor teknisi</li>
+                        <li><code>setheader [teks]</code> - Set header pesan</li>
+                        <li><code>setfooter [teks]</code> - Set footer pesan</li>
+                        <li><code>setgenieacs [url] [user] [pass]</code> - Set GenieACS</li>
+                        <li><code>setmikrotik [host] [port] [user] [pass]</code> - Set Mikrotik</li>
+                        <li><code>genieacs stop</code> - Stop GenieACS</li>
+                        <li><code>genieacs start060111</code> - Start GenieACS</li>
+                        <li><code>admin</code> - Menu admin</li>
+                        <li><code>help</code> - Bantuan perintah</li>
+                        <li><code>ya/iya/yes</code> - Konfirmasi ya</li>
+                        <li><code>tidak/no/batal</code> - Konfirmasi tidak</li>
+                        <li><code>addwan [interface]</code> - Tambah WAN</li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  <!-- WiFi & Layanan -->
+                  <div class="command-card mb-0">
+                    <div class="command-title text-secondary">
+                      <i class="bi bi-wifi"></i> WiFi & Layanan
+                    </div>
+                    <div class="command-list">
+                      <ul class="list-unstyled mb-0 small">
+                        <li><code>info wifi</code> - Info WiFi pelanggan</li>
+                        <li><code>info</code> - Info layanan</li>
+                        <li><code>gantiwifi [ssid]</code> - Ganti nama WiFi</li>
+                        <li><code>gantipass [password]</code> - Ganti password WiFi</li>
+                        <li><code>speedtest</code> - Test kecepatan</li>
+                        <li><code>diagnostic</code> - Diagnostik perangkat</li>
+                        <li><code>history</code> - Riwayat perangkat</li>
+                        <li><code>menu</code> - Menu utama</li>
+                        <li><code>factory reset</code> - Reset factory (pelanggan)</li>
+                        <li><code>confirm factory reset</code> - Konfirmasi factory reset</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- Group Detail Modal -->
+  <div class="modal fade" id="groupDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content bg-dark text-light">
+        <div class="modal-header border-secondary">
+          <h5 class="modal-title"><i class="bi bi-people-fill"></i> Detail Grup WhatsApp</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body" id="groupDetailContent">
+          <!-- Group detail will be loaded here -->
+        </div>
+        <div class="modal-footer border-secondary">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Tutup</button>
+          <button type="button" class="btn btn-primary" id="btnCopyGroupId">Copy Group ID</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script>
+    // WhatsApp QR & Status Management
+    function loadWAStatus() {
+      $.get('/admin/setting/wa-status', function(data) {
+        let statusHtml = '';
+        if (data.connected) {
+          statusHtml = '<span class="badge bg-success status-badge"><i class="bi bi-check-circle"></i> Terhubung</span>';
+          if (data.phoneNumber) {
+            statusHtml += '<p class="mt-2 mb-0 small">Nomor: ' + data.phoneNumber + '</p>';
+          }
+          $('#wa-qr-container').addClass('d-none');
+        } else {
+          statusHtml = '<span class="badge bg-warning status-badge"><i class="bi bi-exclamation-circle"></i> Belum Terhubung</span>';
+          statusHtml += '<p class="mt-2 mb-0 small">Scan QR code di bawah untuk menghubungkan</p>';
+          
+          if (data.qr) {
+            $('#wa-qr-container').removeClass('d-none');
+            $('#wa-qr-div').empty();
+            new QRCode(document.getElementById('wa-qr-div'), {
+              text: data.qr,
+              width: 200,
+              height: 200,
+              colorDark: '#000000',
+              colorLight: '#ffffff',
+              correctLevel: QRCode.CorrectLevel.H
+            });
+          }
+        }
+        $('#wa-status').html(statusHtml);
+      }).fail(function() {
+        $('#wa-status').html('<span class="badge bg-danger status-badge"><i class="bi bi-x-circle"></i> Error</span>');
+      });
+    }
+
+    // Refresh QR
+    $('#btnRefreshQR').on('click', function() {
+      $.post('/admin/setting/wa-refresh', function(data) {
+        if (data.success) {
+          setTimeout(loadWAStatus, 2000);
+        }
+      });
+    });
+
+    // Delete Session
+    $('#btnDeleteSession').on('click', function() {
+      if (confirm('Yakin ingin menghapus session WhatsApp?')) {
+        $.post('/admin/setting/wa-delete', function(data) {
+          if (data.success) {
+            setTimeout(loadWAStatus, 2000);
+          }
+        });
+      }
+    });
+
+    // WhatsApp Groups Management
+    let currentGroups = [];
+
+    $('#btnLoadGroups, #btnRefreshGroups').on('click', function() {
+      loadWhatsAppGroups();
+    });
+
+    $('#btnTestConnection').on('click', function() {
+      testWhatsAppConnection();
+    });
+
+    async function testWhatsAppConnection() {
+      try {
+        const response = await fetch('/admin/setting/whatsapp-test');
+        const data = await response.json();
+        
+        let statusHtml = '<div class="alert ' + (data.success ? 'alert-success' : 'alert-warning') + '">';
+        statusHtml += '<strong>' + (data.success ? '✅ Koneksi Berhasil' : '⚠️ Koneksi Gagal') + '</strong><br>';
+        statusHtml += data.message;
+        
+        if (data.groups) {
+          statusHtml += '<br><br><strong>Info Grup:</strong><br>';
+          statusHtml += 'Total: ' + data.groups.total + ' grup<br>';
+          if (data.groups.sample && data.groups.sample.length > 0) {
+            statusHtml += 'Sample: ' + data.groups.sample.map(g => g.name).join(', ');
+          }
+        }
+        statusHtml += '</div>';
+        
+        $('#waGroupsStatus').html(statusHtml);
+      } catch (error) {
+        $('#waGroupsStatus').html('<div class="alert alert-danger">Error: ' + error.message + '</div>');
+      }
+    }
+
+    async function loadWhatsAppGroups() {
+      $('#waGroupsStatus').html('<div class="alert alert-info"><i class="bi bi-hourglass-split"></i> Memuat grup WhatsApp...</div>');
+      
+      try {
+        const response = await fetch('/admin/setting/whatsapp-groups');
+        const data = await response.json();
+        
+        if (!data.success) {
+          $('#waGroupsStatus').html('<div class="alert alert-danger">' + data.message + '</div>');
+          return;
+        }
+        
+        currentGroups = data.groups || [];
+        
+        if (currentGroups.length === 0) {
+          $('#waGroupsStatus').html('<div class="alert alert-warning">Tidak ada grup WhatsApp yang ditemukan. Pastikan bot sudah ditambahkan ke grup.</div>');
+          $('#waGroupsList').hide();
+          return;
+        }
+        
+        $('#groupsCount').text(currentGroups.length);
+        
+        let groupsHtml = '<div class="list-group list-group-flush">';
+        currentGroups.forEach(group => {
+          groupsHtml += '<a href="#" class="list-group-item list-group-item-action group-item" data-group-id="' + group.id + '">';
+          groupsHtml += '<div class="d-flex w-100 justify-content-between">';
+          groupsHtml += '<h6 class="mb-1">' + group.name + '</h6>';
+          groupsHtml += '<small>' + group.participants + ' anggota</small>';
+          groupsHtml += '</div>';
+          groupsHtml += '<small class="text-muted">ID: ' + group.id + '</small>';
+          groupsHtml += '</a>';
+        });
+        groupsHtml += '</div>';
+        
+        $('#groupsContainer').html(groupsHtml);
+        $('#waGroupsList').show();
+        $('#waGroupsStatus').hide();
+        
+        $('.group-item').on('click', function(e) {
+          e.preventDefault();
+          const groupId = $(this).data('group-id');
+          showGroupDetail(groupId);
+        });
+        
+      } catch (error) {
+        $('#waGroupsStatus').html('<div class="alert alert-danger">Error: ' + error.message + '</div>');
+      }
+    }
+
+    async function showGroupDetail(groupId) {
+      try {
+        const response = await fetch('/admin/setting/whatsapp-groups/' + groupId);
+        const data = await response.json();
+        
+        if (!data.success) {
+          alert('Error: ' + data.message);
+          return;
+        }
+        
+        const group = data.group;
+        let detailHtml = '<div class="mb-3">';
+        detailHtml += '<p><strong>Nama:</strong> ' + group.name + '</p>';
+        detailHtml += '<p><strong>ID:</strong> <code>' + group.id + '</code></p>';
+        detailHtml += '<p><strong>Owner:</strong> ' + group.owner + '</p>';
+        detailHtml += '<p><strong>Total Anggota:</strong> ' + group.totalParticipants + '</p>';
+        detailHtml += '<p><strong>Dibuat:</strong> ' + group.created + '</p>';
+        detailHtml += '<p><strong>Bot adalah Admin:</strong> ' + (group.isAdmin ? '✅ Ya' : '❌ Tidak') + '</p>';
+        if (group.description) {
+          detailHtml += '<p><strong>Deskripsi:</strong> ' + group.description + '</p>';
+        }
+        detailHtml += '</div>';
+        
+        $('#groupDetailContent').html(detailHtml);
+        $('#btnCopyGroupId').data('group-id', group.id);
+        
+        const modal = new bootstrap.Modal(document.getElementById('groupDetailModal'));
+        modal.show();
+      } catch (error) {
+        alert('Error: ' + error.message);
+      }
+    }
+
+    $('#btnCopyGroupId').on('click', function() {
+      const groupId = $(this).data('group-id');
+      navigator.clipboard.writeText(groupId).then(() => {
+        alert('Group ID berhasil disalin: ' + groupId);
+      });
+    });
+
+    // Load initial status
+    $(document).ready(function() {
+      loadWAStatus();
+      setInterval(loadWAStatus, 10000); // Refresh every 10 seconds
+    });
+  </script>
+</body>
+</html>

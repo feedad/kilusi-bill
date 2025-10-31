@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Traffic API Debug</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .log {
+            background: #252526;
+            border: 1px solid #3e3e42;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 10px 0;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .log-entry {
+            margin: 5px 0;
+            padding: 5px;
+            border-bottom: 1px solid #3e3e42;
+        }
+        .success { color: #4ec9b0; }
+        .error { color: #f48771; }
+        .info { color: #569cd6; }
+        .warning { color: #dcdcaa; }
+        button {
+            background: #0e639c;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #1177bb;
+        }
+        input, select {
+            padding: 8px;
+            margin: 5px;
+            background: #3c3c3c;
+            border: 1px solid #3e3e42;
+            color: #d4d4d4;
+            border-radius: 4px;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin: 20px 0;
+        }
+        .stat-card {
+            background: #252526;
+            border: 1px solid #3e3e42;
+            border-radius: 4px;
+            padding: 15px;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Traffic API Debug Tool</h1>
+        
+        <div style="margin: 20px 0;">
+            <label>Interface:</label>
+            <select id="interfaceSelect">
+                <option value="sfp-sfpplus1">sfp-sfpplus1</option>
+                <option value="ether1">ether1</option>
+                <option value="ether7">ether7</option>
+                <option value="vlan10">vlan10</option>
+            </select>
+            <button onclick="testTraffic()">Test Traffic API</button>
+            <button onclick="testInterfaces()">Test Interfaces API</button>
+            <button onclick="startMonitoring()">Start Monitoring</button>
+            <button onclick="stopMonitoring()">Stop Monitoring</button>
+            <button onclick="clearLog()">Clear Log</button>
+        </div>
+
+        <div class="stats">
+            <div class="stat-card">
+                <div>RX (Download)</div>
+                <div class="stat-value success" id="rxValue">0 Mbps</div>
+            </div>
+            <div class="stat-card">
+                <div>TX (Upload)</div>
+                <div class="stat-value error" id="txValue">0 Mbps</div>
+            </div>
+            <div class="stat-card">
+                <div>Total Traffic</div>
+                <div class="stat-value info" id="totalValue">0 Mbps</div>
+            </div>
+            <div class="stat-card">
+                <div>Last Update</div>
+                <div class="stat-value warning" id="lastUpdate">-</div>
+            </div>
+        </div>
+
+        <h3>API Response Log:</h3>
+        <div class="log" id="logContainer"></div>
+    </div>
+
+    <script>
+        let monitoringInterval = null;
+
+        function log(message, type = 'info') {
+            const logContainer = document.getElementById('logContainer');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            const timestamp = new Date().toLocaleTimeString();
+            entry.innerHTML = `<span class="warning">[${timestamp}]</span> ${message}`;
+            logContainer.insertBefore(entry, logContainer.firstChild);
+        }
+
+        function clearLog() {
+            document.getElementById('logContainer').innerHTML = '';
+        }
+
+        async function testTraffic() {
+            const iface = document.getElementById('interfaceSelect').value;
+            log(`Testing traffic for interface: ${iface}`, 'info');
+            
+            try {
+                const response = await fetch(`/api/dashboard/traffic?interface=${iface}`);
+                const data = await response.json();
+                
+                log(`Response Status: ${response.status}`, response.ok ? 'success' : 'error');
+                log(`Response Data: ${JSON.stringify(data, null, 2)}`, data.success ? 'success' : 'error');
+                
+                if (data.success) {
+                    updateStats(data.rx, data.tx);
+                    log(`✅ RX: ${(data.rx / 1000000).toFixed(2)} Mbps, TX: ${(data.tx / 1000000).toFixed(2)} Mbps`, 'success');
+                } else {
+                    log(`❌ Error: ${data.message}`, 'error');
+                }
+            } catch (error) {
+                log(`❌ Exception: ${error.message}`, 'error');
+                console.error(error);
+            }
+        }
+
+        async function testInterfaces() {
+            log('Testing interfaces list API...', 'info');
+            
+            try {
+                const response = await fetch('/api/dashboard/interfaces');
+                const data = await response.json();
+                
+                log(`Response Status: ${response.status}`, response.ok ? 'success' : 'error');
+                
+                if (data.success && data.interfaces) {
+                    log(`✅ Found ${data.interfaces.length} interfaces`, 'success');
+                    
+                    const upCount = data.interfaces.filter(i => i.running).length;
+                    const downCount = data.interfaces.length - upCount;
+                    
+                    log(`   🟢 UP: ${upCount} interfaces`, 'success');
+                    log(`   🔴 DOWN: ${downCount} interfaces`, 'error');
+                    
+                    // Update select dropdown
+                    const select = document.getElementById('interfaceSelect');
+                    select.innerHTML = '';
+                    data.interfaces.forEach(iface => {
+                        const option = document.createElement('option');
+                        option.value = iface.name;
+                        option.textContent = `${iface.name} (${iface.running ? 'UP' : 'DOWN'})`;
+                        select.appendChild(option);
+                    });
+                    
+                    log('Interface list updated in dropdown', 'success');
+                } else {
+                    log(`❌ Error: ${data.message || 'Unknown error'}`, 'error');
+                }
+            } catch (error) {
+                log(`❌ Exception: ${error.message}`, 'error');
+                console.error(error);
+            }
+        }
+
+        function updateStats(rx, tx) {
+            const rxMbps = (rx / 1000000).toFixed(2);
+            const txMbps = (tx / 1000000).toFixed(2);
+            const totalMbps = ((rx + tx) / 1000000).toFixed(2);
+            
+            document.getElementById('rxValue').textContent = rxMbps + ' Mbps';
+            document.getElementById('txValue').textContent = txMbps + ' Mbps';
+            document.getElementById('totalValue').textContent = totalMbps + ' Mbps';
+            document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+        }
+
+        function startMonitoring() {
+            if (monitoringInterval) {
+                log('⚠️ Monitoring already running', 'warning');
+                return;
+            }
+            
+            log('▶️ Starting continuous monitoring (2 second interval)...', 'info');
+            testTraffic(); // Immediate first test
+            monitoringInterval = setInterval(testTraffic, 2000);
+        }
+
+        function stopMonitoring() {
+            if (monitoringInterval) {
+                clearInterval(monitoringInterval);
+                monitoringInterval = null;
+                log('⏹️ Monitoring stopped', 'warning');
+            } else {
+                log('⚠️ Monitoring not running', 'warning');
+            }
+        }
+
+        // Initial load
+        log('🚀 Debug tool loaded. Click "Test Interfaces API" first to load available interfaces.', 'info');
+    </script>
+</body>
+</html>

@@ -1,0 +1,865 @@
+/* ========================================
+   DARK THEME - Global Admin Styles
+   ======================================== */
+
+/* CSS Variables for Dark Theme */
+:root {
+    --card-bg: #252a3d;
+    --secondary-bg: #2d3348;
+    --border-color: #3a4052;
+    --code-bg: #1a1d29;
+    --text-color: #e0e0e0;
+    --text-muted: #b8b8b8;
+}
+
+/* Base Dark Theme */
+body {
+    background: #1a1d29 !important;
+    color: #e0e0e0 !important;
+}
+
+/* Main Content Area */
+.main-content {
+    background: #1a1d29 !important;
+    color: #e0e0e0;
+}
+
+/* ========================================
+   CARDS - Modern Minimalist Design
+   ======================================== */
+.card {
+    background: #252a3d !important;
+    border: none !important;
+    border-radius: 12px !important;
+    color: #e0e0e0 !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1) !important;
+}
+
+.card-header {
+    background: #2d3348 !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+    color: #ffffff !important;
+    border-radius: 12px 12px 0 0 !important;
+    padding: 16px 20px !important;
+}
+
+.card-body {
+    background: #252a3d !important;
+    color: #e0e0e0 !important;
+    padding: 20px !important;
+}
+
+.card-footer {
+    background: #2d3348 !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.05) !important;
+    color: #b8b8b8 !important;
+    border-radius: 0 0 12px 12px !important;
+    padding: 16px 20px !important;
+}
+
+/* Card Variants */
+.card.text-bg-primary {
+    background: #4a5fc1 !important;
+    border-color: #5a6fd1 !important;
+}
+
+.card.text-bg-success {
+    background: #1e6b3a !important;
+    border-color: #28a745 !important;
+}
+
+.card.text-bg-danger {
+    background: #7a2828 !important;
+    border-color: #dc3545 !important;
+}
+
+.card.text-bg-warning {
+    background: #7a6328 !important;
+    border-color: #ffc107 !important;
+}
+
+.card.text-bg-secondary {
+    background: #4a4f5c !important;
+    border-color: #6c757d !important;
+}
+
+.card.text-bg-info {
+    background: #1a5a6b !important;
+    border-color: #17a2b8 !important;
+}
+
+/* ========================================
+   TYPOGRAPHY
+   ======================================== */
+h1, h2, h3, h4, h5, h6 {
+    color: #ffffff !important;
+}
+
+p, span, label, div {
+    color: #e0e0e0;
+}
+
+.text-muted {
+    color: #b8b8b8 !important;
+}
+
+.text-dark {
+    color: #e0e0e0 !important;
+}
+
+strong, b {
+    color: #ffffff;
+}
+
+a {
+    color: #7daeff;
+}
+
+a:hover {
+    color: #a3c4ff;
+}
+
+/* ========================================
+   TABLES
+   ======================================== */
+.table {
+    color: #e0e0e0 !important;
+    border-color: #3a4052 !important;
+    border-collapse: collapse !important; /* ensure contiguous borders */
+    border-spacing: 0 !important;
+    width: 100%;
+}
+
+.table thead th {
+    background: #2d3348 !important;
+    border-color: #3a4052 !important;
+    color: #ffffff !important;
+}
+
+.table tbody tr {
+    background: #252a3d !important;
+    border-color: #3a4052 !important;
+}
+
+.table tbody tr:hover {
+    background: #2d3348 !important;
+}
+
+.table td, .table th {
+    border-color: #3a4052 !important;
+    color: #e0e0e0 !important;
+}
+
+/* Make tables feel like a single solid block and fix last-column look */
+.card .table-responsive, .table-responsive {
+    border: 1px solid #3a4052 !important;
+    border-radius: 12px !important;
+    overflow: hidden !important;
+    background: #252a3d !important;
+}
+.card .table-responsive .table { margin-bottom: 0 !important; }
+/* Let outer wrapper draw the outer frame; avoid inner hard edge on the last column */
+.table tr > *:first-child { border-left: none !important; }
+.table tr > *:last-child { border-right: none !important; }
+.table thead tr:first-child > * { border-top: none !important; }
+
+.table-striped tbody tr:nth-of-type(odd) {
+    background: #252a3d !important;
+}
+
+.table-striped tbody tr:nth-of-type(even) {
+    background: #2a2f42 !important;
+}
+
+.table-hover tbody tr:hover {
+    background: #2d3348 !important;
+}
+
+/* ========================================
+   BUTTONS
+   ======================================== */
+.btn-primary {
+    background: #4a5fc1 !important;
+    border-color: #4a5fc1 !important;
+    color: #ffffff !important;
+}
+
+.btn-primary:hover {
+    background: #5a6fd1 !important;
+    border-color: #5a6fd1 !important;
+}
+
+.btn-secondary {
+    background: #4a4f5c !important;
+    border-color: #4a4f5c !important;
+    color: #ffffff !important;
+}
+
+.btn-secondary:hover {
+    background: #5a5f6c !important;
+    border-color: #5a5f6c !important;
+}
+
+.btn-success {
+    background: #28a745 !important;
+    border-color: #28a745 !important;
+}
+
+.btn-danger {
+    background: #dc3545 !important;
+    border-color: #dc3545 !important;
+}
+
+.btn-warning {
+    background: #ffc107 !important;
+    border-color: #ffc107 !important;
+    color: #000000 !important;
+}
+
+.btn-info {
+    background: #17a2b8 !important;
+    border-color: #17a2b8 !important;
+}
+
+.btn-light {
+    background: #4a4f5c !important;
+    border-color: #5a5f6c !important;
+    color: #ffffff !important;
+}
+
+.btn-dark {
+    background: #2d3348 !important;
+    border-color: #3a4052 !important;
+    color: #ffffff !important;
+}
+
+.btn-outline-primary {
+    color: #7daeff !important;
+    border-color: #4a5fc1 !important;
+}
+
+.btn-outline-primary:hover {
+    background: #4a5fc1 !important;
+    color: #ffffff !important;
+}
+
+/* ========================================
+   FORMS
+   ======================================== */
+.form-control, .form-select {
+    background: #2d3348 !important;
+    border: 1px solid #3a4052 !important;
+    color: #e0e0e0 !important;
+}
+
+.form-control:focus, .form-select:focus {
+    background: #363c52 !important;
+    border-color: #4a5fc1 !important;
+    color: #e0e0e0 !important;
+    box-shadow: 0 0 0 0.25rem rgba(74, 95, 193, 0.25) !important;
+}
+
+.form-control::placeholder {
+    color: #7a7f8c !important;
+}
+
+.form-label {
+    color: #e0e0e0 !important;
+}
+
+.input-group-text {
+    background: #2d3348 !important;
+    border: 1px solid #3a4052 !important;
+    color: #b8b8b8 !important;
+}
+
+.form-check-input {
+    background-color: #2d3348 !important;
+    border: 1px solid #3a4052 !important;
+}
+
+.form-check-input:checked {
+    background-color: #4a5fc1 !important;
+    border-color: #4a5fc1 !important;
+}
+
+.form-check-label {
+    color: #e0e0e0 !important;
+}
+
+/* ========================================
+   BADGES
+   ======================================== */
+.badge.bg-primary {
+    background: #4a5fc1 !important;
+}
+
+.badge.bg-success {
+    background: #28a745 !important;
+}
+
+.badge.bg-danger {
+    background: #dc3545 !important;
+}
+
+.badge.bg-warning {
+    background: #ffc107 !important;
+    color: #000000 !important;
+}
+
+.badge.bg-info {
+    background: #17a2b8 !important;
+}
+
+.badge.bg-secondary {
+    background: #6c757d !important;
+}
+
+.badge.bg-light {
+    background: #5a5f6c !important;
+    color: #ffffff !important;
+}
+
+.badge.bg-dark {
+    background: #2d3348 !important;
+}
+
+/* ========================================
+   ALERTS
+   ======================================== */
+.alert {
+    border: 1px solid #3a4052 !important;
+}
+
+.alert-success {
+    background: #1e4620 !important;
+    border-color: #28a745 !important;
+    color: #7ae582 !important;
+}
+
+.alert-danger {
+    background: #4a1f1f !important;
+    border-color: #dc3545 !important;
+    color: #f8a5a5 !important;
+}
+
+.alert-warning {
+    background: #4a3f1a !important;
+    border-color: #ffc107 !important;
+    color: #ffe17a !important;
+}
+
+.alert-info {
+    background: #1a3644 !important;
+    border-color: #17a2b8 !important;
+    color: #7dcfe2 !important;
+}
+
+.alert-primary {
+    background: #2a3564 !important;
+    border-color: #4a5fc1 !important;
+    color: #a3b8ff !important;
+}
+
+.alert-secondary {
+    background: #2d3240 !important;
+    border-color: #6c757d !important;
+    color: #b8bcc4 !important;
+}
+
+/* ========================================
+   MODALS
+   ======================================== */
+.modal-content {
+    background: #252a3d !important;
+    border: 1px solid #3a4052 !important;
+    color: #e0e0e0 !important;
+}
+
+.modal-header {
+    background: #2d3348 !important;
+    border-bottom: 1px solid #3a4052 !important;
+    color: #ffffff !important;
+}
+
+.modal-body {
+    background: #252a3d !important;
+    color: #e0e0e0 !important;
+}
+
+.modal-footer {
+    background: #2d3348 !important;
+    border-top: 1px solid #3a4052 !important;
+}
+
+.modal-title {
+    color: #ffffff !important;
+}
+
+.btn-close {
+    filter: invert(1) grayscale(100%) brightness(200%);
+}
+
+/* ========================================
+   DROPDOWNS
+   ======================================== */
+.dropdown-menu {
+    background: #252a3d !important;
+    border: 1px solid #3a4052 !important;
+}
+
+.dropdown-item {
+    color: #e0e0e0 !important;
+}
+
+.dropdown-item:hover, .dropdown-item:focus {
+    background: #2d3348 !important;
+    color: #ffffff !important;
+}
+
+.dropdown-divider {
+    border-top: 1px solid #3a4052 !important;
+}
+
+/* ========================================
+   NAVBAR
+   ======================================== */
+.navbar {
+    background: #2d3348 !important;
+    border-bottom: 1px solid #3a4052 !important;
+}
+
+.navbar-dark .navbar-brand,
+.navbar-dark .navbar-text {
+    color: #ffffff !important;
+}
+
+.navbar-dark .navbar-nav .nav-link {
+    color: #b8b8b8 !important;
+}
+
+.navbar-dark .navbar-nav .nav-link:hover {
+    color: #ffffff !important;
+}
+
+/* ========================================
+   PAGINATION
+   ======================================== */
+.pagination .page-link {
+    background: #252a3d !important;
+    border: 1px solid #3a4052 !important;
+    color: #e0e0e0 !important;
+}
+
+.pagination .page-link:hover {
+    background: #2d3348 !important;
+    border-color: #4a5fc1 !important;
+    color: #ffffff !important;
+}
+
+.pagination .page-item.active .page-link {
+    background: #4a5fc1 !important;
+    border-color: #4a5fc1 !important;
+}
+
+.pagination .page-item.disabled .page-link {
+    background: #2d3348 !important;
+    color: #6c757d !important;
+}
+
+/* ========================================
+   BREADCRUMB
+   ======================================== */
+.breadcrumb {
+    background: #252a3d !important;
+}
+
+.breadcrumb-item a {
+    color: #7daeff !important;
+}
+
+.breadcrumb-item.active {
+    color: #b8b8b8 !important;
+}
+
+/* ========================================
+   LIST GROUP
+   ======================================== */
+.list-group-item {
+    background: #252a3d !important;
+    border: 1px solid #3a4052 !important;
+    color: #e0e0e0 !important;
+}
+
+.list-group-item:hover {
+    background: #2d3348 !important;
+}
+
+.list-group-item.active {
+    background: #4a5fc1 !important;
+    border-color: #4a5fc1 !important;
+}
+
+/* ========================================
+   PROGRESS
+   ======================================== */
+.progress {
+    background: #2d3348 !important;
+}
+
+.progress-bar {
+    background: #4a5fc1 !important;
+}
+
+/* ========================================
+   CODE BLOCKS
+   ======================================== */
+code {
+    background: #2d3348 !important;
+    color: #a3d5ff !important;
+    padding: 0.2rem 0.4rem;
+    border-radius: 3px;
+}
+
+pre {
+    background: #2d3348 !important;
+    border: 1px solid #3a4052 !important;
+    color: #e0e0e0 !important;
+}
+
+/* ========================================
+   SIDEBAR (Admin)
+   ======================================== */
+.sidebar {
+    background: #222e3c !important;
+}
+
+.sidebar a {
+    color: #b8b8b8 !important;
+}
+
+.sidebar a:hover,
+.sidebar a.active {
+    background: #2d3a4a !important;
+    color: #ffffff !important;
+}
+
+/* ========================================
+   TOOLTIPS & POPOVERS
+   ======================================== */
+.tooltip-inner {
+    background: #2d3348 !important;
+    color: #ffffff !important;
+}
+
+.popover {
+    background: #252a3d !important;
+    border: 1px solid #3a4052 !important;
+}
+
+.popover-header {
+    background: #2d3348 !important;
+    border-bottom: 1px solid #3a4052 !important;
+    color: #ffffff !important;
+}
+
+.popover-body {
+    color: #e0e0e0 !important;
+}
+
+/* ========================================
+   CUSTOM SCROLLBAR
+   ======================================== */
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+::-webkit-scrollbar-track {
+    background: #1a1d29;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #3a4052;
+    border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #4a5062;
+}
+
+/* ========================================
+   MOBILE SPECIFIC
+   ======================================== */
+@media (max-width: 767.98px) {
+    .mobile-navbar {
+        background: #2d3348 !important;
+        border-bottom: 1px solid #3a4052 !important;
+    }
+    
+    .sidebar-overlay {
+        background: rgba(0, 0, 0, 0.7) !important;
+    }
+}
+
+/* ========================================
+   SPECIAL COMPONENTS
+   ======================================== */
+
+/* Stat Cards */
+.stat-card {
+    background: #252a3d !important;
+    border-left: 4px solid;
+}
+
+/* Charts - if using chart.js */
+.chart-container {
+    background: #252a3d !important;
+}
+
+/* Calendar */
+.calendar {
+    background: #252a3d !important;
+    border: 1px solid #3a4052 !important;
+}
+
+.calendar-day {
+    background: #2d3348 !important;
+    border: 1px solid #3a4052 !important;
+    color: #e0e0e0 !important;
+}
+
+.calendar-day:hover {
+    background: #363c52 !important;
+}
+
+/* Tabs */
+.nav-tabs {
+    border-bottom: 1px solid #3a4052 !important;
+}
+
+.nav-tabs .nav-link {
+    color: #b8b8b8 !important;
+    border: 1px solid transparent !important;
+}
+
+.nav-tabs .nav-link:hover {
+    color: #ffffff !important;
+    border-color: #3a4052 #3a4052 #252a3d !important;
+}
+
+.nav-tabs .nav-link.active {
+    color: #ffffff !important;
+    background: #252a3d !important;
+    border-color: #3a4052 #3a4052 #252a3d !important;
+}
+
+.tab-content {
+    background: #252a3d !important;
+    border: 1px solid #3a4052 !important;
+    border-top: none !important;
+}
+
+/* Accordion */
+.accordion-item {
+    background: #252a3d !important;
+    border: 1px solid #3a4052 !important;
+}
+
+.accordion-button {
+    background: #2d3348 !important;
+    color: #e0e0e0 !important;
+}
+
+.accordion-button:not(.collapsed) {
+    background: #363c52 !important;
+    color: #ffffff !important;
+}
+
+.accordion-body {
+    background: #252a3d !important;
+    color: #e0e0e0 !important;
+}
+
+/* Offcanvas */
+.offcanvas {
+    background: #252a3d !important;
+    color: #e0e0e0 !important;
+}
+
+.offcanvas-header {
+    border-bottom: 1px solid #3a4052 !important;
+}
+
+.offcanvas-title {
+    color: #ffffff !important;
+}
+
+/* Toast */
+.toast {
+    background: #252a3d !important;
+    border: 1px solid #3a4052 !important;
+    color: #e0e0e0 !important;
+}
+
+.toast-header {
+    background: #2d3348 !important;
+    border-bottom: 1px solid #3a4052 !important;
+    color: #ffffff !important;
+}
+
+/* Spinner */
+.spinner-border,
+.spinner-grow {
+    color: #4a5fc1 !important;
+}
+
+/* ========================================
+   UTILITY OVERRIDES
+   ======================================== */
+.bg-white {
+    background: #252a3d !important;
+}
+
+.bg-light {
+    background: #2d3348 !important;
+}
+
+.border {
+    border-color: #3a4052 !important;
+}
+
+.text-white {
+    color: #ffffff !important;
+}
+
+.text-black {
+    color: #e0e0e0 !important;
+}
+
+/* ========================================
+   PRINT MEDIA (Keep light for printing)
+   ======================================== */
+@media print {
+    body {
+        background: white !important;
+        color: black !important;
+    }
+    
+    .card {
+        background: white !important;
+        color: black !important;
+        border: 1px solid #dee2e6 !important;
+    }
+    
+    .table {
+        color: black !important;
+    }
+}
+
+/* ========================================
+     STRONG OVERRIDES: Tables & DataTables
+     ======================================== */
+/* Force dark table backgrounds and readable text */
+.table { background-color: #252a3d !important; color: #e0e0e0 !important; }
+.table thead th { background-color: #2d3348 !important; color: #ffffff !important; border-color: #3a4052 !important; }
+.table th, .table td { border-color: #3a4052 !important; color: #e0e0e0 !important; }
+.table-striped tbody tr:nth-of-type(odd) { background-color: #2b3043 !important; }
+.table-hover tbody tr:hover { background-color: #2e3450 !important; color: #ffffff !important; }
+.table tbody tr { background-color: #252a3d !important; }
+
+/* DataTables (Bootstrap 5) dark controls */
+.dataTables_wrapper .dataTables_filter input,
+.dataTables_wrapper .dataTables_length select {
+    background-color: #1a1d29 !important;
+    color: #e0e0e0 !important;
+    border: 1px solid #3a4052 !important;
+}
+.dataTables_wrapper .dataTables_info,
+.dataTables_wrapper .dataTables_length label,
+.dataTables_wrapper .dataTables_filter label {
+    color: #b8b8b8 !important;
+}
+.dataTables_wrapper .dataTables_paginate .paginate_button {
+    background-color: #252a3d !important;
+    color: #e0e0e0 !important;
+    border: 1px solid #3a4052 !important;
+}
+.dataTables_wrapper .dataTables_paginate .paginate_button.current,
+.dataTables_wrapper .dataTables_paginate .paginate_button:hover {
+    background: #2d3348 !important;
+    color: #ffffff !important;
+    border-color: #4a5fc1 !important;
+}
+.dataTables_wrapper .dataTables_paginate .paginate_button.disabled,
+.dataTables_wrapper .dataTables_paginate .paginate_button.disabled:hover {
+    background: #222836 !important;
+    color: #777 !important;
+    border-color: #3a4052 !important;
+}
+
+/* Sticky action columns (opt-in via class only) */
+.table th.sticky-dark, .table td.sticky-dark {
+    border-left: 1px solid #3a4052 !important;
+}
+/* Keep header cells aligned with header theme even when sticky */
+.table thead th.sticky-dark { background-color: #2d3348 !important; color: #ffffff !important; }
+/* Body sticky cells keep row background */
+.table tbody td.sticky-dark { background-color: #252a3d !important; }
+
+/* DataTables core structures */
+table.dataTable { background-color: #252a3d !important; color: #e0e0e0 !important; }
+table.dataTable.no-footer { border-bottom: 1px solid #3a4052 !important; }
+table.dataTable tbody tr { background-color: #252a3d !important; }
+table.dataTable tbody tr:hover { background-color: #2e3450 !important; color: #ffffff !important; }
+table.dataTable thead th, table.dataTable thead td { background-color: #2d3348 !important; color: #ffffff !important; border-color: #3a4052 !important; }
+table.dataTable tfoot th, table.dataTable tfoot td { background-color: #2d3348 !important; color: #e0e0e0 !important; border-color: #3a4052 !important; }
+table.dataTable > tbody > tr.selected > *,
+table.dataTable tbody tr.selected { background-color: #334066 !important; color: #ffffff !important; }
+
+/* Sorting header states */
+table.dataTable thead th.sorting,
+table.dataTable thead th.sorting_asc,
+table.dataTable thead th.sorting_desc { background-color: #2d3348 !important; color: #ffffff !important; }
+
+/* Responsive child rows */
+table.dataTable > tbody > tr.child { background-color: #252a3d !important; color: #e0e0e0 !important; }
+table.dataTable > tbody > tr.child ul.dtr-details { background-color: #252a3d !important; }
+table.dataTable > tbody > tr.child span.dtr-title { color: #b8b8b8 !important; }
+table.dataTable > tbody > tr.child span.dtr-data { color: #e0e0e0 !important; }
+
+/* Scrolling headers/bodies */
+.dataTables_scrollHead, .dataTables_scrollHeadInner, .dataTables_scrollHead table { background-color: #2d3348 !important; }
+.dataTables_scrollHead table thead th { background-color: #2d3348 !important; color: #ffffff !important; }
+.dataTables_scrollBody, .dataTables_scrollBody table { background-color: #252a3d !important; color: #e0e0e0 !important; }
+.dataTables_scrollBody table tbody td { background-color: #252a3d !important; color: #e0e0e0 !important; }
+
+/* Override generic light bg helpers that may appear inside tables */
+.bg-white, .bg-light, .table .bg-white, .table .bg-light {
+    background-color: #252a3d !important;
+    color: #e0e0e0 !important;
+}
+
+/* RowGroup/FixedHeader/FixedColumns tweaks */
+.dtrg-group, .dtrg-start, .dtrg-end { background-color: #2d3348 !important; color: #ffffff !important; }
+.dtfh-floatingparent, .dtfh-floatingparent thead th { background-color: #2d3348 !important; color: #ffffff !important; }
+.dtfc-fixed-left, .dtfc-fixed-right, .dtfc-fixed-left .dataTables_scrollBody, .dtfc-fixed-right .dataTables_scrollBody {
+    background-color: #252a3d !important; color: #e0e0e0 !important;
+}
+
+/* ========================================
+     Simplify cards: solid borders, no highlights
+     ======================================== */
+.card { box-shadow: none !important; }
+.card-header { border-bottom: 1px solid #3a4052 !important; }
+.card-footer { border-top: 1px solid #3a4052 !important; }
+
+/* Mikrotik/Hotspot profile cards */
+.profile-card {
+    background-color: #252a3d !important;
+    color: #e0e0e0 !important;
+    border: 1px solid #3a4052 !important;
+    box-shadow: none !important;
+}
+.profile-name { color: #ffffff !important; }
+.profile-details { color: #c9c9c9 !important; }

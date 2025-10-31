@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title %> - SNMP Devices</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+  <link href="/css/responsive-admin.css" rel="stylesheet">
+  <style>
+    .status-badge { padding: 6px 10px; border-radius: 8px; font-weight: 600; font-size: 0.8rem; }
+    .status-ok { background: #163; color: #c8facc; border: 1px solid #2e7; }
+    .status-bad { background: #3a1111; color: #f8cccc; border: 1px solid #e55; }
+    .table thead th { font-size: 0.8rem; letter-spacing: .5px; text-transform: uppercase; }
+    .table td { vertical-align: middle; }
+  </style>
+  <link rel="stylesheet" href="/css/dark-theme.css">
+  <link rel="stylesheet" href="/css/theme-unify.css">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#2c3e50">
+  <link rel="apple-touch-icon" href="/img/icons/icon-192.svg">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+</head>
+<body>
+  <div class="container-fluid">
+    <div class="row">
+  <%- include('partials/admin-responsive-sidebar', { page: 'snmp', subpage: 'devices', settings: settings }) %>
+
+      <main class="col-md-10 main-content ms-sm-auto">
+        <div class="container-fluid p-4">
+          <div class="d-flex align-items-center mb-3">
+            <h2 class="me-3 mb-0"><i class="bi bi-router"></i> SNMP Devices</h2>
+            <span class="text-muted">Pantau banyak perangkat via SNMP</span>
+          </div>
+
+          <div class="card mb-3">
+            <div class="card-body d-flex gap-2 flex-wrap">
+              <button id="refreshBtn" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+              <h5 class="mb-0"><i class="bi bi-list-ul"></i> Daftar Perangkat</h5>
+              <div class="input-group input-group-sm" style="width: 260px;">
+                <span class="input-group-text"><i class="bi bi-search"></i></span>
+                <input id="searchBox" class="form-control" placeholder="Cari nama atau IP...">
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="table-responsive">
+                <table class="table table-hover align-middle" id="devicesTable">
+                  <thead>
+                    <tr>
+                      <th style="width:36px;"><input type="checkbox" disabled></th>
+                      <th>Nama Router</th>
+                      <th>Tipe</th>
+                      <th>IP Address</th>
+                      <th>Uptime</th>
+                      <th>CPU</th>
+                      <th>SNMP</th>
+                      <th style="width:160px;">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody id="devicesBody">
+                    <tr><td colspan="8" class="text-center py-4"><div class="spinner-border spinner-border-sm"></div> Memuat perangkat...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- Edit Device SNMP Settings Modal -->
+  <div class="modal fade" id="editDeviceModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="bi bi-pencil"></i> Edit SNMP Settings</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="editDeviceId">
+          <input type="hidden" id="editDeviceSource">
+          <div class="mb-3">
+            <label class="form-label">Nama Perangkat *</label>
+            <input type="text" class="form-control" id="editDeviceName" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">IP Address *</label>
+            <input type="text" class="form-control" id="editDeviceHost" required>
+            <small class="text-muted">Contoh: 192.168.1.1</small>
+          </div>
+          <hr/>
+          <div class="mb-3">
+            <label class="form-label">SNMP Community</label>
+            <input type="text" class="form-control" id="editSnmpCommunity" placeholder="public">
+            <small class="text-muted">Kosongkan untuk menggunakan global setting</small>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">SNMP Version</label>
+            <select class="form-select" id="editSnmpVersion">
+              <option value="">Default (Global)</option>
+              <option value="1">v1</option>
+              <option value="2c">v2c</option>
+              <option value="3">v3</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">SNMP Port</label>
+            <input type="number" class="form-control" id="editSnmpPort" placeholder="161">
+            <small class="text-muted">Kosongkan untuk port 161 (default)</small>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-danger me-auto" onclick="deleteDevice()"><i class="bi bi-trash"></i> Hapus Perangkat</button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+          <button type="button" class="btn btn-primary" onclick="saveDeviceSettings()"><i class="bi bi-save"></i> Simpan</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    const fmtUptime = (secs) => {
+      if (!secs && secs !== 0) return '-';
+      const d = Math.floor(secs/86400), h = Math.floor((secs%86400)/3600), m = Math.floor((secs%3600)/60);
+      return `${d}d ${h}h ${m}m`;
+    };
+
+    async function loadDevices() {
+      const tbody = document.getElementById('devicesBody');
+      tbody.innerHTML = '<tr><td colspan="8" class="text-center py-4"><div class="spinner-border spinner-border-sm"></div> Memuat perangkat...</td></tr>';
+      try {
+        const res = await fetch('/admin/snmp/devices/json');
+        const data = await res.json();
+        if (!data.success) throw new Error(data.message || 'Gagal memuat');
+        renderDevices(data.devices || []);
+      } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="8" class="text-danger">${e.message}</td></tr>`;
+      }
+    }
+
+    function renderDevices(list) {
+      const q = (document.getElementById('searchBox').value || '').toLowerCase();
+      const tbody = document.getElementById('devicesBody');
+      const rows = list
+        .filter(d => !q || d.name.toLowerCase().includes(q) || String(d.host).includes(q))
+        .map(d => {
+          const ok = !!d.snmp_ok;
+          const badge = ok ? `<span class="status-badge status-ok">CONNECTED</span>` : `<span class="status-badge status-bad">DISCONNECTED</span>`;
+          const cpu = (d.cpu || d.cpu === 0) ? `${d.cpu}%` : '-';
+          const uptime = d.uptime ? fmtUptime(d.uptime) : '-';
+          return `<tr>
+            <td><input type="checkbox" disabled></td>
+            <td><strong>${d.name}</strong></td>
+            <td>${d.type || '-'}</td>
+            <td><code>${d.host}</code></td>
+            <td>${uptime}</td>
+            <td>${cpu}</td>
+            <td>${badge}</td>
+            <td>
+              <div class="btn-group btn-group-sm">
+                <a class="btn btn-primary" href="/admin/snmp/monitor?host=${encodeURIComponent(d.host)}"><i class="bi bi-activity"></i> Monitor</a>
+                <button class="btn btn-outline-info" onclick='editDevice(${JSON.stringify(d).replace(/'/g, "&apos;")})'><i class="bi bi-pencil"></i></button>
+                <button class="btn btn-outline-secondary" onclick="probeNow('${d.host}')"><i class="bi bi-radar"></i></button>
+              </div>
+            </td>
+          </tr>`;
+        });
+      tbody.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="8" class="text-center text-muted">Tidak ada perangkat</td></tr>';
+    }
+
+    async function probeNow(host) {
+      const btns = document.querySelectorAll('button');
+      btns.forEach(b => b.disabled = true);
+      try {
+        const res = await fetch('/admin/snmp/device-info?host=' + encodeURIComponent(host));
+        await res.json();
+      } catch {}
+      finally { btns.forEach(b => b.disabled = false); loadDevices(); }
+    }
+
+    document.getElementById('refreshBtn').addEventListener('click', loadDevices);
+    document.getElementById('searchBox').addEventListener('input', () => loadDevices());
+    loadDevices();
+
+    function editDevice(device) {
+      document.getElementById('editDeviceId').value = device.id;
+      document.getElementById('editDeviceSource').value = device.source;
+      document.getElementById('editDeviceName').value = device.name;
+      document.getElementById('editDeviceHost').value = device.host;
+      document.getElementById('editSnmpCommunity').value = device.snmp_community || '';
+      document.getElementById('editSnmpVersion').value = device.snmp_version || '';
+      document.getElementById('editSnmpPort').value = device.snmp_port || '';
+      
+      const modal = new bootstrap.Modal(document.getElementById('editDeviceModal'));
+      modal.show();
+    }
+
+    async function saveDeviceSettings() {
+      const deviceId = document.getElementById('editDeviceId').value;
+      const source = document.getElementById('editDeviceSource').value;
+      const name = document.getElementById('editDeviceName').value.trim();
+      const host = document.getElementById('editDeviceHost').value.trim();
+      const snmpCommunity = document.getElementById('editSnmpCommunity').value.trim();
+      const snmpVersion = document.getElementById('editSnmpVersion').value.trim();
+      const snmpPort = document.getElementById('editSnmpPort').value.trim();
+
+      if (!name) {
+        alert('Nama perangkat harus diisi!');
+        return;
+      }
+      if (!host) {
+        alert('IP Address harus diisi!');
+        return;
+      }
+
+      const payload = {
+        name: name,
+        host: host,
+        snmp_community: snmpCommunity || null,
+        snmp_version: snmpVersion || '2c',
+        snmp_port: snmpPort ? parseInt(snmpPort) : 161
+      };
+
+      try {
+        const endpoint = source === 'nas' 
+          ? `/admin/snmp/devices/update-nas/${deviceId.replace('nas-', '')}`
+          : `/admin/snmp/devices/update-mikrotik/${deviceId.replace('mt-', '')}`;
+        
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        
+        const data = await res.json();
+        
+        if (data.success) {
+          bootstrap.Modal.getInstance(document.getElementById('editDeviceModal')).hide();
+          loadDevices();
+          alert('Perangkat berhasil diupdate!');
+        } else {
+          alert('Error: ' + (data.message || 'Gagal update'));
+        }
+      } catch (e) {
+        alert('Error: ' + e.message);
+      }
+    }
+
+    async function deleteDevice() {
+      const deviceId = document.getElementById('editDeviceId').value;
+      const source = document.getElementById('editDeviceSource').value;
+      const name = document.getElementById('editDeviceName').value;
+
+      if (!confirm(`Apakah Anda yakin ingin menghapus perangkat "${name}"?\n\nPeringatan: Data ini tidak dapat dikembalikan!`)) {
+        return;
+      }
+
+      try {
+        const endpoint = source === 'nas' 
+          ? `/admin/snmp/devices/delete-nas/${deviceId.replace('nas-', '')}`
+          : `/admin/snmp/devices/delete-mikrotik/${deviceId.replace('mt-', '')}`;
+        
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const data = await res.json();
+        
+        if (data.success) {
+          bootstrap.Modal.getInstance(document.getElementById('editDeviceModal')).hide();
+          loadDevices();
+          alert('Perangkat berhasil dihapus!');
+        } else {
+          alert('Error: ' + (data.message || 'Gagal hapus perangkat'));
+        }
+      } catch (e) {
+        alert('Error: ' + e.message);
+      }
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,72 @@
+/* Unified theme tweaks for consistency across views */
+/* Keep changes subtle and compatible with existing dark-theme.css */
+
+/* Cards: soften borders and unify radius/shadow */
+.card {
+  border: none !important;
+  border-radius: 16px !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
+  overflow: hidden;
+}
+
+.card-header {
+  border: none !important;
+  border-top-left-radius: 16px !important;
+  border-top-right-radius: 16px !important;
+}
+
+.card-body {
+  padding: 1rem 1.25rem !important;
+}
+
+/* Tables: reduce contrast and keep borders subtle */
+.table {
+  background-color: transparent !important;
+}
+
+.table td, .table th {
+  vertical-align: middle;
+  background-color: transparent !important;
+}
+
+.table thead th {
+  background-color: rgba(31, 41, 55, 0.5) !important;
+}
+
+.table-striped tbody tr:nth-of-type(odd) {
+  background-color: rgba(31, 41, 55, 0.3) !important;
+}
+
+.table-hover tbody tr:hover {
+  background-color: rgba(148, 163, 184, 0.08) !important;
+}
+
+/* DataTables specific */
+.dataTables_wrapper .table {
+  background-color: transparent !important;
+}
+
+.dataTables_wrapper .table tbody td,
+.dataTables_wrapper .table thead th {
+  background-color: transparent !important;
+}
+
+/* Ensure table-responsive container is also transparent */
+.table-responsive {
+  background-color: transparent !important;
+}
+
+/* Widgets and stats already handled locally; ensure spacing */
+.widget-row { margin-bottom: 24px; }
+
+/* Buttons: consistent rounding */
+.btn { border-radius: 10px !important; }
+
+/* Forms: unified rounding */
+.form-control, .form-select { border-radius: 10px !important; }
+
+/* Alerts: same radius */
+.alert { border-radius: 12px !important; }
+
+/* Make images and canvases respect card radius */
+.card img, .card canvas { border-radius: 12px; }

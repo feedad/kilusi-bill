@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mikrotik Server Management - Admin</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="/css/responsive-admin.css">
+    <link href="/css/dark-theme.css" rel="stylesheet">
+    <link href="/css/theme-unify.css" rel="stylesheet">
+    <link href="/css/widgets.css" rel="stylesheet">
+</head>
+<body>
+    <%- include('partials/admin-responsive-sidebar', { page: 'mikrotik-servers', settings: settings }) %>
+
+    <div class="content main-content">
+        <div class="container-fluid p-4">
+            <!-- Header Section -->
+            <div class="row mb-4">
+                <div class="col-12">
+                    <h2><i class="fas fa-network-wired text-success"></i> Mikrotik Server Management</h2>
+                    <p class="text-muted">Kelola server Mikrotik untuk PPPoE dan Hotspot</p>
+                </div>
+            </div>
+
+            <!-- Statistics Cards -->
+            <div class="row g-3 mb-4">
+                <div class="col-md-3">
+                    <div class="stats-card pppoe-total">
+                        <div class="stats-icon">
+                            <i class="fas fa-network-wired"></i>
+                        </div>
+                        <div class="stats-info">
+                            <div class="stats-label">Total Server Mikrotik</div>
+                            <div class="stats-value"><%= mikrotikServers ? mikrotikServers.length : 0 %></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stats-card pppoe-active">
+                        <div class="stats-icon">
+                            <i class="fas fa-check-circle"></i>
+                        </div>
+                        <div class="stats-info">
+                            <div class="stats-label">Server Aktif</div>
+                            <div class="stats-value"><%= mikrotikServers ? mikrotikServers.filter(m => m.is_active).length : 0 %></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stats-card pppoe-server">
+                        <div class="stats-icon">
+                            <i class="fas fa-server"></i>
+                        </div>
+                        <div class="stats-info">
+                            <div class="stats-label">PPPoE Server</div>
+                            <div class="stats-value"><%= mikrotikServers ? mikrotikServers.filter(m => m.is_pppoe_server).length : 0 %></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stats-card pppoe-offline">
+                        <div class="stats-icon">
+                            <i class="fas fa-times-circle"></i>
+                        </div>
+                        <div class="stats-info">
+                            <div class="stats-label">Server Nonaktif</div>
+                            <div class="stats-value"><%= mikrotikServers ? mikrotikServers.filter(m => !m.is_active).length : 0 %></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="d-flex justify-content-end mb-3">
+                <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addMikrotikModal">
+                    <i class="fas fa-plus"></i> Tambah Mikrotik Server
+                </button>
+            </div>
+
+            <div class="card">
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Name</th>
+                                    <th>Host</th>
+                                    <th>Port</th>
+                                    <th>Username</th>
+                                    <th>PPPoE Server</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <% if (mikrotikServers && mikrotikServers.length > 0) { %>
+                                    <% mikrotikServers.forEach(mt => { %>
+                                        <tr>
+                                            <td><%= mt.id %></td>
+                                            <td><strong><%= mt.name %></strong></td>
+                                            <td><code><%= mt.host %>:<%= mt.port %></code></td>
+                                            <td><%= mt.port %></td>
+                                            <td><%= mt.username %></td>
+                                            <td>
+                                                <% if (mt.is_pppoe_server) { %>
+                                                    <span class="badge bg-primary">Yes</span>
+                                                <% } else { %>
+                                                    <span class="badge bg-secondary">No</span>
+                                                <% } %>
+                                            </td>
+                                            <td>
+                                                <% if (mt.is_active) { %>
+                                                    <span class="badge bg-success">Active</span>
+                                                <% } else { %>
+                                                    <span class="badge bg-secondary">Inactive</span>
+                                                <% } %>
+                                            </td>
+                                            <td>
+                                                <button class="btn btn-sm btn-info" onclick='editMikrotik(<%= JSON.stringify(mt) %>)'>
+                                                    <i class="fas fa-edit"></i>
+                                                </button>
+                                                <button class="btn btn-sm btn-<%= mt.is_active ? 'warning' : 'success' %>" onclick="toggleMikrotik(<%= mt.id %>)">
+                                                    <i class="fas fa-power-off"></i>
+                                                </button>
+                                                <form action="/admin/mikrotik-servers/<%= mt.id %>/delete" method="POST" style="display:inline;">
+                                                    <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Delete this Mikrotik server?')">
+                                                        <i class="fas fa-trash"></i>
+                                                    </button>
+                                                </form>
+                                            </td>
+                                        </tr>
+                                    <% }) %>
+                                <% } else { %>
+                                    <tr>
+                                        <td colspan="8" class="text-center">No Mikrotik servers configured</td>
+                                    </tr>
+                                <% } %>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Mikrotik Modal -->
+    <div class="modal fade" id="addMikrotikModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form action="/admin/mikrotik-servers/add" method="POST">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Add Mikrotik Server</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label">Name *</label>
+                            <input type="text" class="form-control" name="name" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Host/IP *</label>
+                            <input type="text" class="form-control" name="host" placeholder="192.168.1.1" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Port *</label>
+                            <input type="number" class="form-control" name="port" value="8728" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Username *</label>
+                            <input type="text" class="form-control" name="username" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Password *</label>
+                            <input type="password" class="form-control" name="password" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Description</label>
+                            <textarea class="form-control" name="description" rows="2"></textarea>
+                        </div>
+                        <hr/>
+                        <div class="mb-3">
+                            <label class="form-label">SNMP Community</label>
+                            <input type="text" class="form-control" name="snmp_community" placeholder="public">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">SNMP Version</label>
+                            <select class="form-select" name="snmp_version">
+                                <option value="1">v1</option>
+                                <option value="2c" selected>v2c</option>
+                                <option value="3">v3</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">SNMP Port</label>
+                            <input type="number" class="form-control" name="snmp_port" value="161">
+                        </div>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" name="is_pppoe_server" value="1" checked>
+                            <label class="form-check-label">This is a PPPoE Server</label>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Add Server</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Mikrotik Modal -->
+    <div class="modal fade" id="editMikrotikModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form id="editMikrotikForm" method="POST">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Edit Mikrotik Server</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label">Name *</label>
+                            <input type="text" class="form-control" name="name" id="editName" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Host/IP *</label>
+                            <input type="text" class="form-control" name="host" id="editHost" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Port *</label>
+                            <input type="number" class="form-control" name="port" id="editPort" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Username *</label>
+                            <input type="text" class="form-control" name="username" id="editUsername" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Password *</label>
+                            <input type="password" class="form-control" name="password" id="editPassword" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Description</label>
+                            <textarea class="form-control" name="description" id="editDescription" rows="2"></textarea>
+                        </div>
+                        <hr/>
+                        <div class="mb-3">
+                            <label class="form-label">SNMP Community</label>
+                            <input type="text" class="form-control" name="snmp_community" id="editSnmpCommunity" placeholder="public">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">SNMP Version</label>
+                            <select class="form-select" name="snmp_version" id="editSnmpVersion">
+                                <option value="1">v1</option>
+                                <option value="2c">v2c</option>
+                                <option value="3">v3</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">SNMP Port</label>
+                            <input type="number" class="form-control" name="snmp_port" id="editSnmpPort" value="161">
+                        </div>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" name="is_pppoe_server" id="editPppoe" value="1">
+                            <label class="form-check-label" for="editPppoe">This is a PPPoE Server</label>
+                        </div>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" name="is_active" id="editActive" value="1">
+                            <label class="form-check-label" for="editActive">Active</label>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Update</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function editMikrotik(mt) {
+            document.getElementById('editMikrotikForm').action = `/admin/mikrotik-servers/${mt.id}/edit`;
+            document.getElementById('editName').value = mt.name;
+            document.getElementById('editHost').value = mt.host;
+            document.getElementById('editPort').value = mt.port;
+            document.getElementById('editUsername').value = mt.username;
+            document.getElementById('editPassword').value = mt.password;
+            document.getElementById('editDescription').value = mt.description || '';
+            document.getElementById('editSnmpCommunity').value = mt.snmp_community || '';
+            document.getElementById('editSnmpVersion').value = mt.snmp_version || '2c';
+            document.getElementById('editSnmpPort').value = mt.snmp_port || 161;
+            document.getElementById('editPppoe').checked = mt.is_pppoe_server == 1;
+            document.getElementById('editActive').checked = mt.is_active == 1;
+            
+            new bootstrap.Modal(document.getElementById('editMikrotikModal')).show();
+        }
+
+        function toggleMikrotik(id) {
+            if (confirm('Toggle Mikrotik server status?')) {
+                fetch(`/admin/mikrotik-servers/${id}/toggle`, { method: 'POST' })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.success) location.reload();
+                        else alert('Error toggling server status');
+                    });
+            }
+        }
+    </script>
+</body>
+</html>

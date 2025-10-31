@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Customer Management - Admin</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <link href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/css/responsive-admin.css">
+  <link href="/css/dark-theme.css" rel="stylesheet">
+  <link href="/css/theme-unify.css" rel="stylesheet">
+  <style>
+    /* Dark Theme */
+    body { 
+      background: #1a1d29 !important;
+      color: #e0e0e0;
+    }
+    
+    .main-content {
+      background: #1a1d29;
+    }
+    
+    /* Mobile responsive fixes */
+    @media (max-width: 767.98px) {
+      .main-content {
+        margin-top: 70px !important;
+        padding-top: 10px !important;
+        z-index: 1;
+      }
+    }
+    
+    /* Card Dark Theme */
+    .card {
+      background: #252a3d !important;
+      border: 1px solid #3a4052;
+      color: #e0e0e0;
+    }
+    
+    .card-header {
+      background: #2d3348 !important;
+      border-bottom: 1px solid #3a4052;
+      color: #e0e0e0;
+    }
+    
+    .card-body {
+      color: #e0e0e0;
+    }
+    
+    /* Text Colors */
+    h2, h3, h4, h5, h6 {
+      color: #ffffff !important;
+    }
+    
+    p, span, label, .text-muted {
+      color: #b8b8b8 !important;
+    }
+    
+    strong {
+      color: #e0e0e0;
+    }
+    
+    /* Table Dark Theme */
+    .table {
+      color: #e0e0e0 !important;
+      border-color: #3a4052;
+    }
+    
+    .table thead th {
+      background: #2d3348;
+      border-color: #3a4052;
+      color: #ffffff !important;
+    }
+    
+    .table tbody tr {
+      background: #252a3d;
+      border-color: #3a4052;
+    }
+    
+    .table tbody tr:hover {
+      background: #2d3348;
+    }
+    
+    .table td, .table th {
+      border-color: #3a4052;
+    }
+    
+    /* DataTables dark theme */
+    .dataTables_wrapper .dataTables_length,
+    .dataTables_wrapper .dataTables_filter,
+    .dataTables_wrapper .dataTables_info,
+    .dataTables_wrapper .dataTables_paginate {
+      color: #e0e0e0;
+    }
+    
+    .dataTables_wrapper .dataTables_paginate .paginate_button {
+      color: #e0e0e0 !important;
+    }
+    
+    .dataTables_wrapper .dataTables_paginate .paginate_button:hover {
+      background: #2d3348;
+      border-color: #3a4052;
+    }
+    
+    /* Form controls dark theme */
+    .form-control, .form-select {
+      background-color: #1a1d29;
+      border-color: #3a4052;
+      color: #e0e0e0;
+    }
+    
+    .form-control:focus, .form-select:focus {
+      background-color: #1a1d29;
+      border-color: #4a5fc1;
+      color: #e0e0e0;
+    }
+    
+    .modal-content {
+      background-color: #252a3d;
+      border-color: #3a4052;
+    }
+    
+    .modal-header {
+      background: #2d3348;
+      border-bottom-color: #3a4052;
+    }
+    
+    .modal-footer {
+      border-top-color: #3a4052;
+    }
+    
+    .alert-light {
+      background-color: #2d3348;
+      border-color: #3a4052;
+      color: #e0e0e0;
+    }
+    
+    .btn-action {
+      padding: 0.25rem 0.5rem;
+      font-size: 0.875rem;
+    }
+    
+    #customersTable { width: 100% !important; }
+    #customersTable td, #customersTable th { white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <div class="container-fluid">
+    <div class="row">
+      <%- include('partials/admin-responsive-sidebar', { page: 'customers', settings: settings }) %>
+      
+      <main class="col-md-10 main-content ms-sm-auto">
+        <div class="container-fluid p-4">
+          <div class="row mb-4">
+            <div class="col-12">
+              <h2><i class="bi bi-people"></i> Manajemen Pelanggan</h2>
+              <p class="text-muted">Kelola data pelanggan dan paket berlangganan</p>
+            </div>
+          </div>
+
+      <% if (success) { %>
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+          <i class="bi bi-check-circle"></i> <%= success %>
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+      <% } %>
+      <% if (error) { %>
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+          <i class="bi bi-exclamation-triangle"></i> <%= error %>
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+      <% } %>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <h5 class="mb-0"><i class="bi bi-people"></i> Daftar Pelanggan</h5>
+            <div class="btn-group" role="group">
+              <button class="btn btn-success btn-sm" onclick="syncFromGenieACS()" title="Sync customer dari GenieACS berdasarkan tag">
+                <i class="bi bi-arrow-repeat me-1"></i>Sync GenieACS
+              </button>
+              <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#assignPackageModal">
+                <i class="bi bi-plus"></i> Tambah Pelanggan
+              </button>
+              <button class="btn btn-outline-light btn-sm" data-bs-toggle="modal" data-bs-target="#addCustomerOnlyModal">
+                <i class="bi bi-person-plus"></i> Tambah Hanya Pelanggan
+              </button>
+              <button class="btn btn-danger btn-sm" onclick="deleteSelectedCustomers()" id="deleteSelectedBtn" disabled>
+                <i class="bi bi-trash me-1"></i>Hapus Terpilih
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="card-body">
+          <!-- Info Workflow -->
+          <div class="alert alert-light border mb-3">
+            <div class="row">
+              <div class="col-md-8">
+                <h6 class="mb-2"><i class="bi bi-lightbulb text-warning me-2"></i><strong>Workflow Praktis Customer Management:</strong></h6>
+                <div class="small">
+                  <span class="badge bg-primary me-2">1</span>Tambah ONU ke GenieACS<br>
+                  <span class="badge bg-primary me-2">2</span>Tag ONU dengan nomor HP (format: <code>phone:081234567890</code> atau langsung <code>081234567890</code>)<br>
+                  <span class="badge bg-primary me-2">3</span>Klik tombol <strong>"Sync GenieACS"</strong> untuk import customer otomatis<br>
+                  <span class="badge bg-primary me-2">4</span>Klik <strong>"Tambah Pelanggan"</strong> untuk assign paket → Customer siap ditagih!
+                </div>
+              </div>
+              <div class="col-md-4 text-end">
+                <div class="small text-muted">
+                  <i class="bi bi-info-circle me-1"></i>Customer dengan tag nomor HP akan otomatis tersync
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="table-responsive">
+            <table class="table table-hover table-striped table-dark align-middle text-nowrap" id="customersTable">
+              <thead>
+                <tr>
+                  <th class="text-center">
+                    <input type="checkbox" id="selectAllCustomers" class="form-check-input">
+                  </th>
+                  <th class="text-center">Status Koneksi</th>
+                  <th class="text-start">ID Pelanggan</th>
+                  <th class="text-start">Nama</th>
+                  <th class="text-start">Alamat</th>
+                  <th class="text-start">No. HP</th>
+                  <th class="text-start">Paket</th>
+                  <th class="text-end">Harga</th>
+                  <th class="text-start">PPPoE User</th>
+                  <th class="text-start">PPPoE Pass</th>
+                  <th class="text-start">Status Bayar</th>
+                  <th class="text-start">Tgl Isolir</th>
+                  <th class="text-start">Area</th>
+                  <th class="text-start">Username</th>
+                  <th class="text-start">Auto-Isolir</th>
+                  <th class="text-center">Aksi</th>
+                </tr>
+              </thead>
+              <tbody>
+                <!-- Data will be loaded by DataTables -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+</div>
+
+  <!-- Assign Package Modal -->
+  <div class="modal fade" id="assignPackageModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Tambah Pelanggan & Assign Paket</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <form method="POST" action="/admin/billing/customers/assign-package">
+          <div class="modal-body">
+            <div class="mb-3">
+              <label class="form-label">Nomor HP</label>
+              <input type="text" class="form-control" name="phone" placeholder="081234567890" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Nama Lengkap (Opsional)</label>
+              <input type="text" class="form-control" name="name" placeholder="Nama pelanggan">
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Paket</label>
+              <select class="form-select" name="package_id" required>
+                <option value="">Pilih Paket...</option>
+                <% packages.forEach(pkg => { %>
+                  <% if (pkg.is_active) { %>
+                    <option value="<%= pkg.id %>"><%= pkg.name %> - Rp <%= pkg.price.toLocaleString('id-ID') %></option>
+                  <% } %>
+                <% }) %>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">PPPoE Username (Opsional)</label>
+              <input type="text" class="form-control" name="pppoe_username" placeholder="user123">
+              <small class="text-muted">Kosongkan jika belum ada PPPoE user</small>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">PPPoE Password (Opsional)</label>
+              <input type="text" class="form-control" name="pppoe_password" placeholder="1234567">
+              <small class="text-muted">Default: 1234567 jika dikosongkan</small>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Tanggal Pasang (Opsional)</label>
+              <input type="date" class="form-control" name="install_date">
+              <small class="text-muted">Format username PPPoE otomatis: YYYYMMDD + 5-digit ID pelanggan</small>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Area (Opsional)</label>
+              <input type="text" class="form-control" name="area" placeholder="Misal: Blok A / RT01 / RW02">
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Alamat (Opsional)</label>
+              <textarea class="form-control" name="address" rows="2" placeholder="Alamat lengkap"></textarea>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+            <button type="submit" class="btn btn-primary">Simpan</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Customer Only Modal -->
+  <div class="modal fade" id="addCustomerOnlyModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Tambah Hanya Data Pelanggan</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <form method="POST" action="/admin/billing/customers/update">
+          <div class="modal-body">
+            <div class="mb-3">
+              <label class="form-label">Nomor HP</label>
+              <input type="text" class="form-control" name="phone" placeholder="081234567890" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Nama Lengkap</label>
+              <input type="text" class="form-control" name="name" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Username (Opsional)</label>
+              <input type="text" class="form-control" name="username">
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Alamat (Opsional)</label>
+              <textarea class="form-control" name="address" rows="2"></textarea>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Area (Opsional)</label>
+              <input type="text" class="form-control" name="area" placeholder="Misal: Blok A / RT01 / RW02">
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Tanggal Pasang (Opsional)</label>
+              <input type="date" class="form-control" name="install_date">
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+            <button type="submit" class="btn btn-primary">Simpan</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Customer Detail Modal -->
+  <div class="modal fade" id="customerDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Detail Pelanggan</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body" id="customerDetailContent">
+          <div class="text-center">
+            <div class="spinner-border" role="status">
+              <span class="visually-hidden">Loading...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Customer Modal -->
+  <div class="modal fade" id="editCustomerModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Edit Data Pelanggan</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <form method="POST" action="/admin/billing/customers/update" id="editCustomerForm">
+          <div class="modal-body">
+            <div class="row">
+              <div class="col-md-6">
+                <div class="mb-3">
+                  <label class="form-label">Nomor HP</label>
+                  <input type="text" class="form-control" name="phone" id="edit_phone" readonly>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Nama Lengkap</label>
+                  <input type="text" class="form-control" name="name" id="edit_name" required>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Username</label>
+                  <input type="text" class="form-control" name="username" id="edit_username">
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">PPPoE Username</label>
+                  <input type="text" class="form-control" name="pppoe_username" id="edit_pppoe_username">
+                  <small class="text-muted">Username untuk koneksi PPPoE</small>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">PPPoE Password</label>
+                  <input type="text" class="form-control" name="pppoe_password" id="edit_pppoe_password">
+                  <small class="text-muted">Password untuk koneksi PPPoE</small>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Paket</label>
+                  <select class="form-select" name="package_id" id="edit_package_id">
+                    <option value="">Pilih Paket...</option>
+                    <% packages.forEach(pkg => { %>
+                      <% if (pkg.is_active) { %>
+                        <option value="<%= pkg.id %>"><%= pkg.name %> - Rp <%= pkg.price.toLocaleString('id-ID') %></option>
+                      <% } %>
+                    <% }) %>
+                  </select>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">NAS Server (RADIUS)</label>
+                  <select class="form-select" name="nas_server_id" id="edit_nas_server_id">
+                    <% if (nasServers && nasServers.length > 0) { %>
+                      <% nasServers.forEach(nas => { %>
+                        <option value="<%= nas.id %>"><%= nas.name %> (<%= nas.host %>)</option>
+                      <% }) %>
+                    <% } else { %>
+                      <option value="1">Default NAS</option>
+                    <% } %>
+                  </select>
+                  <small class="text-muted">Server RADIUS untuk autentikasi</small>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Mikrotik PPPoE Server</label>
+                  <select class="form-select" name="mikrotik_server_id" id="edit_mikrotik_server_id">
+                    <% if (mikrotikServers && mikrotikServers.length > 0) { %>
+                      <% mikrotikServers.forEach(mt => { %>
+                        <option value="<%= mt.id %>"><%= mt.name %> (<%= mt.host %>)</option>
+                      <% }) %>
+                    <% } else { %>
+                      <option value="1">Main PPPoE Server</option>
+                    <% } %>
+                  </select>
+                  <small class="text-muted">Server PPPoE tempat secret dibuat</small>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="mb-3">
+                  <label class="form-label">Area</label>
+                  <input type="text" class="form-control" name="area" id="edit_area" placeholder="Misal: Blok A / RT01 / RW02">
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Alamat</label>
+                  <textarea class="form-control" name="address" id="edit_address" rows="2" placeholder="Alamat lengkap"></textarea>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Tanggal Pasang</label>
+                  <input type="date" class="form-control" name="install_date" id="edit_install_date">
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Status Pembayaran</label>
+                  <select class="form-select" name="payment_status" id="edit_payment_status">
+                    <option value="unpaid">Belum Lunas</option>
+                    <option value="paid">Lunas</option>
+                  </select>
+                </div>
+                <div class="mb-3">
+                  <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" name="enable_isolir" id="edit_enable_isolir" value="true">
+                    <label class="form-check-label" for="edit_enable_isolir">
+                      Aktifkan Auto-Isolir
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+            <button type="submit" class="btn btn-primary">Simpan Perubahan</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+  <script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
+  <script>
+    let customersTable;
+
+    $(document).ready(function() {
+      // Initialize DataTable with server-side processing
+      customersTable = $('#customersTable').DataTable({
+        processing: true,
+        serverSide: true,
+        ajax: {
+          url: '/admin/billing/api/customers',
+          dataSrc: 'data'
+        },
+        autoWidth: false,
+        scrollX: true,
+        responsive: false,
+        columns: [
+          { data: null, orderable: false, className: 'text-center', render: (d, t, row) => `<input type="checkbox" class="form-check-input customer-checkbox" value="${row.phone}">` },
+          { data: 'connection_status', className: 'text-center', render: (v) => {
+            if (v === 'online') return '<span class="badge bg-success">Online</span>';
+            if (v === 'suspended') return '<span class="badge bg-danger">Suspended</span>';
+            return '<span class="badge bg-secondary">Offline</span>';
+          }},
+          { data: 'customer_id', className: 'text-start' },
+          { data: 'name', className: 'text-start' },
+          { data: 'address', className: 'text-start' },
+          { data: 'phone', className: 'text-start' },
+          { data: 'package_name', className: 'text-start' },
+          { data: 'package_price', className: 'text-end', render: (v) => v ? `Rp ${parseFloat(v).toLocaleString('id-ID')}` : '-' },
+          { data: 'pppoe_username', className: 'text-start', render: (v) => v ? `<code>${v}</code>` : '<span class="text-muted">-</span>' },
+          { data: 'pppoe_password', className: 'text-start', render: (v) => v ? `<code>${v}</code>` : '<span class="text-muted">-</span>' },
+          { data: 'payment_status', className: 'text-start', render: (v) => {
+            if (v === 'paid') return '<span class="badge bg-success">Lunas</span>';
+            if (v === 'unpaid') return '<span class="badge bg-warning">Belum Lunas</span>';
+            return '<span class="badge bg-secondary">-</span>';
+          }},
+          { data: 'isolir_scheduled_date', className: 'text-start', render: (v) => v ? new Date(v).toLocaleDateString('id-ID') : '-' },
+          { data: 'area', className: 'text-start' },
+          { data: 'username', className: 'text-start' },
+          { data: 'enable_isolir', orderable: false, className: 'text-start', render: (v) => v ? '<span class="badge bg-success">ON</span>' : '<span class="badge bg-secondary">OFF</span>' },
+          { data: null, orderable: false, className: 'text-center', render: (d, t, row) => {
+            let btns = `<button class=\"btn btn-info btn-action\" onclick=\"editCustomer('${row.phone}')\" title=\"Edit\"><i class=\"bi bi-pencil\"></i></button>`;
+            btns += ` <button class=\"btn btn-primary btn-action\" onclick=\"viewCustomer('${row.phone}')\" data-bs-toggle=\"modal\" data-bs-target=\"#customerDetailModal\" title=\"Detail\"><i class=\"bi bi-eye\"></i></button>`;
+            if (row.package_id) {
+              btns += ` <button class=\"btn btn-success btn-action\" onclick=\"createInvoice('${row.phone}', '${row.package_id}')\" title=\"Buat Invoice\"><i class=\"bi bi-receipt\"></i></button>`;
+            }
+            btns += ` <button class=\"btn btn-danger btn-action\" onclick=\"deleteCustomer('${row.phone}', '${row.name || row.phone}')\" title=\"Hapus\"><i class=\"bi bi-trash\"></i></button>`;
+            return btns;
+          }}
+        ],
+        language: { url: '//cdn.datatables.net/plug-ins/1.13.4/i18n/id.json' },
+        drawCallback: function() {
+          initializeCustomerCheckboxes();
+        }
+      });
+
+      // Auto-hide alerts
+      setTimeout(function() {
+        $('.alert').fadeOut();
+      }, 4000);
+    });
+
+    function initializeCustomerCheckboxes() {
+      const selectAllCheckbox = document.getElementById('selectAllCustomers');
+      const customerCheckboxes = document.querySelectorAll('.customer-checkbox');
+      const deleteSelectedBtn = document.getElementById('deleteSelectedBtn');
+      
+      selectAllCheckbox.addEventListener('change', function() {
+        customerCheckboxes.forEach(checkbox => {
+          checkbox.checked = this.checked;
+        });
+        updateDeleteButtonState();
+      });
+      
+      customerCheckboxes.forEach(checkbox => {
+        checkbox.addEventListener('change', function() {
+          updateDeleteButtonState();
+        });
+      });
+      
+      function updateDeleteButtonState() {
+        const checkedCount = document.querySelectorAll('.customer-checkbox:checked').length;
+        deleteSelectedBtn.disabled = checkedCount === 0;
+        if (checkedCount > 0) {
+          deleteSelectedBtn.innerHTML = `<i class="bi bi-trash me-1"></i>Hapus Terpilih (${checkedCount})`;
+        } else {
+          deleteSelectedBtn.innerHTML = `<i class="bi bi-trash me-1"></i>Hapus Terpilih`;
+        }
+      }
+    }
+
+    function syncFromGenieACS() {
+      if (!confirm('Sync customer dari GenieACS? Customer dengan tag nomor HP akan ditambahkan.')) return;
+      
+      $.post('/admin/billing/customers/sync-genieacs', function(res) {
+        alert(res.message || 'Sync selesai');
+        customersTable.ajax.reload();
+      }).fail(function() {
+        alert('Gagal sync dari GenieACS');
+      });
+    }
+
+    function viewCustomer(phone) {
+      $('#customerDetailContent').html('<div class="text-center"><div class="spinner-border"></div></div>');
+      
+      $.get(`/admin/billing/api/customer/${phone}`, function(data) {
+        let c = data && data.customer ? data.customer : (data || {});
+        let html = `
+          <div class="row">
+            <div class="col-md-6">
+              <p><strong>Nomor HP:</strong> ${c.phone || '-'}</p>
+              <p><strong>ID Pelanggan:</strong> ${c.customer_id || '-'}</p>
+              <p><strong>Nama:</strong> ${c.name || '-'}</p>
+              <p><strong>Alamat:</strong> ${c.address || '-'}</p>
+              <p><strong>Area:</strong> ${c.area || '-'}</p>
+              <p><strong>Username:</strong> ${c.username || '-'}</p>
+            </div>
+            <div class="col-md-6">
+              <p><strong>Paket:</strong> ${c.package_name || '-'}</p>
+              <p><strong>Harga:</strong> ${c.package_price ? 'Rp ' + parseFloat(c.package_price).toLocaleString('id-ID') : '-'}</p>
+              <p><strong>PPPoE User:</strong> ${c.pppoe_username ? '<code>' + c.pppoe_username + '</code>' : '-'}</p>
+              <p><strong>PPPoE Pass:</strong> ${c.pppoe_password ? '<code>' + c.pppoe_password + '</code>' : '-'}</p>
+              <p><strong>Tanggal Pasang:</strong> ${c.install_date ? new Date(c.install_date).toLocaleDateString('id-ID') : '-'}</p>
+              <p><strong>Status:</strong> ${c.payment_status === 'paid' ? '<span class="badge bg-success">Lunas</span>' : '<span class="badge bg-warning">Belum Lunas</span>'}</p>
+            </div>
+          </div>
+        `;
+        $('#customerDetailContent').html(html);
+      }).fail(function() {
+        $('#customerDetailContent').html('<p class="text-danger">Gagal memuat data pelanggan</p>');
+      });
+    }
+
+    function editCustomer(phone) {
+      // Load customer data
+      $.get(`/admin/billing/api/customer/${phone}`, function(data) {
+        let c = data && data.customer ? data.customer : (data || {});
+        
+        // Populate form fields
+        $('#edit_phone').val(c.phone || '');
+        $('#edit_name').val(c.name || '');
+        $('#edit_username').val(c.username || '');
+        $('#edit_pppoe_username').val(c.pppoe_username || '');
+        $('#edit_pppoe_password').val(c.pppoe_password || '');
+        $('#edit_area').val(c.area || '');
+        $('#edit_address').val(c.address || '');
+        $('#edit_package_id').val(c.package_id || '');
+        $('#edit_payment_status').val(c.payment_status || 'unpaid');
+        
+        // Set NAS server and Mikrotik server
+        $('#edit_nas_server_id').val(c.nas_server_id || 1);
+        $('#edit_mikrotik_server_id').val(c.mikrotik_server_id || 1);
+        
+        // Handle install_date
+        if (c.install_date) {
+          const date = new Date(c.install_date);
+          const formattedDate = date.toISOString().split('T')[0];
+          $('#edit_install_date').val(formattedDate);
+        } else {
+          $('#edit_install_date').val('');
+        }
+        
+        // Handle enable_isolir checkbox
+        $('#edit_enable_isolir').prop('checked', c.enable_isolir === true);
+        
+        // Show modal
+        const modal = new bootstrap.Modal(document.getElementById('editCustomerModal'));
+        modal.show();
+      }).fail(function() {
+        alert('Gagal memuat data pelanggan');
+      });
+    }
+
+    function createInvoice(phone, packageId) {
+      if (!confirm('Buat tagihan baru untuk pelanggan ini?')) return;
+      
+      $.post('/admin/billing/invoices/create', { customer_phone: phone, package_id: packageId }, function(res) {
+        alert(res.message || 'Tagihan berhasil dibuat');
+        customersTable.ajax.reload();
+      }).fail(function() {
+        alert('Gagal membuat tagihan');
+      });
+    }
+
+    function deleteCustomer(phone, name) {
+      if (!confirm(`Hapus pelanggan ${name}? Data tidak dapat dikembalikan!`)) return;
+      
+      $.post('/admin/billing/customers/delete', { phone: phone }, function(res) {
+        alert(res.message || 'Pelanggan berhasil dihapus');
+        customersTable.ajax.reload();
+      }).fail(function() {
+        alert('Gagal menghapus pelanggan');
+      });
+    }
+
+    function deleteSelectedCustomers() {
+      const selectedPhones = Array.from(document.querySelectorAll('.customer-checkbox:checked')).map(cb => cb.value);
+      
+      if (selectedPhones.length === 0) {
+        alert('Pilih minimal 1 pelanggan untuk dihapus');
+        return;
+      }
+      
+      if (!confirm(`Hapus ${selectedPhones.length} pelanggan terpilih? Data tidak dapat dikembalikan!`)) return;
+      
+      $.post('/admin/billing/customers/delete-multiple', { phones: selectedPhones }, function(res) {
+        alert(res.message || 'Pelanggan berhasil dihapus');
+        customersTable.ajax.reload();
+      }).fail(function() {
+        alert('Gagal menghapus pelanggan');
+      });
+    }
+  </script>
+</body>
+</html>
