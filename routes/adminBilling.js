@@ -227,9 +227,9 @@ router.post('/messages/send-invoice-batch', adminAuth, async (req, res) => {
     const sendDelayMs = parseInt(getSetting('wa_send_delay_ms', '1200'));
     for (const p of uniquePhones) {
       try {
-        const customer = billing.getCustomerByPhone(p);
+        const customer = await billing.getCustomerByPhone(p);
         if (!customer) { failed++; continue; }
-        const invs = billing.getInvoicesByPhone(p) || [];
+        const invs = await billing.getCustomerInvoices(customer.id) || [];
         if (!invs.length) { failed++; continue; }
         const unpaid = invs.filter(i => i.status === 'unpaid');
         const latest = (arr) => arr.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
@@ -275,13 +275,13 @@ router.post('/messages/send-invoice', adminAuth, async (req, res) => {
     // Normalisasi nomor ke format 62xxxxxxxxxxx (untuk konsistensi billing dan WhatsApp)
     let cleanPhone = normalizePhoneLocal(phone);
 
-    const customer = billing.getCustomerByPhone(cleanPhone);
+    const customer = await billing.getCustomerByPhone(cleanPhone);
     if (!customer) {
       return res.redirect('/admin/billing?error=' + encodeURIComponent('Pelanggan tidak ditemukan di sistem billing'));
     }
 
     // Ambil tagihan: prioritas tagihan belum lunas terbaru, jika tidak ada gunakan tagihan terbaru
-    const invs = billing.getInvoicesByPhone(cleanPhone) || [];
+    const invs = await billing.getCustomerInvoices(customer.id) || [];
     if (!invs || invs.length === 0) {
       return res.redirect('/admin/billing?error=' + encodeURIComponent('Pelanggan belum memiliki tagihan'));
     }
@@ -1336,8 +1336,8 @@ router.get('/api/customer/:phone', adminAuth, async (req, res) => {
     } catch {}
     
     // Get billing data
-    const customer = billing.getCustomerByPhone(normalizedPhone);
-    const invoices = billing.getInvoicesByPhone(normalizedPhone);
+    const customer = await billing.getCustomerByPhone(normalizedPhone);
+    const invoices = customer ? await billing.getCustomerInvoices(customer.id) : [];
     
     res.json({ 
       success: true, 

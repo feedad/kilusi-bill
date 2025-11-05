@@ -353,7 +353,7 @@ async function sendIsolirNotification(customer) {
     // Ambil invoice terbaru (prioritas yang belum lunas)
     let invoice = null;
     try {
-      const invs = billing.getInvoicesByPhone(customer.phone) || [];
+      const invs = await billing.getCustomerInvoices(customer.id) || [];
       const unpaid = invs.filter(i => i.status === 'unpaid');
       const latest = (arr) => arr.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
       invoice = unpaid.length > 0 ? latest(unpaid) : latest(invs);

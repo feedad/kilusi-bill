@@ -563,7 +563,7 @@ async function handlePaymentCommand(remoteJid, invoiceId) {
         return;
       }
 
-      const invoices = billing.getInvoicesByPhone(cleanPhone) || [];
+      const invoices = await billing.getCustomerInvoices(customer.id) || [];
       const unpaid = invoices.filter(i => i.status === 'unpaid');
       if (unpaid.length === 0) {
         await safeSend(remoteJid, { text: formatBillingMessage(`ℹ️ Tidak ada tagihan UNPAID untuk ${customer.name || cleanPhone}.`) });

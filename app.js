@@ -1409,24 +1409,25 @@ const backupSystem = require('./config/backup-system');
 backupSystem.initialize();
 
 // Initialize RADIUS server
-const radiusServer = require('./config/radius-server');
+// DISABLED: Using FreeRADIUS in Docker instead of Node.js RADIUS server
+// const radiusServer = require('./config/radius-server');
 const radiusSync = require('./config/radius-sync');
 
 (async function initializeRadius() {
     try {
-        const radiusEnabled = getSetting('radius_server_enabled', 'true');
+        // Node.js RADIUS server disabled - using FreeRADIUS in Docker
+        logger.info('⏭️  Node.js RADIUS server disabled - using FreeRADIUS in Docker');
         
+        // Keep sync functionality for FreeRADIUS integration
+        const radiusEnabled = getSetting('radius_server_enabled', 'true');
         if (radiusEnabled === 'true') {
-            logger.info('🔐 Starting RADIUS server...');
-            await radiusServer.startRadiusServer();
-            
             // Auto sync customers and packages on startup
             const autoSyncOnStartup = getSetting('radius_auto_sync_on_startup', 'true');
             if (autoSyncOnStartup === 'true') {
-                logger.info('🔄 Syncing customers to RADIUS...');
+                logger.info('🔄 Syncing customers to FreeRADIUS...');
                 await radiusSync.syncCustomersToRadius();
                 
-                logger.info('🔄 Syncing packages to RADIUS...');
+                logger.info('🔄 Syncing packages to FreeRADIUS...');
                 await radiusSync.syncPackagesToRadius();
             }
             
@@ -1440,36 +1441,26 @@ const radiusSync = require('./config/radius-sync');
                     logger.info('🔄 Running scheduled packages sync...');
                     await radiusSync.syncPackagesToRadius();
                 }, syncInterval * 60 * 1000);
-                logger.info(`✅ RADIUS auto-sync configured: every ${syncInterval} minutes`);
+                logger.info(`✅ FreeRADIUS auto-sync configured: every ${syncInterval} minutes`);
             }
         } else {
-            logger.info('⏭️  RADIUS server disabled in settings');
+            logger.info('⏭️  FreeRADIUS sync disabled in settings');
         }
     } catch (error) {
-        logger.error(`❌ Failed to initialize RADIUS server: ${error.message}`);
+        logger.error(`❌ Failed to initialize RADIUS sync: ${error.message}`);
     }
 })();
 
 // Handle graceful shutdown
 process.on('SIGINT', async () => {
     logger.info('🛑 Shutting down gracefully...');
-    try {
-        await radiusServer.stopRadiusServer();
-        logger.info('✅ RADIUS server stopped');
-    } catch (error) {
-        logger.error(`Error stopping RADIUS server: ${error.message}`);
-    }
+    // Node.js RADIUS server disabled - using FreeRADIUS in Docker
     process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
     logger.info('🛑 Shutting down gracefully...');
-    try {
-        await radiusServer.stopRadiusServer();
-        logger.info('✅ RADIUS server stopped');
-    } catch (error) {
-        logger.error(`Error stopping RADIUS server: ${error.message}`);
-    }
+    // Node.js RADIUS server disabled - using FreeRADIUS in Docker
     process.exit(0);
 });
 
