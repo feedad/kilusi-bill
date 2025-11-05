@@ -1,0 +1,54 @@
+# SQL module configuration for FreeRADIUS 3.2
+# Optimized for PostgreSQL with high performance for 2000+ customers
+
+sql {
+    driver = "rlm_sql_postgresql"
+    dialect = "postgresql"
+
+    # Database connection settings
+    server = "${DB_HOST}"
+    port = ${DB_PORT}
+    login = "${DB_USER}"
+    password = "${DB_PASSWORD}"
+    radius_db = "${DB_NAME}"
+
+    # Connection pool optimized for high concurrency
+    pool {
+        start = ${DB_POOL_MIN:-20}
+        min = ${DB_POOL_MIN:-20}
+        max = ${DB_POOL_MAX:-200}
+        spare = 20
+        uses = 0
+        retry_delay = 30
+        lifetime = 0
+        idle_timeout = 60
+    }
+
+    # Read NAS clients from database
+    read_clients = yes
+    client_table = "nas_servers"
+
+    # Table configuration
+    acct_table1 = "radacct"
+    acct_table2 = "radacct"
+    authcheck_table = "radcheck"
+    authreply_table = "radreply"
+    groupcheck_table = "radgroupcheck"
+    groupreply_table = "radgroupreply"
+    usergroup_table = "radusergroup"
+    nas_table = "nas_servers"
+
+    # Include custom queries
+    $INCLUDE ${modconfdir}/sql/main/${dialect}/queries.conf
+
+    # Post-auth logging
+    postauth_table = "radpostauth"
+
+    # Accounting options for high performance
+    accounting {
+        reference = "Session-Id"
+    }
+}
+
+# Custom PostgreSQL queries optimized for 2000+ users
+$INCLUDE ${modconfdir}/sql/main/postgresql/queries.conf

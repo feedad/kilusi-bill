@@ -873,7 +873,25 @@ router.post('/invoices/create', adminAuth, async (req, res) => {
     
     const normalizedPhone = normalizePhoneLocal(customer_phone);
     const safeAmount = toFiniteNumber(amount, undefined);
-    const invoice = billing.createInvoice(normalizedPhone, package_id, safeAmount);
+    
+    // Get customer by phone to get customer_id
+    const customer = await billing.getCustomerByPhone(normalizedPhone);
+    if (!customer) {
+      return res.redirect('/admin/billing?error=' + encodeURIComponent('Pelanggan tidak ditemukan'));
+    }
+    
+    // Get package to get price if amount not provided
+    const pkg = await billing.getPackageById(package_id);
+    const finalAmount = safeAmount || (pkg ? pkg.price : 0);
+    
+    const invoice = await billing.createInvoice({
+      customer_id: customer.id,
+      package_id: package_id,
+      amount: finalAmount,
+      due_date: new Date(new Date().setDate(parseInt(getSetting('billing_due_date', '1')))),
+      status: 'unpaid',
+      notes: 'Invoice created manually'
+    });
     
     if (invoice) {
       res.redirect('/admin/billing?success=' + encodeURIComponent('Tagihan berhasil dibuat'));
@@ -1341,7 +1359,7 @@ router.post('/generate-monthly-invoices', adminAuth, async (req, res) => {
     for (const customer of customers) {
       if (customer.package_id && customer.status === 'active') {
         // Check if invoice for this month already exists
-        const invoices = billing.getInvoicesByPhone(customer.phone);
+        const invoices = await billing.getCustomerInvoices(customer.id);
         const currentMonth = new Date().getMonth();
         const currentYear = new Date().getFullYear();
         
@@ -1351,7 +1369,14 @@ router.post('/generate-monthly-invoices', adminAuth, async (req, res) => {
         });
         
         if (!existingInvoice) {
-          const invoice = billing.createInvoice(customer.phone, customer.package_id, customer.package_price);
+          const invoice = await billing.createInvoice({
+            customer_id: customer.id,
+            package_id: customer.package_id,
+            amount: customer.package_price,
+            due_date: new Date(currentYear, currentMonth, parseInt(getSetting('billing_due_date', '1'))),
+            status: 'unpaid',
+            notes: `Invoice bulan ${currentMonth + 1}/${currentYear}`
+          });
           if (invoice) generated++;
         }
       }

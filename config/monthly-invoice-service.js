@@ -186,7 +186,7 @@ async function generateMonthlyInvoices() {
         }
         
         // Check if invoice for this month already exists
-        const customerInvoices = billing.getInvoicesByPhone(customer.phone);
+        const customerInvoices = await billing.getCustomerInvoices(customer.id);
         const existingInvoice = customerInvoices.find(inv => {
           const invDate = new Date(inv.created_at);
           return invDate.getMonth() === currentMonth && 
@@ -194,17 +194,24 @@ async function generateMonthlyInvoices() {
         });
         
         if (existingInvoice) {
-          logger.info(`📄 Invoice already exists for ${customer.phone} (${customer.name}) - ${currentMonth + 1}/${currentYear}`);
+          logger.info(`📄 Invoice already exists for ${customer.id} - ${customer.phone} (${customer.name}) - ${currentMonth + 1}/${currentYear}`);
           skippedCount++;
           continue;
         }
         
         // Create new monthly invoice
-        const invoice = billing.createInvoice(customer.phone, customer.package_id, customer.package_price);
+        const invoice = await billing.createInvoice({
+          customer_id: customer.id,
+          package_id: customer.package_id,
+          amount: customer.package_price,
+          due_date: new Date(currentYear, currentMonth, parseInt(getSetting('billing_due_date', '1'))),
+          status: 'unpaid',
+          notes: `Invoice bulan ${currentMonth + 1}/${currentYear}`
+        });
         
         if (invoice) {
           generatedCount++;
-          logger.info(`✅ Generated invoice ${invoice.invoice_number} for ${customer.phone} (${customer.name}) - Rp ${customer.package_price.toLocaleString('id-ID')}`);
+          logger.info(`✅ Generated invoice ${invoice.invoice_number} for customer ID ${customer.id} - ${customer.phone} (${customer.name}) - Rp ${customer.package_price.toLocaleString('id-ID')}`);
           
           // Send WhatsApp notification to customer (with delay)
           await sendInvoiceNotification(customer, invoice);
@@ -214,12 +221,12 @@ async function generateMonthlyInvoices() {
           
         } else {
           errorCount++;
-          logger.error(`❌ Failed to generate invoice for ${customer.phone}`);
+          logger.error(`❌ Failed to generate invoice for customer ID ${customer.id} - ${customer.phone}`);
         }
         
       } catch (customerError) {
         errorCount++;
-        logger.error(`❌ Error processing customer ${customer.phone}: ${customerError.message}`);
+        logger.error(`❌ Error processing customer ${customer.id} (${customer.phone}): ${customerError.message}`);
       }
     }
     
@@ -280,14 +287,21 @@ async function generateInvoicesByInstallDate() {
         const nextTargetDay = Math.min(install.getDate(), nextLastDay);
         const cycleEnd = new Date(nextMonth.getFullYear(), nextMonth.getMonth(), nextTargetDay, 0,0,0,0);
 
-        const invoices = billing.getInvoicesByPhone(customer.phone) || [];
+        const invoices = await billing.getCustomerInvoices(customer.id) || [];
         const exists = invoices.some(inv => {
           const t = new Date(inv.created_at);
           return t >= cycleStart && t < cycleEnd;
         });
         if (exists) { skippedCount++; continue; }
 
-        const invoice = billing.createInvoice(customer.phone, customer.package_id, customer.package_price);
+        const invoice = await billing.createInvoice({
+          customer_id: customer.id,
+          package_id: customer.package_id,
+          amount: customer.package_price,
+          due_date: cycleEnd,
+          status: 'unpaid',
+          notes: `Invoice install-date cycle`
+        });
         if (invoice) {
           generatedCount++;
           await sendInvoiceNotification(customer, invoice);
@@ -363,7 +377,7 @@ async function runDailyReminders() {
 
   for (const customer of customers) {
     try {
-      const invoices = billing.getInvoicesByPhone(customer.phone) || [];
+      const invoices = await billing.getCustomerInvoices(customer.id) || [];
       if (invoices.length === 0) continue;
 
       const unpaid = invoices.filter(inv => inv.status === 'unpaid');

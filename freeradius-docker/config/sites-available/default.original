@@ -1,0 +1,78 @@
+# Listen section - already OK, just verify
+listen {
+    type = auth
+    ipaddr = *
+    port = 1812
+    limit {
+        max_connections = 256
+        lifetime = 0
+        idle_timeout = 30
+    }
+}
+
+listen {
+    type = acct
+    ipaddr = *
+    port = 1813
+    limit {
+        max_connections = 256
+        lifetime = 0
+        idle_timeout = 30
+    }
+}
+
+# Authorize section - ADD sql
+authorize {
+    filter_username
+    preprocess
+    chap
+    mschap
+    digest
+    suffix
+    eap
+
+    # ✅ ADD THIS LINE
+    sql
+
+    -sql_log
+    pap
+}
+
+# Authenticate section - already OK
+authenticate {
+    Auth-Type PAP {
+        pap
+    }
+    Auth-Type CHAP {
+        chap
+    }
+    Auth-Type MS-CHAP {
+        mschap
+    }
+}
+
+# Accounting section - ADD sql
+accounting {
+    detail
+
+    # ✅ ADD THIS LINE
+    sql
+
+    exec
+    attr_filter.accounting_response
+}
+
+# Post-Auth section - ADD sql
+post-auth {
+    # ✅ ADD THIS LINE
+    sql
+
+    exec
+
+    Post-Auth-Type REJECT {
+        # ✅ ADD THIS LINE TOO
+        sql
+
+        attr_filter.access_reject
+    }
+}

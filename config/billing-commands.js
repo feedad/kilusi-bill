@@ -478,14 +478,25 @@ async function handleCreateInvoiceCommand(remoteJid, params) {
       return;
     }
     
-    // Create invoice
-    const invoice = billing.createInvoice(cleanPhone, customer.package_id, customer.package_price);
+    // Create invoice using customer_id
+    const invoice = await billing.createInvoice({
+      customer_id: customer.id,
+      package_id: customer.package_id,
+      amount: customer.package_price,
+      due_date: new Date(new Date().setDate(parseInt(getSetting('billing_due_date', '1')))),
+      status: 'unpaid',
+      notes: 'Invoice created via WhatsApp command'
+    });
     
     if (invoice) {
+      // Get package name
+      const pkg = await billing.getPackageById(customer.package_id);
+      const packageName = pkg ? pkg.name : 'Unknown Package';
+      
       let message = `📄 *TAGIHAN BERHASIL DIBUAT*\n\n`;
       message += `📋 *No. Tagihan:* ${invoice.invoice_number}\n`;
       message += `👤 *Pelanggan:* ${customer.name || cleanPhone}\n`;
-      message += `📦 *Paket:* ${invoice.package_name}\n`;
+      message += `📦 *Paket:* ${packageName}\n`;
       message += `💰 *Jumlah:* ${formatCurrency(invoice.amount)}\n`;
       message += `📅 *Jatuh Tempo:* ${new Date(invoice.due_date).toLocaleDateString('id-ID')}\n`;
       message += `📊 *Status:* Belum Lunas\n\n`;
@@ -499,7 +510,7 @@ async function handleCreateInvoiceCommand(remoteJid, params) {
         const tpl = getInvoiceTemplate();
         const customerMessage = renderTemplate(tpl, {
           invoice_number: invoice.invoice_number,
-          package_name: invoice.package_name,
+          package_name: packageName,
           amount: formatCurrency(invoice.amount),
           due_date: new Date(invoice.due_date).toLocaleDateString('id-ID'),
           customer_name: customer.name || cleanPhone,
