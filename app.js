@@ -1395,9 +1395,10 @@ const { addCustomerTag } = require('./config/customerTag');
         const isolirService = require('./config/isolir-service');
         isolirService.initializeIsolirService();
 
-        // Initialize monthly invoice service
-        const monthlyInvoiceService = require('./config/monthly-invoice-service');
-        monthlyInvoiceService.initializeMonthlyInvoiceService();
+        // Initialize monthly invoice service - DISABLED to prevent infinite loop
+        // Use scheduler.js instead for invoice generation
+        // const monthlyInvoiceService = require('./config/monthly-invoice-service');
+        // monthlyInvoiceService.initializeMonthlyInvoiceService();
     } catch (error) {
         logger.error('❌ Failed to initialize services:', error);
     }

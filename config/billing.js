@@ -556,6 +556,31 @@ async function getCustomerInvoices(customerId) {
 }
 
 /**
+ * Get invoices by phone number
+ */
+async function getInvoicesByPhone(phone) {
+    try {
+        // Normalize phone number
+        const normalizedPhone = normalizePhone(phone);
+        
+        const sql = `
+            SELECT i.*, 
+                   c.name as customer_name, c.phone as customer_phone,
+                   p.name as package_name
+            FROM invoices i
+            JOIN customers c ON i.customer_id = c.id
+            JOIN packages p ON i.package_id = p.id
+            WHERE c.phone = $1
+            ORDER BY i.created_at DESC
+        `;
+        return await getAll(sql, [normalizedPhone]);
+    } catch (error) {
+        logger.error('Error getting invoices by phone:', error);
+        return [];
+    }
+}
+
+/**
  * Create invoice
  */
 async function createInvoice(invoiceData) {
@@ -843,6 +868,7 @@ module.exports = {
     getInvoices,
     getInvoiceById,
     getCustomerInvoices,
+    getInvoicesByPhone,
     createInvoice,
     updateInvoice,
     markInvoicePaid,
