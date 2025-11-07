@@ -199,3 +199,6 @@ restore-*.js
 *.config.backup
 settings.json.backup
 *.env.backup
+
+# Documentation folder (exclude from git)
+docs/

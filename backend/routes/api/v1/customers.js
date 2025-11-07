@@ -17,7 +17,7 @@ router.get('/', async (req, res) => {
         let queryParams = [];
 
         if (search) {
-            whereClause += ` AND (c.name ILIKE $${queryParams.length + 1} OR c.phone ILIKE $${queryParams.length + 1} OR c.email ILIKE $${queryParams.length + 1} OR c.pppoe_username ILIKE $${queryParams.length + 1})`;
+            whereClause += ` AND (c.name ILIKE $${queryParams.length + 1} OR c.phone ILIKE $${queryParams.length + 1} OR c.email ILIKE $${queryParams.length + 1} OR c.pppoe_username ILIKE $${queryParams.length + 1} OR c.customer_id ILIKE $${queryParams.length + 1})`;
             queryParams.push(`%${search}%`);
         }
 
@@ -40,15 +40,19 @@ router.get('/', async (req, res) => {
         const dataQuery = `
             SELECT
                 c.id,
+                c.customer_id,
                 c.name,
                 c.phone,
-                c.email,
+                c.nik,
                 c.address,
                 c.pppoe_username,
                 c.pppoe_password,
                 c.status,
                 c.created_at,
                 c.updated_at,
+                c.install_date,
+                c.active_date,
+                c.isolir_date,
                 -- Package information
                 p.name as package_name,
                 p.price as package_price,
@@ -119,7 +123,7 @@ router.get('/:id', async (req, res) => {
                 p.description as package_description
             FROM customers c
             LEFT JOIN packages p ON c.package_id = p.id
-            WHERE c.id = $1 AND c.deleted_at IS NULL
+            WHERE c.id = $1
         `;
 
         const result = await query(query, [id]);
@@ -216,7 +220,7 @@ router.post('/', async (req, res) => {
 
         // Check if phone already exists
         const existingPhone = await query(
-            'SELECT id FROM customers WHERE phone = $1 AND deleted_at IS NULL',
+            'SELECT id FROM customers WHERE phone = $1',
             [phone]
         );
 
@@ -230,7 +234,7 @@ router.post('/', async (req, res) => {
         // Check if PPPoE username already exists
         if (pppoe_username) {
             const existingUsername = await query(
-                'SELECT id FROM customers WHERE pppoe_username = $1 AND deleted_at IS NULL',
+                'SELECT id FROM customers WHERE pppoe_username = $1',
                 [pppoe_username]
             );
 
@@ -291,7 +295,7 @@ router.put('/:id', async (req, res) => {
 
         // Check if customer exists
         const existingCustomer = await query(
-            'SELECT * FROM customers WHERE id = $1 AND deleted_at IS NULL',
+            'SELECT * FROM customers WHERE id = $1',
             [id]
         );
 
@@ -305,7 +309,7 @@ router.put('/:id', async (req, res) => {
         // Check if phone already exists (excluding current customer)
         if (phone && phone !== existingCustomer.rows[0].phone) {
             const existingPhone = await query(
-                'SELECT id FROM customers WHERE phone = $1 AND deleted_at IS NULL AND id != $2',
+                'SELECT id FROM customers WHERE phone = $1 AND id != $2',
                 [phone, id]
             );
 
@@ -320,7 +324,7 @@ router.put('/:id', async (req, res) => {
         // Check if PPPoE username already exists (excluding current customer)
         if (pppoe_username && pppoe_username !== existingCustomer.rows[0].pppoe_username) {
             const existingUsername = await query(
-                'SELECT id FROM customers WHERE pppoe_username = $1 AND deleted_at IS NULL AND id != $2',
+                'SELECT id FROM customers WHERE pppoe_username = $1 AND id != $2',
                 [pppoe_username, id]
             );
 
@@ -377,7 +381,7 @@ router.delete('/:id', async (req, res) => {
 
         // Check if customer exists
         const existingCustomer = await query(
-            'SELECT * FROM customers WHERE id = $1 AND deleted_at IS NULL',
+            'SELECT * FROM customers WHERE id = $1',
             [id]
         );
 
@@ -388,9 +392,22 @@ router.delete('/:id', async (req, res) => {
             });
         }
 
-        // Soft delete customer
+        // Check for dependencies before deleting
+        const invoiceCheck = await query(
+            'SELECT COUNT(*) as count FROM invoices WHERE customer_id = $1',
+            [id]
+        );
+
+        if (parseInt(invoiceCheck.rows[0].count) > 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Tidak dapat menghapus pelanggan yang masih memiliki invoice'
+            });
+        }
+
+        // Hard delete customer
         await query(
-            'UPDATE customers SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1',
+            'DELETE FROM customers WHERE id = $1',
             [id]
         );
 

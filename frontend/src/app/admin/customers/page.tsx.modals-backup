@@ -18,7 +18,6 @@ import {
   Trash2,
   X,
   Save,
-  MapPin,
 } from 'lucide-react'
 import { Button } from '@/components/ui'
 import { Input } from '@/components/ui'
@@ -28,9 +27,6 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatCurrency } from '@/lib/utils'
 import { api, endpoints } from '@/lib/api'
-import CustomerMap from '@/components/CustomerMap'
-import CoordinateMap from '@/components/CoordinateMap'
-import RegionModal from '@/components/RegionModal'
 
 interface Customer {
   id: string
@@ -39,8 +35,6 @@ interface Customer {
   phone: string
   nik?: string
   address?: string
-  latitude?: number
-  longitude?: number
   package_name?: string
   package_price?: number
   package_speed?: string
@@ -76,8 +70,6 @@ interface FormData {
   phone: string
   nik: string
   address: string
-  latitude?: number
-  longitude?: number
   package_id: string
   pppoe_username: string
   pppoe_password: string
@@ -110,8 +102,6 @@ export default function CustomersPage() {
   const [showDetailModal, setShowDetailModal] = useState(false)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
-  const [showRegionModal, setShowRegionModal] = useState(false)
-  const [regions, setRegions] = useState<any[]>([])
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [totalItems, setTotalItems] = useState(0)
@@ -136,7 +126,6 @@ export default function CustomersPage() {
   useEffect(() => {
     fetchCustomers()
     fetchPackages()
-    fetchRegions()
   }, [currentPage, pageSize, searchQuery, filterStatus, sortField, sortDirection])
 
   const fetchCustomers = async () => {
@@ -186,17 +175,6 @@ export default function CustomersPage() {
       }
     } catch (err: any) {
       console.error('Error fetching packages:', err)
-    }
-  }
-
-  const fetchRegions = async () => {
-    try {
-      const response = await api.get('/api/v1/regions')
-      if (response.data.success) {
-        setRegions(response.data.data || [])
-      }
-    } catch (err: any) {
-      console.error('Error fetching regions:', err)
     }
   }
 
@@ -275,8 +253,6 @@ export default function CustomersPage() {
       phone: '',
       nik: '',
       address: '',
-      latitude: undefined,
-      longitude: undefined,
       package_id: '',
       pppoe_username: '',
       pppoe_password: '',
@@ -344,16 +320,6 @@ export default function CustomersPage() {
           >
             <Download className="h-4 w-4" />
             Export
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="flex items-center space-x-2"
-            onClick={() => setShowRegionModal(true)}
-          >
-            <MapPin className="h-4 w-4" />
-            <span className="hidden sm:inline">Kelola Wilayah</span>
-            <span className="sm:hidden">Wilayah</span>
           </Button>
           <Button
             className="flex items-center space-x-2"
@@ -521,7 +487,7 @@ export default function CustomersPage() {
                   <th className="text-left p-3 font-semibold text-foreground whitespace-nowrap">Tanggal Daftar</th>
                   <th className="text-left p-3 font-semibold text-foreground whitespace-nowrap">Tanggal Aktif</th>
                   <th
-                    className="text-left p-3 font-semibold text-foreground whitespace-nowrap cursor-pointer hover:bg-muted/50 transition-colors"
+                    className="text-left p-3 font-semibold text-foreground whitespace-nowrap cursor-pointer hover:bg-muted/50 transition-colors text-red-600"
                     onClick={() => handleSort('isolir_date')}
                   >
                     <div className="flex items-center gap-1">
@@ -680,14 +646,6 @@ export default function CustomersPage() {
                     <p className="text-sm text-muted-foreground">Alamat</p>
                     <p className="font-medium text-foreground">{selectedCustomer.address || '-'}</p>
                   </div>
-
-                  {/* Peta Lokasi */}
-                  {selectedCustomer.address && (
-                    <div className="md:col-span-2">
-                      <p className="text-sm text-muted-foreground mb-2">Lokasi pada Peta</p>
-                      <CustomerMap customer={selectedCustomer} />
-                    </div>
-                  )}
                   <div>
                     <p className="text-sm text-muted-foreground">Status</p>
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(selectedCustomer.status)}`}>
@@ -822,25 +780,12 @@ export default function CustomersPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="create-region">Wilayah</Label>
-                  <Select value={formData.region} onValueChange={(value) => setFormData({ ...formData, region: value })}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Pilih wilayah" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">Tidak ada wilayah</SelectItem>
-                      {regions.map((region) => (
-                        <SelectItem key={region.id} value={region.name}>
-                          {region.name}
-                          {region.district && ` - ${region.district}`}
-                          {region.regency && `, ${region.regency}`}
-                          {region.province && `, ${region.province}`}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-gray-500">
-                    Kelola wilayah melalui tombol "Kelola Wilayah" di atas
-                  </p>
+                  <Input
+                    id="create-region"
+                    value={formData.region}
+                    onChange={(e) => setFormData({ ...formData, region: e.target.value })}
+                    placeholder="Contoh: Jakarta, Surabaya, Bandung"
+                  />
                 </div>
               </div>
 
@@ -852,20 +797,6 @@ export default function CustomersPage() {
                   onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                   placeholder="Masukkan alamat lengkap"
                   rows={2}
-                />
-              </div>
-
-              {/* Coordinate Map */}
-              <div className="space-y-2">
-                <Label>Koordinat Lokasi Pelanggan</Label>
-                <p className="text-xs text-gray-600 mb-2">
-                  Gunakan GPS untuk mendapatkan lokasi otomatis atau adjust manual pada map. Tekniksi bisa capture koordinat langsung dari lokasi pelanggan.
-                </p>
-                <CoordinateMap
-                  latitude={formData.latitude}
-                  longitude={formData.longitude}
-                  address={formData.address}
-                  onCoordinatesChange={(lat, lng) => setFormData({ ...formData, latitude: lat, longitude: lng })}
                 />
               </div>
 
@@ -987,12 +918,6 @@ export default function CustomersPage() {
           </DialogContent>
         </Dialog>
       )}
-
-      {/* Region Management Modal */}
-      <RegionModal
-        isOpen={showRegionModal}
-        onClose={() => setShowRegionModal(false)}
-      />
     </div>
   )
 }

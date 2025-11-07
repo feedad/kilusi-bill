@@ -9,6 +9,7 @@ router.use('/auth', require('./auth'));
 router.use('/customers', jwtAuth, require('./customers'));
 router.use('/packages', jwtAuth, require('./packages'));
 router.use('/billing', jwtAuth, require('./billing'));
+router.use('/regions', jwtAuth, require('./regions'));
 router.use('/dashboard', require('./dashboard'));
 router.use('/settings', jwtAuth, require('./settings'));
 router.use('/realtime', jwtAuth, require('./realtime'));

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
+import 'leaflet/dist/leaflet.css'
 import { ThemeProvider } from '@/components/providers/ThemeProvider'
 import { AuthProvider } from '@/components/providers/AuthProvider'
 
@@ -11,7 +12,11 @@ export const metadata: Metadata = {
   description: 'Complete ISP billing and management solution',
   keywords: 'ISP, billing, management, mikrotik, radius',
   authors: [{ name: 'Kilusi Digital Network' }],
-  viewport: 'width=device-width, initial-scale=1',
+}
+
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
   themeColor: '#3b82f6',
 }
 

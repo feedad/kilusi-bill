@@ -1,24 +1,16 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui'
-import {
-  Package,
-  Search,
-  Plus,
-  Download,
-  Filter,
-  Edit,
-  Trash2,
-  Users,
-  Activity,
-  Wifi,
-  DollarSign,
-  Loader2,
-} from 'lucide-react'
-import { Button } from '@/components/ui'
-import { Input } from '@/components/ui'
-import { formatCurrency } from '@/lib/utils'
+import { useState, useEffect } from 'react'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { Switch } from '@/components/ui/switch'
+import { Badge } from '@/components/ui/badge'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Plus, Edit2, Trash2, Search, Users, DollarSign, Package, Loader2 } from 'lucide-react'
 import { api, endpoints } from '@/lib/api'
 
 interface ServicePackage {
@@ -32,330 +24,581 @@ interface ServicePackage {
   customerCount: number
   totalRevenue: number
   features: string[]
+  group: string | null
+  rateLimit: string | null
+  shared: boolean
+  hpp: number
+  commission: number
   createdAt: string
-}
-
-interface PackageStats {
-  totalPackages: number
-  activePackages: number
-  totalCustomers: number
-  totalRevenue: number
+  updatedAt: string
 }
 
 export default function PackagesPage() {
   const [packages, setPackages] = useState<ServicePackage[]>([])
-  const [stats, setStats] = useState<PackageStats | null>(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive'>('all')
-
-  useEffect(() => {
-    fetchPackages()
-  }, [searchQuery, filterStatus])
+  const [searchTerm, setSearchTerm] = useState('')
+  const [showCreateDialog, setShowCreateDialog] = useState(false)
+  const [showEditDialog, setShowEditDialog] = useState(false)
+  const [editingPackage, setEditingPackage] = useState<ServicePackage | null>(null)
+  const [formLoading, setFormLoading] = useState(false)
+  const [formData, setFormData] = useState({
+    name: '',
+    description: '',
+    speed: '',
+    price: '',
+    group: '',
+    rate_limit: '',
+    shared: true,
+    hpp: '',
+    commission: '',
+    is_active: true
+  })
 
   const fetchPackages = async () => {
     try {
       setLoading(true)
-      setError(null)
-
-      console.log('Fetching packages via API')
-
-      const params = new URLSearchParams({
-        limit: '50',
-        search: searchQuery,
-        status: filterStatus === 'all' ? '' : filterStatus,
-      })
-
-      const response = await api.get(`${endpoints.packages.list}?${params}`)
+      const response = await api.get(endpoints.packages.list)
+      console.log('Fetch packages response:', response.data)
 
       if (response.data.success) {
-        setPackages(response.data.data.packages || [])
-
-        // Calculate stats from package data
-        const packageList = response.data.data.packages || []
-        setStats({
-          totalPackages: packageList.length,
-          activePackages: packageList.filter(p => p.isActive).length,
-          totalCustomers: packageList.reduce((sum, p) => sum + p.customerCount, 0),
-          totalRevenue: packageList.reduce((sum, p) => sum + p.totalRevenue, 0),
-        })
+        setPackages(response.data.data.packages)
+        console.log('Packages loaded:', response.data.data.packages.length, 'packages')
+      } else {
+        console.error('API returned error:', response.data.message)
+        alert('Gagal memuat data paket: ' + (response.data.message || 'Unknown error'))
       }
-    } catch (err: any) {
-      console.error('Error fetching packages:', err)
-      setError(err.message || 'Failed to load packages')
+    } catch (error: any) {
+      console.error('Error fetching packages:', error)
+
+      if (error.response?.status === 401) {
+        alert('Session habis, silakan login ulang')
+        window.location.href = '/login'
+      } else {
+        alert('Terjadi kesalahan saat memuat data paket: ' + (error.message || 'Unknown error'))
+      }
     } finally {
       setLoading(false)
     }
   }
 
-  const getStatusColor = (isActive: boolean) => {
-    return isActive ? 'text-success bg-success/10' : 'text-error bg-error/10'
+  useEffect(() => {
+    fetchPackages()
+  }, [])
+
+  const handleCreatePackage = async () => {
+    if (!formData.name || !formData.speed || !formData.price) {
+      alert('Nama, kecepatan, dan harga paket wajib diisi')
+      return
+    }
+
+    try {
+      setFormLoading(true)
+      const requestData = {
+        name: formData.name,
+        speed: formData.speed,
+        price: parseFloat(formData.price),
+        description: formData.description,
+        group: formData.group || null,
+        rate_limit: formData.rate_limit || null,
+        shared: formData.shared,
+        hpp: parseFloat(formData.hpp) || 0,
+        commission: parseFloat(formData.commission) || 0
+      }
+
+      console.log('Creating package with data:', requestData)
+      const response = await api.post(endpoints.packages.create, requestData)
+      console.log('Create response:', response.data)
+
+      if (response.data.success) {
+        setShowCreateDialog(false)
+        resetForm()
+        fetchPackages()
+        alert('Paket berhasil dibuat')
+      } else {
+        alert(response.data.message || 'Gagal membuat paket')
+      }
+    } catch (error: any) {
+      console.error('Error creating package:', error)
+
+      if (error.response?.data?.message) {
+        alert(error.response.data.message)
+      } else if (error.response?.status === 401) {
+        alert('Session habis, silakan login ulang')
+      } else {
+        alert('Terjadi kesalahan saat membuat paket: ' + (error.message || 'Unknown error'))
+      }
+    } finally {
+      setFormLoading(false)
+    }
   }
 
-  const getStatusText = (isActive: boolean) => {
-    return isActive ? 'Aktif' : 'Tidak Aktif'
+  const handleUpdatePackage = async () => {
+    if (!formData.name || !formData.speed || !formData.price || !editingPackage) {
+      alert('Nama, kecepatan, dan harga paket wajib diisi')
+      return
+    }
+
+    try {
+      setFormLoading(true)
+      const requestData = {
+        name: formData.name,
+        speed: formData.speed,
+        price: parseFloat(formData.price),
+        description: formData.description,
+        group: formData.group || null,
+        rate_limit: formData.rate_limit || null,
+        shared: formData.shared,
+        hpp: parseFloat(formData.hpp) || 0,
+        commission: parseFloat(formData.commission) || 0
+      }
+
+      console.log('Updating package:', editingPackage.id, 'with data:', requestData)
+      const response = await api.put(endpoints.packages.update(editingPackage.id), requestData)
+      console.log('Update response:', response.data)
+
+      if (response.data.success) {
+        setShowEditDialog(false)
+        resetForm()
+        fetchPackages()
+        alert('Paket berhasil diperbarui')
+      } else {
+        alert(response.data.message || 'Gagal memperbarui paket')
+      }
+    } catch (error: any) {
+      console.error('Error updating package:', error)
+
+      if (error.response?.data?.message) {
+        alert(error.response.data.message)
+      } else if (error.response?.status === 401) {
+        alert('Session habis, silakan login ulang')
+      } else {
+        alert('Terjadi kesalahan saat memperbarui paket: ' + (error.message || 'Unknown error'))
+      }
+    } finally {
+      setFormLoading(false)
+    }
   }
 
-  // Show loading state
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-semibold text-foreground">Paket Layanan</h1>
-          <div className="flex items-center space-x-2">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            <span className="text-sm text-muted-foreground">Loading...</span>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[...Array(4)].map((_, i) => (
-            <Card key={i} className="animate-pulse">
-              <CardHeader className="pb-2">
-                <div className="h-4 bg-muted rounded w-3/4"></div>
-              </CardHeader>
-              <CardContent>
-                <div className="h-8 bg-muted rounded w-1/2 mb-2"></div>
-                <div className="h-3 bg-muted rounded w-full"></div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {[...Array(6)].map((_, i) => (
-            <Card key={i} className="animate-pulse">
-              <CardHeader className="pb-3">
-                <div className="h-6 bg-muted rounded w-3/4"></div>
-                <div className="h-4 bg-muted rounded w-full"></div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="h-8 bg-muted rounded w-1/2"></div>
-                <div className="h-4 bg-muted rounded w-full"></div>
-                <div className="h-4 bg-muted rounded w-3/4"></div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </div>
-    )
+  const handleDeletePackage = async (pkg: ServicePackage) => {
+    if (pkg.customerCount > 0) {
+      alert('Tidak dapat menghapus paket yang memiliki pelanggan')
+      return
+    }
+
+    if (!confirm(`Apakah Anda yakin ingin menghapus paket "${pkg.name}"?`)) {
+      return
+    }
+
+    try {
+      console.log('Deleting package:', pkg.id, pkg.name)
+      const response = await api.delete(endpoints.packages.delete(pkg.id))
+      console.log('Delete response:', response.data)
+
+      if (response.data.success) {
+        fetchPackages()
+        alert('Paket berhasil dihapus')
+      } else {
+        alert(response.data.message || 'Gagal menghapus paket')
+      }
+    } catch (error: any) {
+      console.error('Error deleting package:', error)
+
+      if (error.response?.data?.message) {
+        alert(error.response.data.message)
+      } else if (error.response?.status === 401) {
+        alert('Session habis, silakan login ulang')
+      } else {
+        alert('Terjadi kesalahan saat menghapus paket: ' + (error.message || 'Unknown error'))
+      }
+    }
   }
 
-  // Show error state
-  if (error) {
-    return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-semibold text-foreground">Paket Layanan</h1>
-        </div>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-center text-destructive">
-              <p className="mb-2">Error loading packages</p>
-              <p className="text-sm text-muted-foreground mb-4">{error}</p>
-              <Button onClick={fetchPackages}>Try Again</Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    )
+  const openEditDialog = (pkg: ServicePackage) => {
+    setEditingPackage(pkg)
+    setFormData({
+      name: pkg.name,
+      description: pkg.description || '',
+      speed: pkg.speed,
+      price: pkg.price.toString(),
+      group: pkg.group || '',
+      rate_limit: pkg.rateLimit || '',
+      shared: pkg.shared,
+      hpp: pkg.hpp.toString(),
+      commission: pkg.commission.toString(),
+      is_active: pkg.isActive
+    })
+    setShowEditDialog(true)
   }
+
+  const resetForm = () => {
+    setFormData({
+      name: '',
+      description: '',
+      speed: '',
+      price: '',
+      group: '',
+      rate_limit: '',
+      shared: true,
+      hpp: '',
+      commission: '',
+      is_active: true
+    })
+    setEditingPackage(null)
+  }
+
+  const filteredPackages = packages.filter(pkg =>
+    pkg.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    pkg.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    pkg.speed.toLowerCase().includes(searchTerm.toLowerCase())
+  )
 
   return (
     <div className="space-y-6">
-      {/* Page Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-foreground">Paket Layanan</h1>
-        <div className="flex items-center space-x-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="hidden sm:flex items-center space-x-2"
-          >
-            <Download className="h-4 w-4" />
-            Export
-          </Button>
-          <Button className="flex items-center space-x-2">
-            <Plus className="h-4 w-4" />
-            Tambah Paket
-          </Button>
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-3xl font-bold">Manajemen Paket</h1>
+          <p className="text-muted-foreground">Kelola paket layanan internet</p>
         </div>
+        <Button onClick={() => setShowCreateDialog(true)}>
+          <Plus className="h-4 w-4 mr-2" />
+          Tambah Paket
+        </Button>
       </div>
 
-      {/* Stats Cards */}
-      {stats && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-foreground">Total Paket</CardTitle>
-              <Package className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent className="pt-0">
-              <div className="text-2xl font-bold text-foreground">{stats.totalPackages}</div>
-              <p className="text-xs text-muted-foreground">Semua paket</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-foreground">Paket Aktif</CardTitle>
-              <Activity className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent className="pt-0">
-              <div className="text-2xl font-bold text-success">
-                {stats.activePackages}
-              </div>
-              <p className="text-xs text-muted-foreground">Sedang aktif</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-foreground">Total Pelanggan</CardTitle>
-              <Users className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent className="pt-0">
-              <div className="text-2xl font-bold text-foreground">
-                {stats.totalCustomers.toLocaleString()}
-              </div>
-              <p className="text-xs text-muted-foreground">Semua paket</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-foreground">Total Pendapatan</CardTitle>
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent className="pt-0">
-              <div className="text-2xl font-bold text-foreground">
-                {formatCurrency(stats.totalRevenue)}
-              </div>
-              <p className="text-xs text-muted-foreground">Semua waktu</p>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Filters and Search */}
       <Card>
-        <CardContent className="pt-6">
-          <div className="flex flex-col sm:flex-row gap-4">
-            <div className="flex-1">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Cari paket layanan..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-            </div>
-            <div className="flex items-center space-x-2">
-              <select
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value as any)}
-                className="rounded-md border border-input bg-background px-3 py-2 text-sm"
-              >
-                <option value="all">Semua Status</option>
-                <option value="active">Aktif</option>
-                <option value="inactive">Tidak Aktif</option>
-              </select>
-              <Button variant="outline" size="icon">
-                <Filter className="h-4 w-4" />
-              </Button>
-            </div>
+        <CardHeader>
+          <CardTitle>Daftar Paket</CardTitle>
+          <CardDescription>
+            Total {filteredPackages.length} paket layanan
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center space-x-2 mb-4">
+            <Search className="h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Cari paket..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="max-w-sm"
+            />
           </div>
+
+          {loading ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-8 w-8 animate-spin" />
+            </div>
+          ) : (
+            <div className="grid gap-4">
+              {filteredPackages.map((pkg) => (
+                <div key={pkg.id} className="border rounded-lg p-4">
+                  <div className="flex justify-between items-start">
+                    <div className="flex-1">
+                      <div className="flex items-center space-x-2 mb-2">
+                        <h3 className="font-semibold">{pkg.name}</h3>
+                        <Badge variant={pkg.isActive ? 'default' : 'secondary'}>
+                          {pkg.isActive ? 'Aktif' : 'Tidak Aktif'}
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground mb-2">
+                        {pkg.description || 'Tidak ada deskripsi'}
+                      </p>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <div>
+                          <span className="font-medium">Kecepatan:</span>
+                          <p>{pkg.speed}</p>
+                        </div>
+                        <div>
+                          <span className="font-medium">Harga:</span>
+                          <p>Rp {pkg.price.toLocaleString()}</p>
+                        </div>
+                        <div>
+                          <span className="font-medium">Pelanggan:</span>
+                          <p>{pkg.customerCount}</p>
+                        </div>
+                        <div>
+                          <span className="font-medium">Pendapatan:</span>
+                          <p>Rp {pkg.totalRevenue.toLocaleString()}</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex space-x-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openEditDialog(pkg)}
+                      >
+                        <Edit2 className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDeletePackage(pkg)}
+                        disabled={pkg.customerCount > 0}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
 
-      {/* Packages Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {packages.map((pkg) => (
-          <Card key={pkg.id} className="hover:shadow-md transition-shadow">
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-lg font-semibold text-foreground">{pkg.name}</CardTitle>
-                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(pkg.isActive)}`}>
-                  {getStatusText(pkg.isActive)}
-                </span>
-              </div>
-              <p className="text-sm text-muted-foreground">{pkg.description}</p>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Price and Speed */}
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-2xl font-bold text-foreground">{formatCurrency(pkg.price)}</p>
-                  <p className="text-xs text-muted-foreground">{pkg.duration}</p>
-                </div>
-                <div className="flex items-center text-sm text-foreground">
-                  <Wifi className="h-4 w-4 mr-1 text-muted-foreground" />
-                  {pkg.speed}
-                </div>
-              </div>
-
-              {/* Customer Count */}
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Pelanggan Aktif</span>
-                <span className="font-medium text-foreground">{pkg.customerCount}</span>
-              </div>
-
-              {/* Revenue */}
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Total Pendapatan</span>
-                <span className="font-medium text-foreground">{formatCurrency(pkg.totalRevenue)}</span>
-              </div>
-
-              {/* Features */}
-              <div>
-                <p className="text-sm font-medium text-foreground mb-2">Fitur:</p>
-                <ul className="text-xs text-muted-foreground space-y-1">
-                  {pkg.features.map((feature, index) => (
-                    <li key={index} className="flex items-center">
-                      <div className="h-1 w-1 bg-success rounded-full mr-2" />
-                      {feature}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex items-center space-x-2 pt-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="flex-1"
-                >
-                  <Edit className="h-4 w-4 mr-2" />
-                  Edit
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="flex-1 text-error hover:text-error"
-                >
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Hapus
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      {/* Empty State */}
-      {packages.length === 0 && (
-        <Card>
-          <CardContent className="py-12">
-            <div className="text-center">
-              <Package className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-foreground mb-2">Tidak ada paket ditemukan</h3>
-              <p className="text-muted-foreground">Coba ubah filter atau kata kunci pencarian Anda.</p>
+      {/* Create Package Dialog */}
+      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Tambah Paket Baru</DialogTitle>
+            <DialogDescription>
+              Buat paket layanan internet baru
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 max-h-96 overflow-y-auto">
+            <div>
+              <Label htmlFor="create-name">Nama Paket</Label>
+              <Input
+                id="create-name"
+                value={formData.name}
+                onChange={(e) => setFormData({...formData, name: e.target.value})}
+                placeholder="Masukkan nama paket"
+              />
             </div>
-          </CardContent>
-        </Card>
-      )}
+            <div>
+              <Label htmlFor="create-description">Deskripsi</Label>
+              <Textarea
+                id="create-description"
+                value={formData.description}
+                onChange={(e) => setFormData({...formData, description: e.target.value})}
+                placeholder="Masukkan deskripsi paket"
+              />
+            </div>
+            <div>
+              <Label htmlFor="create-speed">Kecepatan</Label>
+              <Input
+                id="create-speed"
+                value={formData.speed}
+                onChange={(e) => setFormData({...formData, speed: e.target.value})}
+                placeholder="Contoh: 10/10"
+              />
+            </div>
+            <div>
+              <Label htmlFor="create-price">Harga</Label>
+              <Input
+                id="create-price"
+                type="number"
+                value={formData.price}
+                onChange={(e) => setFormData({...formData, price: e.target.value})}
+                placeholder="Masukkan harga"
+              />
+            </div>
+            <div>
+              <Label htmlFor="create-group">Grup</Label>
+              <Input
+                id="create-group"
+                value={formData.group}
+                onChange={(e) => setFormData({...formData, group: e.target.value})}
+                placeholder="Masukkan grup paket"
+              />
+            </div>
+            <div>
+              <Label htmlFor="create-rate-limit">Rate Limit</Label>
+              <Input
+                id="create-rate-limit"
+                value={formData.rate_limit}
+                onChange={(e) => setFormData({...formData, rate_limit: e.target.value})}
+                placeholder="Contoh: 10M/10M"
+              />
+            </div>
+            <div>
+              <Label htmlFor="create-hpp">HPP (Harga Pokok)</Label>
+              <Input
+                id="create-hpp"
+                type="number"
+                value={formData.hpp}
+                onChange={(e) => setFormData({...formData, hpp: e.target.value})}
+                placeholder="Masukkan HPP"
+              />
+            </div>
+            <div>
+              <Label htmlFor="create-commission">Komisi</Label>
+              <Input
+                id="create-commission"
+                type="number"
+                value={formData.commission}
+                onChange={(e) => setFormData({...formData, commission: e.target.value})}
+                placeholder="Masukkan komisi"
+              />
+            </div>
+            <div className="flex items-center space-x-2">
+              <Switch
+                id="create-shared"
+                checked={formData.shared}
+                onCheckedChange={(checked) => setFormData({...formData, shared: checked})}
+              />
+              <Label htmlFor="create-shared">Shared</Label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Switch
+                id="create-active"
+                checked={formData.is_active}
+                onCheckedChange={(checked) => setFormData({...formData, is_active: checked})}
+              />
+              <Label htmlFor="create-active">Aktif</Label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowCreateDialog(false)}
+              disabled={formLoading}
+            >
+              Batal
+            </Button>
+            <Button
+              onClick={handleCreatePackage}
+              disabled={formLoading || !formData.name || !formData.speed || !formData.price}
+            >
+              {formLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Menyimpan...
+                </>
+              ) : (
+                'Simpan'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Package Dialog */}
+      <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Paket</DialogTitle>
+            <DialogDescription>
+              Ubah informasi paket layanan
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 max-h-96 overflow-y-auto">
+            <div>
+              <Label htmlFor="edit-name">Nama Paket</Label>
+              <Input
+                id="edit-name"
+                value={formData.name}
+                onChange={(e) => setFormData({...formData, name: e.target.value})}
+                placeholder="Masukkan nama paket"
+              />
+            </div>
+            <div>
+              <Label htmlFor="edit-description">Deskripsi</Label>
+              <Textarea
+                id="edit-description"
+                value={formData.description}
+                onChange={(e) => setFormData({...formData, description: e.target.value})}
+                placeholder="Masukkan deskripsi paket"
+              />
+            </div>
+            <div>
+              <Label htmlFor="edit-speed">Kecepatan</Label>
+              <Input
+                id="edit-speed"
+                value={formData.speed}
+                onChange={(e) => setFormData({...formData, speed: e.target.value})}
+                placeholder="Contoh: 10/10"
+              />
+            </div>
+            <div>
+              <Label htmlFor="edit-price">Harga</Label>
+              <Input
+                id="edit-price"
+                type="number"
+                value={formData.price}
+                onChange={(e) => setFormData({...formData, price: e.target.value})}
+                placeholder="Masukkan harga"
+              />
+            </div>
+            <div>
+              <Label htmlFor="edit-group">Grup</Label>
+              <Input
+                id="edit-group"
+                value={formData.group}
+                onChange={(e) => setFormData({...formData, group: e.target.value})}
+                placeholder="Masukkan grup paket"
+              />
+            </div>
+            <div>
+              <Label htmlFor="edit-rate-limit">Rate Limit</Label>
+              <Input
+                id="edit-rate-limit"
+                value={formData.rate_limit}
+                onChange={(e) => setFormData({...formData, rate_limit: e.target.value})}
+                placeholder="Contoh: 10M/10M"
+              />
+            </div>
+            <div>
+              <Label htmlFor="edit-hpp">HPP (Harga Pokok)</Label>
+              <Input
+                id="edit-hpp"
+                type="number"
+                value={formData.hpp}
+                onChange={(e) => setFormData({...formData, hpp: e.target.value})}
+                placeholder="Masukkan HPP"
+              />
+            </div>
+            <div>
+              <Label htmlFor="edit-commission">Komisi</Label>
+              <Input
+                id="edit-commission"
+                type="number"
+                value={formData.commission}
+                onChange={(e) => setFormData({...formData, commission: e.target.value})}
+                placeholder="Masukkan komisi"
+              />
+            </div>
+            <div className="flex items-center space-x-2">
+              <Switch
+                id="edit-shared"
+                checked={formData.shared}
+                onCheckedChange={(checked) => setFormData({...formData, shared: checked})}
+              />
+              <Label htmlFor="edit-shared">Shared</Label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Switch
+                id="edit-active"
+                checked={formData.is_active}
+                onCheckedChange={(checked) => setFormData({...formData, is_active: checked})}
+              />
+              <Label htmlFor="edit-active">Aktif</Label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowEditDialog(false)}
+              disabled={formLoading}
+            >
+              Batal
+            </Button>
+            <Button
+              onClick={handleUpdatePackage}
+              disabled={formLoading || !formData.name || !formData.speed || !formData.price}
+            >
+              {formLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Menyimpan...
+                </>
+              ) : (
+                'Update'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

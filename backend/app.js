@@ -1393,10 +1393,13 @@ function startServer(portToUse) {
 }
 
 // Mulai server setelah memastikan database siap (migrations)
+// NOTE: SQLite migration disabled - using PostgreSQL instead
 (async () => {
     try {
-        const { ensureMultiServerDatabase } = require('./config/db-init');
-        await ensureMultiServerDatabase();
+        // Skip SQLite migration since we're using PostgreSQL
+        // const { ensureMultiServerDatabase } = require('./config/db-init');
+        // await ensureMultiServerDatabase();
+        logger.info('SQLite migration skipped - using PostgreSQL database');
     } catch (e) {
         logger.warn(`Database migration step encountered an issue: ${e.message}`);
     }

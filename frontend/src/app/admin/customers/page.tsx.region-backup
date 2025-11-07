@@ -18,7 +18,6 @@ import {
   Trash2,
   X,
   Save,
-  MapPin,
 } from 'lucide-react'
 import { Button } from '@/components/ui'
 import { Input } from '@/components/ui'
@@ -30,7 +29,6 @@ import { formatCurrency } from '@/lib/utils'
 import { api, endpoints } from '@/lib/api'
 import CustomerMap from '@/components/CustomerMap'
 import CoordinateMap from '@/components/CoordinateMap'
-import RegionModal from '@/components/RegionModal'
 
 interface Customer {
   id: string
@@ -110,8 +108,6 @@ export default function CustomersPage() {
   const [showDetailModal, setShowDetailModal] = useState(false)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
-  const [showRegionModal, setShowRegionModal] = useState(false)
-  const [regions, setRegions] = useState<any[]>([])
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [totalItems, setTotalItems] = useState(0)
@@ -136,7 +132,6 @@ export default function CustomersPage() {
   useEffect(() => {
     fetchCustomers()
     fetchPackages()
-    fetchRegions()
   }, [currentPage, pageSize, searchQuery, filterStatus, sortField, sortDirection])
 
   const fetchCustomers = async () => {
@@ -186,17 +181,6 @@ export default function CustomersPage() {
       }
     } catch (err: any) {
       console.error('Error fetching packages:', err)
-    }
-  }
-
-  const fetchRegions = async () => {
-    try {
-      const response = await api.get('/api/v1/regions')
-      if (response.data.success) {
-        setRegions(response.data.data || [])
-      }
-    } catch (err: any) {
-      console.error('Error fetching regions:', err)
     }
   }
 
@@ -344,16 +328,6 @@ export default function CustomersPage() {
           >
             <Download className="h-4 w-4" />
             Export
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="flex items-center space-x-2"
-            onClick={() => setShowRegionModal(true)}
-          >
-            <MapPin className="h-4 w-4" />
-            <span className="hidden sm:inline">Kelola Wilayah</span>
-            <span className="sm:hidden">Wilayah</span>
           </Button>
           <Button
             className="flex items-center space-x-2"
@@ -822,25 +796,12 @@ export default function CustomersPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="create-region">Wilayah</Label>
-                  <Select value={formData.region} onValueChange={(value) => setFormData({ ...formData, region: value })}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Pilih wilayah" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">Tidak ada wilayah</SelectItem>
-                      {regions.map((region) => (
-                        <SelectItem key={region.id} value={region.name}>
-                          {region.name}
-                          {region.district && ` - ${region.district}`}
-                          {region.regency && `, ${region.regency}`}
-                          {region.province && `, ${region.province}`}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-gray-500">
-                    Kelola wilayah melalui tombol "Kelola Wilayah" di atas
-                  </p>
+                  <Input
+                    id="create-region"
+                    value={formData.region}
+                    onChange={(e) => setFormData({ ...formData, region: e.target.value })}
+                    placeholder="Contoh: Jakarta, Surabaya, Bandung"
+                  />
                 </div>
               </div>
 
@@ -987,12 +948,6 @@ export default function CustomersPage() {
           </DialogContent>
         </Dialog>
       )}
-
-      {/* Region Management Modal */}
-      <RegionModal
-        isOpen={showRegionModal}
-        onClose={() => setShowRegionModal(false)}
-      />
     </div>
   )
 }

@@ -266,14 +266,14 @@ export default function GenieACSPage() {
     switch (status) {
       case 'online':
       case 'connected':
-        return 'bg-green-100 text-green-800 border-green-300'
+        return 'bg-green-100/60 text-green-800 border-green-300'
       case 'offline':
       case 'disconnected':
-        return 'bg-red-100 text-red-800 border-red-300'
+        return 'bg-red-100/60 text-red-800 border-red-300'
       case 'warning':
-        return 'bg-yellow-100 text-yellow-800 border-yellow-300'
+        return 'bg-amber-100/60 text-amber-800 border-amber-300'
       default:
-        return 'bg-gray-100 text-gray-800 border-gray-300'
+        return 'bg-gray-100/60 text-gray-800 border-gray-300'
     }
   }
 
@@ -295,17 +295,17 @@ export default function GenieACSPage() {
   const getSignalStrengthColor = (snr?: string) => {
     if (!snr) return 'text-gray-500'
     const snrValue = parseFloat(snr)
-    if (snrValue >= 30) return 'text-green-600'
-    if (snrValue >= 20) return 'text-yellow-600'
-    return 'text-red-600'
+    if (snrValue >= 30) return 'text-green-700'
+    if (snrValue >= 20) return 'text-amber-700'
+    return 'text-red-700'
   }
 
   const getAttenuationColor = (attenuation?: string) => {
     if (!attenuation) return 'text-gray-500'
     const attenValue = parseFloat(attenuation)
-    if (attenValue <= 20) return 'text-green-600'
-    if (attenValue <= 30) return 'text-yellow-600'
-    return 'text-red-600'
+    if (attenValue <= 20) return 'text-green-700'
+    if (attenValue <= 30) return 'text-amber-700'
+    return 'text-red-700'
   }
 
   const filteredDevices = devices.filter(device => {
@@ -396,7 +396,7 @@ export default function GenieACSPage() {
               <h3 className="text-sm font-medium text-muted-foreground">Offline</h3>
               <WifiOff className="h-4 w-4 text-red-600" />
             </div>
-            <div className="text-2xl font-bold text-red-600">{stats.offline_devices}</div>
+            <div className="text-2xl font-bold text-red-700">{stats.offline_devices}</div>
             <p className="text-xs text-muted-foreground">
               {stats.total_devices > 0 ? ((stats.offline_devices / stats.total_devices) * 100).toFixed(1) : 0}% dari total
             </p>
@@ -407,9 +407,9 @@ export default function GenieACSPage() {
           <CardContent className="p-6">
             <div className="flex items-center justify-between space-y-0 pb-2">
               <h3 className="text-sm font-medium text-muted-foreground">Warning</h3>
-              <AlertCircle className="h-4 w-4 text-yellow-600" />
+              <AlertCircle className="h-4 w-4 text-amber-600" />
             </div>
-            <div className="text-2xl font-bold text-yellow-600">{stats.warning_devices}</div>
+            <div className="text-2xl font-bold text-amber-700">{stats.warning_devices}</div>
             <p className="text-xs text-muted-foreground">
               {stats.total_devices > 0 ? ((stats.warning_devices / stats.total_devices) * 100).toFixed(1) : 0}% dari total
             </p>
@@ -565,8 +565,8 @@ export default function GenieACSPage() {
                           <div className="flex justify-between items-center">
                             <span className="text-sm font-medium">User Konek:</span>
                             <div className="flex items-center space-x-1">
-                              <Wifi className="h-3 w-3 text-blue-500" />
-                              <span className="text-sm font-semibold text-blue-600">
+                              <Wifi className="h-3 w-3 text-blue-600" />
+                              <span className="text-sm font-semibold text-blue-700">
                                 {device.userKonek || '0'}
                               </span>
                             </div>
@@ -579,10 +579,10 @@ export default function GenieACSPage() {
                             <span className="text-sm font-medium">RX Power:</span>
                             <div className={`font-semibold ${
                               device.rxPower && parseFloat(device.rxPower.toString()) < -25
-                                ? 'text-red-600'
+                                ? 'text-red-700'
                                 : device.rxPower && parseFloat(device.rxPower.toString()) < -20
-                                ? 'text-yellow-600'
-                                : 'text-green-600'
+                                ? 'text-amber-700'
+                                : 'text-green-700'
                             }`}>
                               <Signal className="inline h-3 w-3 mr-1" />
                               {device.rxPower ? `${device.rxPower} dBm` : '-'}
@@ -642,13 +642,13 @@ export default function GenieACSPage() {
                     <table className="w-full">
                       <thead className="bg-muted/50">
                         <tr className="border-b">
-                          <th className="text-left p-4 font-semibold text-foreground whitespace-nowrap">No</th>
-                          <th className="text-left p-4 font-semibold text-foreground whitespace-nowrap min-w-[150px]">PPPoE Username</th>
-                          <th className="text-left p-4 font-semibold text-foreground whitespace-nowrap min-w-[140px]">SSID</th>
-                          <th className="text-left p-4 font-semibold text-foreground whitespace-nowrap text-center">User Konek</th>
-                          <th className="text-left p-4 font-semibold text-foreground whitespace-nowrap min-w-[140px]">Nomor Pelanggan</th>
-                          <th className="text-left p-4 font-semibold text-foreground whitespace-nowrap text-center">RX Power</th>
-                          <th className="text-left p-4 font-semibold text-foreground whitespace-nowrap text-center min-w-[180px]">Aksi</th>
+                          <th className="text-left p-2 px-3 text-sm font-semibold text-foreground whitespace-nowrap">No</th>
+                          <th className="text-left p-2 px-3 text-sm font-semibold text-foreground whitespace-nowrap min-w-[120px]">PPPoE Username</th>
+                          <th className="text-left p-2 px-3 text-sm font-semibold text-foreground whitespace-nowrap min-w-[120px]">SSID</th>
+                          <th className="text-left p-2 px-3 text-sm font-semibold text-foreground whitespace-nowrap text-center">User Konek</th>
+                          <th className="text-left p-2 px-3 text-sm font-semibold text-foreground whitespace-nowrap min-w-[120px]">Nomor Pelanggan</th>
+                          <th className="text-left p-2 px-3 text-sm font-semibold text-foreground whitespace-nowrap text-center">RX Power</th>
+                          <th className="text-left p-2 px-3 text-sm font-semibold text-foreground whitespace-nowrap text-center min-w-[140px]">Aksi</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y">
@@ -657,45 +657,45 @@ export default function GenieACSPage() {
 
                           return (
                             <tr key={device._id || device.id} className="hover:bg-muted/30 transition-colors">
-                              <td className="p-4">
-                                <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center">
-                                  <span className="text-sm font-semibold text-primary">{index + 1}</span>
+                              <td className="p-2 px-3">
+                                <div className="w-6 h-6 bg-primary/10 rounded-full flex items-center justify-center">
+                                  <span className="text-xs font-semibold text-primary">{index + 1}</span>
                                 </div>
                               </td>
-                              <td className="p-4">
-                                <div className="font-mono text-sm font-medium bg-muted px-2 py-1 rounded border">
+                              <td className="p-2 px-3">
+                                <div className="font-mono text-xs font-medium bg-muted px-1.5 py-0.5 rounded border">
                                   {device.pppoeUsername || '-'}
                                 </div>
                               </td>
-                              <td className="p-4">
-                                <div className="flex items-center space-x-2">
-                                  <Wifi className="h-4 w-4 text-blue-500" />
-                                  <span className="font-medium">{device.ssid || '-'}</span>
+                              <td className="p-2 px-3">
+                                <div className="flex items-center space-x-1">
+                                  <Wifi className="h-3 w-3 text-blue-500" />
+                                  <span className="text-xs font-medium">{device.ssid || '-'}</span>
                                 </div>
                               </td>
-                              <td className="p-4 text-center">
-                                <div className="inline-flex items-center space-x-1 bg-blue-50 text-blue-700 px-2 py-1 rounded-full text-sm font-semibold">
+                              <td className="p-2 px-3 text-center">
+                                <div className="flex items-center space-x-1 text-blue-700">
                                   <Wifi className="h-3 w-3" />
-                                  <span>{device.userKonek || '0'}</span>
+                                  <span className="text-xs">{device.userKonek || '0'}</span>
                                 </div>
                               </td>
-                              <td className="p-4">
-                                <span className="font-mono text-sm">{device.tag || '-'}</span>
+                              <td className="p-2 px-3">
+                                <span className="font-mono text-xs">{device.tag || '-'}</span>
                               </td>
-                              <td className="p-4 text-center">
-                                <div className={`inline-flex items-center space-x-1 px-2 py-1 rounded-full text-sm font-semibold ${
+                              <td className="p-2 px-3 text-center">
+                                <div className={`flex items-center space-x-1 ${
                                   device.rxPower && parseFloat(device.rxPower.toString()) < -25
-                                    ? 'bg-red-100 text-red-700'
+                                    ? 'text-red-700'
                                     : device.rxPower && parseFloat(device.rxPower.toString()) < -20
-                                    ? 'bg-yellow-100 text-yellow-700'
-                                    : 'bg-green-100 text-green-700'
+                                    ? 'text-amber-700'
+                                    : 'text-green-700'
                                 }`}>
                                   <Signal className="h-3 w-3" />
-                                  <span>{device.rxPower ? `${device.rxPower} dBm` : '-'}</span>
+                                  <span className="text-xs">{device.rxPower ? `${device.rxPower} dBm` : '-'}</span>
                                 </div>
                               </td>
-                              <td className="p-4">
-                                <div className="flex items-center justify-center space-x-2">
+                              <td className="p-2 px-3">
+                                <div className="flex items-center justify-center space-x-1">
                                   <Button
                                     variant="outline"
                                     size="sm"
@@ -703,7 +703,7 @@ export default function GenieACSPage() {
                                       setSelectedDevice(device)
                                       setShowDetails(true)
                                     }}
-                                    className="h-8 px-3"
+                                    className="h-6 px-2"
                                     title="Lihat Detail"
                                   >
                                     <Eye className="h-3 w-3 mr-1" />
@@ -713,7 +713,7 @@ export default function GenieACSPage() {
                                     variant="outline"
                                     size="sm"
                                     onClick={() => handleEditSSID(device)}
-                                    className="h-8 px-3"
+                                    className="h-6 px-2"
                                     title="Edit SSID & Password"
                                   >
                                     <Edit className="h-3 w-3 mr-1" />
@@ -723,7 +723,7 @@ export default function GenieACSPage() {
                                     variant="outline"
                                     size="sm"
                                     onClick={() => handleDeviceAction(device._id || device.id, 'reboot')}
-                                    className="h-8 px-3"
+                                    className="h-6 px-2"
                                     title="Restart ONU"
                                   >
                                     <RefreshCw className="h-3 w-3 mr-1" />
@@ -832,9 +832,9 @@ export default function GenieACSPage() {
                   </div>
                 </div>
 
-                <div className="flex items-center space-x-2 p-3 bg-blue-50 rounded-lg">
+                <div className="flex items-center space-x-2 p-3 bg-blue-50/50 rounded-lg">
                   <AlertCircle className="h-4 w-4 text-blue-600 flex-shrink-0" />
-                  <p className="text-xs text-blue-700">
+                  <p className="text-xs text-blue-800">
                     Perubahan akan diterapkan langsung ke perangkat ONU. Pastikan device online.
                   </p>
                 </div>
@@ -1025,7 +1025,7 @@ export default function GenieACSPage() {
                       <span className="text-muted-foreground">Tags:</span>
                       <div className="flex gap-1">
                         {selectedDevice.tags?.map((tag, index) => (
-                          <span key={index} className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                          <span key={index} className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100/60 text-gray-800">
                             {tag}
                           </span>
                         )) || <span className="text-muted-foreground">No tags</span>}
