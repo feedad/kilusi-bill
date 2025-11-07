@@ -1,0 +1,157 @@
+# ===========================================
+# FreeRADIUS Default Site Configuration
+# ===========================================
+# This file processes authentication and accounting requests
+
+# Read the main attribute dictionaries
+$INCLUDE ${modconfdir}/attr_filter
+
+# Filter the attributes to make sure we only send back
+# attributes that we understand.
+preacct {
+    # Clean up the request attributes
+    preprocess
+
+    # Ensure we have a sane accounting request
+    acct_unique
+
+    # Look for IP addresses in NAS-IP-Address and Framed-IP-Address
+    files
+
+    # If we don't have an IP address, look in the Client-IP-Address
+    # or in the Calling-Station-Id
+    expr
+
+    # No more modifications to be done to the request.
+    # Stop processing the section at this point.
+    suffix
+    expiration
+    logintime
+}
+
+# Accounting section
+accounting {
+    #  Log the accounting data
+    detail
+
+    #  Create a unique session ID for each accounting record
+    acct_unique
+
+    #  Write to a SQL database
+    sql
+
+    #  Filter the attributes to make sure we only send back
+    #  attributes that we understand.
+    attr_filter.accounting_response
+
+    #  See the README file in the raddb/mods-available/sql
+    #  for more information about this module.
+    #  sql
+
+    #  Instead of sending the query to the SQL server,
+    #  we write the query to a file.  See the
+    #  'mod_log_sql' module for more information.
+    #
+    #  sql_log
+
+    #  Uncomment this if you want to use radutmp.  See the
+    #  'mods-available/radutmp' file for more information.
+    #
+    #  radutmp
+
+    #  Uncomment this if you want to use the 'sqlsession' module.
+    #  This module keeps a SQL table of users who are currently
+    #  logged in.  See the 'mods-available/sqlsession' file for
+    #  more information.
+    #
+    #  sqlsession
+
+    #  Uncomment this if you want to use the 'lastlog' module.
+    #  This module keeps a SQL table of the last login time for
+    #  each user.  See the 'mods-available/lastlog' file for more
+    #  information.
+    #
+    #  lastlog
+}
+
+# Session verification section
+session {
+    #  Create a unique session ID for each session
+    radutmp
+
+    #  Include the SQL session module
+    sql
+
+    #  Uncomment this if you want to use the 'sqlsession' module.
+    #  This module keeps a SQL table of users who are currently
+    #  logged in.  See the 'mods-available/sqlsession' file for
+    #  more information.
+    #
+    #  sqlsession
+}
+
+# Post-Authentication section
+post-auth {
+    #  Get the client IP address
+    update reply {
+        &Reply-Message := "Authentication successful"
+    }
+
+    #  Write to a SQL database
+    sql
+
+    #  Log successful authentications to a file
+    exec
+
+    #  No more processing
+    #  The user is now authenticated, and we have logged the
+    #  authentication, so we don't need any more processing.
+    #  This also prevents the 'authenticate' section from being
+    #  called twice.
+    #
+    #  The Post-Authentication section is also used for
+    #  CoA and Disconnect messages.
+    #
+    #  Post-Authentication-Type ACCEPT
+}
+
+# Pre-proxy section
+pre-proxy {
+    #  Uncomment this if you want to modify the request
+    #  before it is sent to the home server.
+    #
+    #  attr_filter.pre-proxy
+
+    #  Uncomment this if you want to use the 'rewrite' module
+    #  to modify the request before it is sent to the home server.
+    #
+    #  rewrite
+}
+
+# Post-proxy section
+post-proxy {
+    #  Uncomment this if you want to modify the response
+    #  after it comes back from the home server.
+    #
+    #  attr_filter.post-proxy
+
+    #  Uncomment this if you want to use the 'rewrite' module
+    #  to modify the response after it comes back from the home
+    #  server.
+    #
+    #  rewrite
+
+    #  Post-Proxy-Type Fail
+    #  Post-Proxy-Type Fail {
+    #      #  If we fail, then we don't want to do anything else.
+    #      #
+    #      #  This means we don't try to authenticate the user,
+    #      #  or to log the authentication, or to do any other
+    #      #  processing.
+    #      #
+    #      #  The only thing we do is to send back a
+    #      #  'Access-Reject' packet.
+    #      #
+    #      reject
+    #  }
+}

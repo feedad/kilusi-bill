@@ -1,0 +1,184 @@
+# ===========================================
+# FreeRADIUS SQL Module Configuration
+# ===========================================
+# This module connects FreeRADIUS to a PostgreSQL database
+
+sql {
+    # The sub-module to use to connect to the database.
+    # See mods-available/sql for the list of available sub-modules.
+    driver = "rlm_sql_postgresql"
+
+    # Connection info:
+    server = "postgres"
+    port = 5432
+    login = "${POSTGRES_USER:-kilusi_user}"
+    password = "${POSTGRES_PASSWORD:-kilusi1234}"
+    radius_db = "radius"
+
+    # If you want both stop and start records logged to the
+    # same SQL table, leave this as is.  If you want them in
+    # different tables, put the start table in acct_table1
+    # and the stop table in acct_table2
+    acct_table1 = "radacct"
+    acct_table2 = "radacct"
+
+    # Allow for reading from the radacct table for Simultaneous-Use checking
+    # and for start-stop times accounting
+    postauth_table = "radpostauth"
+    authcheck_table = "radcheck"
+    authreply_table = "radreply"
+    groupcheck_table = "radgroupcheck"
+    groupreply_table = "radgroupreply"
+    usergroup_table = "radusergroup"
+
+    # Delete all stale sessions if the SQL server is marked dead
+    delete_stale_sessions = yes
+
+    # Set to 'yes' to enable query logging
+    sqltrace = no
+    sqltracefile = ${logdir}/sqltrace.sql
+
+    # The number of times to attempt to connect to the SQL database
+    num_sql_socks = 5
+
+    # How many seconds to wait for a response from the SQL server
+    connect_timeout = 3
+
+    # Lifetime of an SQL connection.  After this many seconds,
+    # the connection will be closed.  You may want to set this
+    # to 0 (infinite lifetime), or to a small value if you
+    # want to quickly reclaim the connections.
+    lifetime = 0
+
+    # How many seconds between pool re-tries
+    max_queries = 0
+
+    # Set to 'yes' to read database clients from the database (nas table)
+    read_clients = yes
+
+    # Table to keep track of radius clients
+    client_table = "nas"
+
+    # Read groups from the database (for group checking)
+    read_groups = yes
+
+    # Remove stale session if checkrad does not see a double login
+    deletestalesessions = yes
+
+    # Print all SQL statements when in debug mode (-x)
+    debug = 0
+
+    # This is a comma-separated list of SQL queries that will be
+    # executed in order when a request is received.
+    #
+    #  See "Authorization Queries" in mods-available/sql for
+    #  documentation on what these queries do.
+    #
+    #  The queries below are the default queries, which work for
+    #  the default schema.  You can change them to match your
+    #  own schema.
+    #
+    #  Note that many of these queries are commented out.
+    #  That means they are not used by default.  If you want
+    #  to use them, uncomment them.
+
+    #  The following queries are used for authentication.
+    #
+    #  The queries are executed in order.  The first query that
+    #  returns a row will be used.  If no query returns a row,
+    #  the user will be rejected.
+    #
+    #  These queries are designed to be used with the default
+    #  schema.  You can change them to match your own schema.
+
+    # Authentication query
+    authenticate_query = "SELECT id, username, attribute, value, op \
+        FROM ${authcheck_table} \
+        WHERE username = '%{SQL-User-Name}' \
+        ORDER BY id"
+
+    # Authorization Queries
+    authorize_check_query = "SELECT id, username, attribute, value, op \
+        FROM ${authcheck_table} \
+        WHERE username = '%{SQL-User-Name}' \
+        ORDER BY id"
+
+    authorize_reply_query = "SELECT id, username, attribute, value, op \
+        FROM ${authreply_table} \
+        WHERE username = '%{SQL-User-Name}' \
+        ORDER BY id"
+
+    authorize_group_check_query = "SELECT id, groupname, attribute, \
+        Value, op \
+        FROM ${groupcheck_table} \
+        WHERE groupname = '%{Sql-Group}' \
+        ORDER BY id"
+
+    authorize_group_reply_query = "SELECT id, groupname, attribute, \
+        value, op \
+        FROM ${groupreply_table} \
+        WHERE groupname = '%{Sql-Group}' \
+        ORDER BY id"
+
+    # Accounting Queries
+    accounting_onoff_query = "UPDATE ${acct_table1} \
+        SET acctstoptime = ('%S'::timestamp), \
+        acctsessiontime = (EXTRACT(EPOCH FROM ('%S'::timestamp - acctstarttime::timestamp)))::bigint, \
+        acctterminatecause = '%{Acct-Terminate-Cause}', \
+        acctstopdelay = %{%{Acct-Delay-Time}:-0}, \
+        connectinfo_stop = '%{Connect-Info}' \
+        WHERE acctsessionid = '%{Acct-Session-Id}' AND username = '%{SQL-User-Name}' \
+        AND acctstoptime IS NULL"
+
+    accounting_update_query = "UPDATE ${acct_table1} \
+        SET framedipaddress = '%{Framed-IP-Address}', \
+        acctsessiontime = (EXTRACT(EPOCH FROM ('%S'::timestamp - acctstarttime::timestamp)))::bigint, \
+        acctinputoctets = %{%{Acct-Input-Octets}:-0}, \
+        acctoutputoctets = %{%{Acct-Output-Octets}:-0} \
+        WHERE acctsessionid = '%{Acct-Session-Id}' AND username = '%{SQL-User-Name}' \
+        AND acctstoptime IS NULL"
+
+    accounting_update_query_alt = "INSERT INTO ${acct_table1} \
+        (acctsessionid, acctuniqueid, username, realm, nasipaddress, nasportid, \
+        nasporttype, acctstarttime, acctupdatetime, acctsessiontime, \
+        acctauthentic, connectinfo_start, acctinputoctets, acctoutputoctets, \
+        calledstationid, callingstationid, acctterminatecause, servicetype, \
+        framedprotocol, framedipaddress) \
+        VALUES ('%{Acct-Session-Id}', '%{Acct-Unique-Session-Id}', \
+        '%{SQL-User-Name}', '%{Realm}', '%{NAS-IP-Address}', '%{NAS-Port}', \
+        '%{NAS-Port-Type}', '%S'::timestamp, '%S'::timestamp, \
+        '0', '%{Acct-Authentic}', '%{Connect-Info}', \
+        '%{%{Acct-Input-Octets}:-0}', '%{%{Acct-Output-Octets}:-0}', \
+        '%{Called-Station-Id}', '%{Calling-Station-Id}', '', \
+        '%{Service-Type}', '%{Framed-Protocol}', '%{Framed-IP-Address}')"
+
+    # Simultaneous Use Checking Queries
+    simul_count_query = "SELECT COUNT(*) \
+        FROM ${acct_table1} \
+        WHERE username = '%{SQL-User-Name}' \
+        AND acctstoptime IS NULL"
+
+    simul_verify_query = "SELECT radacctid, acctsessionid, username, \
+        nasipaddress, nasportid, fram edipaddress, \
+        callingstationid, framedprotocol \
+        FROM ${acct_table1} \
+        WHERE username = '%{SQL-User-Name}' \
+        AND acctstoptime IS NULL"
+
+    # Group Membership Queries
+    group_membership_query = "SELECT groupname \
+        FROM ${usergroup_table} \
+        WHERE username = '%{SQL-User-Name}' \
+        ORDER BY priority"
+
+    # Post-Auth Query
+    postauth_query = "INSERT INTO ${postauth_table} \
+        (username, pass, reply, authdate) \
+        VALUES ('%{SQL-User-Name}', '%{%{User-Password}:-%{Chap-Password}}', \
+        '%{reply:Packet-Type}', '%S')"
+
+    # Client Queries
+    client_query = "SELECT nasname, shortname, type, secret, server \
+        FROM ${client_table} \
+        WHERE nasname = '%{Client-IP-Address}'"
+}

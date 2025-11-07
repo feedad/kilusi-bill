@@ -1,67 +1,201 @@
-# Node modules
+# Dependencies
 node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+*/node_modules/
 
-# Logs
-logs/
-*.log
+# Build outputs
+.next/
+dist/
+build/
 
 # Environment variables
 .env
 .env.local
-.env.production
+.env.development.local
+.env.test.local
+.env.production.local
+.env.docker
+
+# Docker environment files
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Configuration files with sensitive data
+backend/settings.json
+backend/.env
+backend/.env.local
+backend/.env.development.local
+backend/.env.test.local
+backend/.env.production.local
+
+# Frontend environment files
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+# Session and authentication files
+backend/whatsapp-session/*
+backend/session/
+backend/sessions/
+backend/auth/keys/
+
+# Certificate files
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
 
 # Database files
 *.db
 *.sqlite
 *.sqlite3
 
-# Backups
-backups/
-backup-*/
+# Backup files (already included but keeping for clarity)
+backend/backups/
+*.sql
+*.dump
+*.backup
 
-# WhatsApp session data
-whatsapp-session/
-*.json.crypt
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
 
-# OS files
-.DS_Store
-Thumbs.db
-desktop.ini
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+*.lcov
+
+# nyc test coverage
+.nyc_output
+
+# Dependency directories
+jspm_packages/
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Optional REPL history
+.node_repl_history
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
+
+# dotenv environment variables file
+.env
+
+# parcel-bundler cache (https://parceljs.org/)
+.cache
+.parcel-cache
+
+# Next.js build output
+.next
+
+# Nuxt.js build / generate output
+.nuxt
+dist
+
+# Gatsby files
+.cache/
+public
+
+# Storybook build outputs
+.out
+.storybook-out
+
+# Temporary folders
+tmp/
+temp/
 
 # Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
+.vscode/
+.idea/
 *.swp
 *.swo
 *~
-.project
-.classpath
-.settings/
-*.sublime-project
-*.sublime-workspace
 
-# Build files
-dist/
-build/
-*.tgz
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 
-# Backup files
+# Database backups
+backend/backups/
+*.sql
+*.dump
 *.backup
-*.backup.*
-*.bak
 
-# Temporary files
-tmp/
-temp/
-*.tmp
+# Documentation files (except README.md)
+*.md
+!README.md
+!config-examples/README.md
+!backend/README.md
+!frontend/README.md
 
-# Settings file (may contain sensitive data)
-# Uncomment if you want to exclude settings.json
-# settings.json
+# Exclude all documentation from backend/scripts-extras
+backend/scripts-extras/*.md
+backend/docs/*.md
+backend/freeradius-docker/docs/*.md
 
-# Data directory
-data/
+# Exclude changelog and progress files
+CHANGELOG*
+*MIGRATION*
+*PROGRESS*
+WORK_PROGRESS*
+STATUS*
+DIAGNOSTIC*
+TROUBLESHOOTING*
+GUIDE*
+FAQ*
+
+# Exclude test files and scripts
+test-*.js
+debug-*.js
+check-*.js
+create-*.js
+fix-*.js
+analyze-*.js
+monitor-*.js
+simple-*.js
+reset-*.js
+update-*.js
+verify-*.js
+setup-*.js
+cleanup-*.js
+backup-*.js
+restore-*.js
+
+# Exclude batch and shell scripts (except development scripts)
+*.bat
+!start-dev.bat
+*.sh
+!start-dev.sh
+!docker/postgres/init/*.sh
+!backend/freeradius-docker/scripts/*.sh
+
+# Exclude configuration backups
+*.conf.backup
+*.config.backup
+settings.json.backup
+*.env.backup
