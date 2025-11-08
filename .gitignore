@@ -140,6 +140,14 @@ temp/
 ehthumbs.db
 Thumbs.db
 
+# Screenshot files (exclude from git)
+Screenshot*
+*Screenshots*
+screenshot*
+*screenshots*
+/Screenshot*
+/*Screenshots*
+
 # Database backups
 backend/backups/
 *.sql
