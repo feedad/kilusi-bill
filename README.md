@@ -52,6 +52,44 @@ Sistem billing dan management untuk ISP lengkap dengan RADIUS authentication, mo
 - **Storage**: Minimum 20GB, Recommended 50GB+
 - **Network**: Static IP untuk RADIUS devices
 - **Docker**: Docker & Docker Compose (auto-installed)
+- **Node.js**: Version 18.x or later (for development)
+- **PostgreSQL**: Version 14+ (for development)
+
+### 🛠️ Development Setup
+
+For local development without Docker:
+
+```bash
+# 1. Clone repository
+git clone https://github.com/feedad/kilusi-bill.git
+cd kilusi-bill
+
+# 2. Install backend dependencies
+cd backend
+npm install
+
+# 3. Setup environment variables
+cp .env.example .env
+# Edit .env with your database configuration
+
+# 4. Install frontend dependencies
+cd ../frontend
+npm install
+
+# 5. Start development servers
+# Backend (terminal 1)
+cd ../backend
+npm run dev
+
+# Frontend (terminal 2)
+cd ../frontend
+npm run dev
+
+# Access application
+# Frontend: http://localhost:3001
+# Backend API: http://localhost:3000
+# Default login: admin/aw3s0me17 (check settings.json)
+```
 
 ### 🎯 Auto Install (Recommended)
 
@@ -159,7 +197,54 @@ Setelah install dan konfigurasi:
 
 ### Default Login
 - **Username**: `admin`
-- **Password**: Check di settings.json (ubah setelah install)
+- **Password**: `aw3s0me17` (ubah setelah install di settings.json)
+
+## 🎯 Current Development Status
+
+### ✅ Completed Features (as of November 2025)
+
+#### Frontend (Next.js + TypeScript)
+- **Customer Management System** with full CRUD operations
+  - Customer creation with form validation
+  - Customer listing with search and filtering
+  - Customer detail modal with comprehensive information
+  - Edit functionality with pre-populated forms
+  - Delete functionality with confirmation dialogs
+- **Interactive Map Integration** using react-leaflet
+  - Draggable markers for location selection
+  - Click-to-set location functionality
+  - GPS location detection
+  - Coordinate input fields with validation
+  - Address geocoding integration
+- **Real API Integration**
+  - Regions dropdown populated from database (11 regions)
+  - Packages dropdown with real service packages
+  - Router/NAS dropdown with RADIUS integration
+  - All dropdowns using native HTML selects (replaced problematic shadcn/ui components)
+
+#### Backend (Node.js + Express + PostgreSQL)
+- **Authentication System** with JWT tokens
+- **API Endpoints** for customers, regions, packages, and NAS management
+- **Database Integration** with proper field mapping
+- **Error Handling** with comprehensive validation
+
+### 🔧 Technical Improvements Made
+- **Fixed Dropdown Data Loading**: Replaced shadcn/ui Select components with native HTML selects
+- **Restored Map Functionality**: Fixed SSR issues with react-leaflet using dynamic imports
+- **API Field Mapping**: Corrected field name mismatches between API and frontend
+- **Error Handling**: Added safety checks for array operations
+- **State Management**: Implemented proper create/edit mode handling
+
+### 📊 Database Status
+- **11 Regions** loaded with hierarchical administrative data
+- **Service Packages** integrated with pricing and features
+- **RADIUS/NAS Devices** with status monitoring
+- **Customer Data** with coordinate mapping
+
+### 🌐 Access Points
+- **Development Frontend**: http://localhost:3001
+- **Development Backend**: http://localhost:3000
+- **API Documentation**: http://localhost:3000/api/v1/docs
 
 ## 🔧 Management Commands
 
