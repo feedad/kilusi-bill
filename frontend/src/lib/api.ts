@@ -49,6 +49,14 @@ export const endpoints = {
     verify: '/auth/verify',
   },
 
+  // Regions
+  regions: {
+    list: '/regions',
+    create: '/regions',
+    update: (id: string) => `/regions/${id}`,
+    delete: (id: string) => `/regions/${id}`,
+  },
+
   // Customers
   customers: {
     list: '/customers',

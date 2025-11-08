@@ -14,18 +14,17 @@ import {
   Shield,
   ChevronUp,
   ChevronDown,
-  Edit,
-  Trash2,
-  X,
   Save,
   MapPin,
+  Edit,
+  Trash2,
 } from 'lucide-react'
 import { Button } from '@/components/ui'
 import { Input } from '@/components/ui'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+// import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select' // Replaced with native HTML selects
 import { formatCurrency } from '@/lib/utils'
 import { api, endpoints } from '@/lib/api'
 import CustomerMap from '@/components/CustomerMap'
@@ -63,12 +62,23 @@ interface Customer {
 }
 
 interface Package {
-  id: string
+  id: number
   name: string
   price: number
   speed: string
   description?: string
-  is_active: boolean
+  isActive: boolean
+}
+
+interface Router {
+  id: number
+  shortname: string
+  nasname: string
+  type: string
+  description: string
+  status: string
+  ports?: number
+  snmp_status?: string
 }
 
 interface FormData {
@@ -101,6 +111,7 @@ interface CustomerStats {
 export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [packages, setPackages] = useState<Package[]>([])
+  const [routers, setRouters] = useState<Router[]>([])
   const [stats, setStats] = useState<CustomerStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -109,7 +120,8 @@ export default function CustomersPage() {
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
   const [showDetailModal, setShowDetailModal] = useState(false)
   const [showCreateModal, setShowCreateModal] = useState(false)
-  const [showEditModal, setShowEditModal] = useState(false)
+  const [isEditing, setIsEditing] = useState(false)
+  const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null)
   const [showRegionModal, setShowRegionModal] = useState(false)
   const [regions, setRegions] = useState<any[]>([])
   const [currentPage, setCurrentPage] = useState(1)
@@ -122,6 +134,8 @@ export default function CustomersPage() {
     phone: '',
     nik: '',
     address: '',
+    latitude: undefined,
+    longitude: undefined,
     package_id: '',
     pppoe_username: '',
     pppoe_password: '',
@@ -137,6 +151,7 @@ export default function CustomersPage() {
     fetchCustomers()
     fetchPackages()
     fetchRegions()
+    fetchRouters()
   }, [currentPage, pageSize, searchQuery, filterStatus, sortField, sortDirection])
 
   const fetchCustomers = async () => {
@@ -191,12 +206,134 @@ export default function CustomersPage() {
 
   const fetchRegions = async () => {
     try {
-      const response = await api.get('/api/v1/regions')
+      const response = await api.get(`${endpoints.regions.list}?limit=100&include_disabled=false`)
       if (response.data.success) {
-        setRegions(response.data.data || [])
+        const regionsData = response.data.data || []
+        setRegions(regionsData)
       }
     } catch (err: any) {
       console.error('Error fetching regions:', err)
+    }
+  }
+
+  const fetchRouters = async () => {
+    try {
+      const response = await api.get(endpoints.radius.nas)
+      if (response.data.success) {
+        const routersData = response.data.data.nas || []
+        setRouters(routersData)
+      }
+    } catch (err: any) {
+      console.error('Error fetching routers:', err)
+    }
+  }
+
+  const handleCreateCustomer = async () => {
+    if (!formData.name || !formData.phone) {
+      setError('Nama dan nomor telepon wajib diisi')
+      return
+    }
+
+    setSubmitting(true)
+    setError(null)
+
+    try {
+      const customerData = {
+        name: formData.name,
+        phone: formData.phone,
+        nik: formData.nik || null,
+        address: formData.address || null,
+        latitude: formData.latitude || null,
+        longitude: formData.longitude || null,
+        package_id: formData.package_id || null,
+        pppoe_username: formData.pppoe_username || null,
+        pppoe_password: formData.pppoe_password || null,
+        billing_type: formData.billing_type || 'postpaid',
+        billing_cycle: formData.billing_cycle || 'tetap',
+        router: formData.router || 'all',
+        region: formData.region || null,
+        status: formData.status || 'active'
+      }
+
+      let response
+      if (isEditing && editingCustomerId) {
+        // Update existing customer
+        response = await api.put(endpoints.customers.update(editingCustomerId), customerData)
+      } else {
+        // Create new customer
+        response = await api.post(endpoints.customers.create, customerData)
+      }
+
+      if (response.data.success) {
+        setShowCreateModal(false)
+        resetForm()
+        fetchCustomers()
+        // Reset editing state
+        setIsEditing(false)
+        setEditingCustomerId(null)
+        // Show success message
+        alert(isEditing ? 'Pelanggan berhasil diupdate!' : 'Pelanggan berhasil ditambahkan!')
+      } else {
+        setError(response.data.message || `Gagal ${isEditing ? 'mengupdate' : 'menambahkan'} pelanggan`)
+      }
+    } catch (err: any) {
+      console.error('Error creating customer:', err)
+      setError(err.response?.data?.message || err.message || 'Gagal menambahkan pelanggan')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleEditCustomer = (customer: Customer) => {
+    // Set form data with selected customer data
+    setFormData({
+      name: customer.name,
+      phone: customer.phone,
+      nik: customer.nik || '',
+      address: customer.address || '',
+      latitude: customer.latitude,
+      longitude: customer.longitude,
+      package_id: customer.package_id || '',
+      pppoe_username: customer.pppoe_username || '',
+      pppoe_password: customer.pppoe_password || '',
+      billing_type: customer.billing_type || 'postpaid',
+      billing_cycle: customer.billing_cycle || 'bulan',
+      router: customer.router || 'all',
+      region: customer.region || '',
+      status: customer.status || 'active'
+    })
+
+    // Set editing state
+    setIsEditing(true)
+    setEditingCustomerId(customer.id)
+
+    // Close detail modal and open create modal for editing
+    setShowDetailModal(false)
+    setShowCreateModal(true)
+  }
+
+  const handleDeleteCustomer = async (customerId: string) => {
+    if (!window.confirm('Apakah Anda yakin ingin menghapus pelanggan ini?')) {
+      return
+    }
+
+    try {
+      setSubmitting(true)
+      setError(null)
+
+      const response = await api.delete(endpoints.customers.delete(customerId))
+
+      if (response.data.success) {
+        setShowDetailModal(false)
+        fetchCustomers() // Refresh customer list
+      } else {
+        setError(response.data.message || 'Gagal menghapus pelanggan')
+      }
+    } catch (err: any) {
+      console.error('Error deleting customer:', err)
+      setError(err.response?.data?.message || err.message || 'Gagal menghapus pelanggan')
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -287,6 +424,10 @@ export default function CustomersPage() {
       status: 'active'
     })
     setSelectedCustomer(null)
+
+    // Reset editing state
+    setIsEditing(false)
+    setEditingCustomerId(null)
   }
 
   if (loading) {
@@ -352,14 +493,15 @@ export default function CustomersPage() {
             onClick={() => setShowRegionModal(true)}
           >
             <MapPin className="h-4 w-4" />
-            <span className="hidden sm:inline">Kelola Wilayah</span>
-            <span className="sm:hidden">Wilayah</span>
+            <span className="hidden sm:inline">Kelola Wilayah ({regions.length})</span>
+            <span className="sm:hidden">Wilayah ({regions.length})</span>
           </Button>
           <Button
             className="flex items-center space-x-2"
             onClick={() => {
               resetForm()
               setShowCreateModal(true)
+              fetchRegions() // Fetch regions when modal opens
             }}
           >
             <Plus className="h-4 w-4" />
@@ -772,10 +914,32 @@ export default function CustomersPage() {
                 </div>
               </div>
             </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowDetailModal(false)}>
-                Tutup
-              </Button>
+            <DialogFooter className="flex justify-between">
+              <div className="flex gap-2">
+                <Button
+                  variant="destructive"
+                  onClick={() => selectedCustomer && handleDeleteCustomer(selectedCustomer.id)}
+                  disabled={submitting}
+                  className="flex items-center gap-2"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Hapus
+                </Button>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => selectedCustomer && handleEditCustomer(selectedCustomer)}
+                  disabled={submitting}
+                  className="flex items-center gap-2"
+                >
+                  <Edit className="h-4 w-4" />
+                  Edit
+                </Button>
+                <Button variant="outline" onClick={() => setShowDetailModal(false)}>
+                  Tutup
+                </Button>
+              </div>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -786,8 +950,16 @@ export default function CustomersPage() {
         <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Tambah Pelanggan Baru</DialogTitle>
+              <DialogTitle>{isEditing ? 'Edit Pelanggan' : 'Tambah Pelanggan Baru'}</DialogTitle>
             </DialogHeader>
+
+            {/* Error Display */}
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+                {error}
+              </div>
+            )}
+
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -822,22 +994,22 @@ export default function CustomersPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="create-region">Wilayah</Label>
-                  <Select value={formData.region} onValueChange={(value) => setFormData({ ...formData, region: value })}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Pilih wilayah" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">Tidak ada wilayah</SelectItem>
-                      {regions.map((region) => (
-                        <SelectItem key={region.id} value={region.name}>
-                          {region.name}
-                          {region.district && ` - ${region.district}`}
-                          {region.regency && `, ${region.regency}`}
-                          {region.province && `, ${region.province}`}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <select
+                    id="create-region"
+                    value={formData.region}
+                    onChange={(e) => setFormData({ ...formData, region: e.target.value })}
+                    className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="">Pilih wilayah...</option>
+                    {Array.isArray(regions) && regions.map((region) => (
+                      <option key={region.id} value={region.name}>
+                        {region.name}
+                        {region.district && ` - ${region.district}`}
+                        {region.regency && `, ${region.regency}`}
+                        {region.province && `, ${region.province}`}
+                      </option>
+                    ))}
+                  </select>
                   <p className="text-xs text-gray-500">
                     Kelola wilayah melalui tombol "Kelola Wilayah" di atas
                   </p>
@@ -872,61 +1044,65 @@ export default function CustomersPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="create-package">Paket Layanan</Label>
-                  <Select value={formData.package_id} onValueChange={(value) => setFormData({ ...formData, package_id: value })}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Pilih paket" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">Tidak ada paket</SelectItem>
-                      {packages.filter(pkg => pkg.is_active).map((pkg) => (
-                        <SelectItem key={pkg.id} value={pkg.id}>
-                          {pkg.name} - {pkg.speed} - {formatCurrency(pkg.price)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <select
+                    id="create-package"
+                    value={formData.package_id}
+                    onChange={(e) => setFormData({ ...formData, package_id: e.target.value })}
+                    className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="">Pilih paket...</option>
+                    {Array.isArray(packages) && packages.filter(pkg => pkg.isActive).map((pkg) => (
+                      <option key={pkg.id} value={pkg.id}>
+                        {pkg.name} - {pkg.speed} - {formatCurrency(pkg.price)}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Router</Label>
-                  <Select value={formData.router} onValueChange={(value) => setFormData({ ...formData, router: value })}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Pilih router" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Router (Bebas)</SelectItem>
-                      <SelectItem value="router1">Router 1</SelectItem>
-                      <SelectItem value="router2">Router 2</SelectItem>
-                      <SelectItem value="router3">Router 3</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <Label htmlFor="create-router">Router</Label>
+                  <select
+                    id="create-router"
+                    value={formData.router}
+                    onChange={(e) => setFormData({ ...formData, router: e.target.value })}
+                    className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="all">All Router (Bebas)</option>
+                    {Array.isArray(routers) && routers.map((router) => (
+                      <option key={router.id} value={router.shortname}>
+                        {router.shortname} ({router.nasname}) - {router.snmp_status || router.status}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>Jenis Tagihan</Label>
-                  <Select value={formData.billing_type} onValueChange={(value) => setFormData({ ...formData, billing_type: value })}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Pilih jenis tagihan" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="prepaid">Prabayar</SelectItem>
-                      <SelectItem value="postpaid">Pascabayar</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <Label htmlFor="create-billing-type">Jenis Tagihan</Label>
+                  <select
+                    id="create-billing-type"
+                    value={formData.billing_type}
+                    onChange={(e) => setFormData({ ...formData, billing_type: e.target.value })}
+                    className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="">Pilih jenis tagihan</option>
+                    <option value="prepaid">Prabayar</option>
+                    <option value="postpaid">Pascabayar</option>
+                  </select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Siklus Billing</Label>
-                  <Select value={formData.billing_cycle} onValueChange={(value) => setFormData({ ...formData, billing_cycle: value })}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Pilih siklus billing" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="profile">Profile</SelectItem>
-                      <SelectItem value="tetap">Tetap</SelectItem>
-                      <SelectItem value="bulan">Bulanan</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <Label htmlFor="create-billing-cycle">Siklus Billing</Label>
+                  <select
+                    id="create-billing-cycle"
+                    value={formData.billing_cycle}
+                    onChange={(e) => setFormData({ ...formData, billing_cycle: e.target.value })}
+                    className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="">Pilih siklus billing</option>
+                    <option value="profile">Profile</option>
+                    <option value="tetap">Tetap</option>
+                    <option value="bulan">Bulanan</option>
+                  </select>
                 </div>
               </div>
 
@@ -953,24 +1129,28 @@ export default function CustomersPage() {
               </div>
 
               <div className="space-y-2">
-                <Label>Status Pelanggan</Label>
-                <Select value={formData.status} onValueChange={(value) => setFormData({ ...formData, status: value })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Pilih status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="active">Aktif</SelectItem>
-                    <SelectItem value="inactive">Tidak Aktif</SelectItem>
-                    <SelectItem value="suspended">Ditangguh</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="create-status">Status Pelanggan</Label>
+                <select
+                  id="create-status"
+                  value={formData.status}
+                  onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                  className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="">Pilih status</option>
+                  <option value="active">Aktif</option>
+                  <option value="inactive">Tidak Aktif</option>
+                  <option value="suspended">Ditangguh</option>
+                </select>
               </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setShowCreateModal(false)}>
                 Batal
               </Button>
-              <Button disabled={submitting}>
+              <Button
+                disabled={submitting}
+                onClick={handleCreateCustomer}
+              >
                 {submitting ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
