@@ -137,6 +137,7 @@
             </div>
             <div class="submenu" id="systemSection" style="background: transparent;">
                 <a href="/admin/setting" class="<%= typeof page !== 'undefined' && page === 'setting' ? 'active' : '' %>"><i class="bi bi-sliders"></i> General Settings</a>
+                <a href="/admin/setting/company-profile" class="<%= typeof currentRoute !== 'undefined' && currentRoute === 'company-profile' ? 'active' : '' %>"><i class="bi bi-building"></i> Company Profile</a>
                 <a href="/admin/whatsapp-settings" class="<%= typeof page !== 'undefined' && page === 'whatsapp-settings' ? 'active' : '' %>"><i class="bi bi-whatsapp text-success"></i> WhatsApp Settings</a>
                 <a href="/admin/radius" class="<%= typeof page !== 'undefined' && page === 'radius' ? 'active' : '' %>"><i class="bi bi-shield-lock"></i> RADIUS Server</a>
                 <!-- Server Management API, sembunyikan/hapus NAS Servers, sembunyikan Mikrotik Servers di mode radius -->

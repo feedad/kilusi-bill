@@ -133,7 +133,7 @@ async function sendNotificationToTechnicians(report) {
     logger.info(`Mencoba mengirim notifikasi laporan gangguan ${report.id} ke teknisi`);
     
     const technicianGroupId = getSetting('technician_group_id', '');
-    const companyHeader = getSetting('company_header', 'ALIJAYA DIGITAL NETWORK');
+    const companyHeader = getSetting('company_header', 'KILUSI BILL');
     
     // Format pesan untuk teknisi
     const message = `🚨 *LAPORAN GANGGUAN BARU*

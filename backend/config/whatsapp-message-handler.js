@@ -373,7 +373,7 @@ Maaf, pesan Anda tidak dapat diproses oleh sistem.
 • *BANTU* - Minta bantuan
 • *MASALAH* - Laporkan kendala
 
-*ALIJAYA DIGITAL NETWORK*`;
+*KILUSI BILL*`;
 
         // TODO: Integrate with your WhatsApp sending system
         logger.info(`Sending unrecognized message response to ${phone}`);
@@ -387,7 +387,7 @@ Maaf, nomor telepon Anda tidak terdaftar sebagai teknisi aktif.
 
 Silakan hubungi admin untuk verifikasi status teknisi Anda.
 
-*ALIJAYA DIGITAL NETWORK*`;
+*KILUSI BILL*`;
 
         // TODO: Integrate with your WhatsApp sending system
         logger.info(`Sending technician not found response to ${phone}`);
@@ -403,7 +403,7 @@ Saat ini tidak ada tugas instalasi aktif yang ditugaskan kepada Anda.
 
 Silakan tunggu penugasan dari admin atau hubungi admin jika ada pertanyaan.
 
-*ALIJAYA DIGITAL NETWORK*`;
+*KILUSI BILL*`;
 
         // TODO: Integrate with your WhatsApp sending system
         logger.info(`Sending no active job response to ${phone}`);
@@ -426,7 +426,7 @@ Tugas instalasi telah dikonfirmasi:
 
 Silakan siapkan peralatan dan lakukan instalasi sesuai jadwal.
 
-*ALIJAYA DIGITAL NETWORK*`;
+*KILUSI BILL*`;
                 break;
                 
             case 'start_installation':
@@ -441,7 +441,7 @@ Instalasi telah dimulai:
 
 Lakukan instalasi dengan teliti dan aman.
 
-*ALIJAYA DIGITAL NETWORK*`;
+*KILUSI BILL*`;
                 break;
                 
             case 'complete_installation':
@@ -457,7 +457,7 @@ Selamat! Instalasi telah berhasil diselesaikan:
 
 Terima kasih telah menyelesaikan tugas dengan baik!
 
-*ALIJAYA DIGITAL NETWORK*`;
+*KILUSI BILL*`;
                 break;
                 
             case 'help_requested':
@@ -471,9 +471,9 @@ Permintaan bantuan Anda telah diterima:
 
 Tim support akan segera menghubungi Anda.
 
-📞 *Support:* 081947215703
+📞 *Support:* +6281234567890
 
-*ALIJAYA DIGITAL NETWORK*`;
+*KILUSI BILL*`;
                 break;
                 
             case 'problem_reported':
@@ -487,9 +487,9 @@ Laporan masalah Anda telah diterima:
 
 Tim support akan segera menindaklanjuti.
 
-📞 *Support:* 081947215703
+📞 *Support:* +6281234567890
 
-*ALIJAYA DIGITAL NETWORK*`;
+*KILUSI BILL*`;
                 break;
                 
             case 'additional_reported':
@@ -503,7 +503,7 @@ Laporan tambahan Anda telah diterima:
 
 Terima kasih atas informasi tambahan.
 
-*ALIJAYA DIGITAL NETWORK*`;
+*KILUSI BILL*`;
                 break;
                 
             default:
@@ -511,7 +511,7 @@ Terima kasih atas informasi tambahan.
 
 Aksi Anda telah berhasil diproses oleh sistem.
 
-*ALIJAYA DIGITAL NETWORK*`;
+*KILUSI BILL*`;
         }
 
         // TODO: Integrate with your WhatsApp sending system

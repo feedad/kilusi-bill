@@ -14,8 +14,8 @@ function getVersionInfo() {
         versionDate: settings.version_date || 'Unknown Date',
         versionNotes: settings.version_notes || 'No release notes',
         buildNumber: settings.build_number || 'Unknown Build',
-        companyHeader: settings.company_header || 'GEMBOK',
-        footerInfo: settings.footer_info || 'Info Hubungi : 081947215703'
+        companyHeader: settings.company_header || 'KILUSI BILL',
+        footerInfo: settings.footer_info || 'Info Hubungi : +6281234567890'
     };
 }
 

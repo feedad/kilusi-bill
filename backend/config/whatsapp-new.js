@@ -57,7 +57,7 @@ async function connectToWhatsApp() {
             auth: state,
             printQRInTerminal: true,
             logger: pinoLogger,
-            browser: ['ALIJAYA WhatsApp Bot', 'Chrome', '1.0.0'],
+            browser: ['Kilusi Bill WhatsApp Bot', 'Chrome', '1.0.0'],
             version: whatsappVersion
         });
         
@@ -149,7 +149,7 @@ async function connectToWhatsApp() {
 // Fungsi untuk mengirim notifikasi ke admin
 async function sendAdminNotifications(sock) {
     try {
-        const companyHeader = getSetting('company_header', 'ALIJAYA DIGITAL NETWORK');
+        const companyHeader = getSetting('company_header', 'KILUSI BILL');
         const companyHeaderShort = companyHeader.length > 20 ? companyHeader.substring(0, 20) + '...' : companyHeader;
         
         // Notifikasi ke semua admin

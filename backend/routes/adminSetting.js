@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const router = express.Router();
 const multer = require('multer');
+const { requireAdminAuth } = require('../config/middleware');
 
 // Konfigurasi penyimpanan file
 const storage = multer.diskStorage({
@@ -1207,6 +1208,95 @@ router.post('/update', (req, res) => {
     } catch (error) {
         console.error('Error updating settings:', error);
         res.json({ success: false, error: error.message });
+    }
+});
+
+// GET: Company Profile Settings Page
+router.get('/company-profile', requireAdminAuth, (req, res) => {
+    try {
+        let settings;
+
+        // Use the same pattern as other routes in this file
+        if (req.cachedSettings) {
+            settings = req.cachedSettings;
+        } else if (cachedSettings && cacheTime && (Date.now() - cacheTime) < CACHE_DURATION) {
+            settings = cachedSettings;
+        } else {
+            const settingsFile = path.join(__dirname, '../settings.json');
+            if (fs.existsSync(settingsFile)) {
+                const data = fs.readFileSync(settingsFile, 'utf8');
+                settings = JSON.parse(data);
+            } else {
+                settings = { ...dummySettings };
+            }
+        }
+        res.render('admin/company-profile', {
+            page: 'company-profile',
+            currentRoute: 'company-profile',
+            user: req.session.user,
+            settings: settings,
+            success: req.query.success || null,
+            error: req.query.error || null
+        });
+    } catch (error) {
+        console.error('Error loading company profile page:', error);
+        res.status(500).render('error', {
+            message: 'Error loading company profile settings',
+            error: error
+        });
+    }
+});
+
+// POST: Update Company Profile Settings
+router.post('/company-profile/update', requireAdminAuth, (req, res) => {
+    try {
+        // Read current settings using the same pattern as other routes
+        let settings = {};
+        if (fs.existsSync(settingsPath)) {
+            const data = fs.readFileSync(settingsPath, 'utf8');
+            settings = JSON.parse(data);
+        } else {
+            settings = { ...dummySettings };
+        }
+
+        // Update company profile settings
+        const companyProfileFields = [
+            'company_name',
+            'company_header',
+            'contact_whatsapp',
+            'contact_phone',
+            'support_phone',
+            'bank_name',
+            'bank_account_number',
+            'bank_account_holder',
+            'footer_info',
+            'payment_accounts'
+        ];
+
+        companyProfileFields.forEach(field => {
+            if (req.body[field] !== undefined) {
+                settings[field] = req.body[field];
+            }
+        });
+
+        // Update payment_accounts based on individual fields
+        if (req.body.bank_name && req.body.bank_account_number && req.body.bank_account_holder) {
+            settings.payment_accounts = `${req.body.bank_name} ${req.body.bank_account_number} a/n ${req.body.bank_account_holder}`;
+        }
+
+        if (req.body.contact_whatsapp) {
+            settings.payment_accounts += `\ne-Wallet ${req.body.contact_whatsapp} a/n ${req.body.bank_account_holder || settings.company_name || 'Kilusi Bill'}`;
+        }
+
+        // Write settings using the same pattern as other routes
+        fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+        clearSettingsCache();
+        broadcastSettingsUpdate(settings);
+
+        res.redirect('/admin/setting/company-profile?success=' + encodeURIComponent('Company profile updated successfully'));
+    } catch (error) {
+        console.error('Error updating company profile:', error);
+        res.redirect('/admin/setting/company-profile?error=' + encodeURIComponent('Failed to update company profile'));
     }
 });
 

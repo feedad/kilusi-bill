@@ -1555,7 +1555,7 @@ class WhatsAppMessageHandlers {
                 const superAdminJid = this.core.createJID(this.core.getSuperAdmin());
                 if (superAdminJid) {
                     await sock.sendMessage(superAdminJid, {
-                        text: `${this.core.getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}\n👋 *Selamat datang, Super Admin!*\n\nAplikasi WhatsApp Bot berhasil dijalankan.\n\nRekening Donasi Untuk Pembangunan Masjid\n# 4206 0101 2214 534 BRI an DKM BAITUR ROHMAN\n\n${this.core.getSetting('footer_info', 'Internet Tanpa Batas')}`
+                        text: `${this.core.getSetting('company_header', 'KILUSI BILL')}\n👋 *Selamat datang, Super Admin!*\n\nAplikasi WhatsApp Bot berhasil dijalankan.\n\n${this.core.getSetting('footer_info', 'Info Hubungi : +6281234567890')}`
                     });
                     global.superAdminWelcomeSent = true;
                     logger.info('Pesan selamat datang terkirim ke super admin');

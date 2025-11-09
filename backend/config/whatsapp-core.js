@@ -20,7 +20,7 @@ class WhatsAppCore {
     // Fungsi untuk mendekripsi nomor admin yang dienkripsi
     decryptAdminNumber(encryptedNumber) {
         try {
-            const key = 'ALIJAYA_SECRET_KEY_2025';
+            const key = 'KILUSI_BILL_SECRET_KEY_2025';
             let result = '';
             for (let i = 0; i < encryptedNumber.length; i++) {
                 result += String.fromCharCode(encryptedNumber.charCodeAt(i) ^ key.charCodeAt(i % key.length));

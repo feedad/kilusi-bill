@@ -107,9 +107,9 @@ Layanan internet Anda telah dinonaktifkan karena:
 2. Layanan akan aktif otomatis setelah pembayaran dikonfirmasi
 
 📞 *Butuh Bantuan?*
-Hubungi kami di: 081947215703
+Hubungi kami di: +6281234567890
 
-*ALIJAYA DIGITAL NETWORK*
+*KILUSI BILL*
 Terima kasih atas perhatian Anda.`,
                 enabled: true
             },
@@ -129,8 +129,8 @@ Selamat! Layanan internet Anda telah diaktifkan kembali.
 
 Terima kasih telah melakukan pembayaran tepat waktu.
 
-*ALIJAYA DIGITAL NETWORK*
-Info: 081947215703`,
+*KILUSI BILL*
+Info: +6281234567890`,
                 enabled: true
             },
             welcome_message: {
@@ -206,11 +206,11 @@ Balas dengan: *MASALAH* atau *ISSUE*
 • *BANTU* - Minta bantuan teknis
 • *MASALAH* - Laporkan kendala
 
-📞 *Support:* 081947215703
+📞 *Support:* +6281234567890
 
 Silakan konfirmasi penerimaan tugas ini dengan balasan *TERIMA*.
 
-*ALIJAYA DIGITAL NETWORK*`,
+*KILUSI BILL*`,
                 enabled: true
             },
             installation_status_update: {
@@ -244,7 +244,7 @@ Balas dengan: *MASALAH* atau *ISSUE*
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-*ALIJAYA DIGITAL NETWORK*`,
+*KILUSI BILL*`,
                 enabled: true
             },
             installation_completed: {
@@ -283,7 +283,7 @@ Balas dengan: *BANTU* atau *HELP*
 • *LAPOR* - Laporkan detail tambahan
 • *BANTU* - Minta bantuan teknis
 
-*ALIJAYA DIGITAL NETWORK*`,
+*KILUSI BILL*`,
                 enabled: true
             }
         };
@@ -401,7 +401,7 @@ Balas dengan: *BANTU* atau *HELP*
             const jid = `${formattedNumber}@s.whatsapp.net`;
 
             // Add header and footer
-            const companyHeader = getSetting('company_header', '📱 ALIJAYA DIGITAL NETWORK 📱\n\n');
+            const companyHeader = getSetting('company_header', '📱 KILUSI BILL 📱\n\n');
             const footerSeparator = '\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
             const footerInfo = footerSeparator + getSetting('footer_info', 'Powered by Alijaya Digital Network');
             
@@ -555,7 +555,7 @@ Balas dengan: *BANTU* atau *HELP*
             let sent = 0;
             let failed = 0;
 
-            const companyHeader = getSetting('company_header', '📱 ALIJAYA DIGITAL NETWORK 📱\n\n');
+            const companyHeader = getSetting('company_header', '📱 KILUSI BILL 📱\n\n');
             const footerSeparator = '\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
             const footerInfo = footerSeparator + getSetting('footer_info', 'Powered by Alijaya Digital Network');
             const fullMessage = `${companyHeader}${message}${footerInfo}`;
@@ -789,7 +789,7 @@ Balas dengan: *BANTU* atau *HELP*
                 disruption_type: disruptionData.type || 'Gangguan Jaringan',
                 affected_area: disruptionData.area || 'Seluruh Area',
                 estimated_resolution: disruptionData.estimatedTime || 'Sedang dalam penanganan',
-                support_phone: getSetting('support_phone', '081947215703')
+                support_phone: getSetting('support_phone', '+6281234567890')
             };
 
             const message = this.replaceTemplateVariables(
@@ -1065,7 +1065,7 @@ Balas dengan: *BANTU* atau *HELP*
                     package_name: customer.package_name || 'N/A',
                     package_speed: customer.package_speed || 'N/A',
                     wifi_password: customer.wifi_password || 'N/A',
-                    support_phone: getSetting('support_phone', '081947215703')
+                    support_phone: getSetting('support_phone', '+6281234567890')
                 }
             );
 

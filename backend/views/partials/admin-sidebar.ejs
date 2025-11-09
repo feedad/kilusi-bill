@@ -16,7 +16,8 @@
     <a href="/admin/billing" class="<%= typeof page !== 'undefined' && page === 'billing' ? 'active' : '' %>"><i class="bi bi-file-earmark-text"></i> Billing</a>
     <a href="/admin/trouble" class="<%= typeof page !== 'undefined' && page === 'trouble' ? 'active' : '' %>"><i class="bi bi-bug"></i> Laporan Gangguan</a>
     <a href="/admin/backup" class="<%= typeof page !== 'undefined' && page === 'backup' ? 'active' : '' %>"><i class="bi bi-cloud-arrow-down"></i> Backup</a>
-    <a href="/admin/setting" class="<%= typeof page !== 'undefined' && page === 'setting' ? 'active' : '' %>"><i class="bi bi-sliders"></i> Setting</a>
+    <a href="/admin/setting" class="<%= typeof page !== 'undefined' && page === 'setting' ? 'active' : '' %>"><i class="bi bi-sliders"></i> System Settings</a>
+    <a href="/admin/setting/company-profile" class="<%= typeof currentRoute !== 'undefined' && currentRoute === 'company-profile' ? 'active' : '' %>"><i class="bi bi-building"></i> Company Profile</a>
     <a href="/admin/logout"><i class="bi bi-power"></i> Logout</a>
     <a href="#" id="restartMikrotikBtn"><i class="bi bi-arrow-clockwise"></i> Restart Mikrotik</a>
 </nav>

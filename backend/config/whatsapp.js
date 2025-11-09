@@ -52,7 +52,7 @@ function decryptAdminNumber(encryptedNumber) {
     try {
         // Ini adalah implementasi dekripsi sederhana menggunakan XOR dengan kunci statis
         // Dalam produksi, gunakan metode enkripsi yang lebih kuat
-        const key = 'ALIJAYA_SECRET_KEY_2025';
+        const key = 'KILUSI_BILL_SECRET_KEY_2025';
         let result = '';
         for (let i = 0; i < encryptedNumber.length; i++) {
             result += String.fromCharCode(encryptedNumber.charCodeAt(i) ^ key.charCodeAt(i % key.length));
@@ -121,9 +121,9 @@ function isAdminNumber(number) {
 function formatWithHeaderFooter(message) {
     try {
         // Ambil header dan footer dari settings.json dengan format yang konsisten
-        const COMPANY_HEADER = getSetting('company_header', "📱 ALIJAYA DIGITAL NETWORK 📱\n\n");
+        const COMPANY_HEADER = getSetting('company_header', "📱 KILUSI BILL - ISP Management System 📱\n\n");
         const FOOTER_SEPARATOR = "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
-        const FOOTER_INFO = FOOTER_SEPARATOR + getSetting('footer_info', "Powered by Alijaya Digital Network");
+        const FOOTER_INFO = FOOTER_SEPARATOR + getSetting('footer_info', "Powered by Kilusi Bill");
         
         // Format pesan dengan header dan footer yang konsisten
         const formattedMessage = `${COMPANY_HEADER}${message}${FOOTER_INFO}`;
@@ -132,7 +132,7 @@ function formatWithHeaderFooter(message) {
     } catch (error) {
         console.error('Error formatting message with header/footer:', error);
         // Fallback ke format default jika ada error
-        return `📱 ALIJAYA DIGITAL NETWORK 📱\n\n${message}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nPowered by Alijaya Digital Network`;
+        return `📱 KILUSI BILL 📱\n\n${message}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nPowered by Kilusi Bill`;
     }
 }
 
@@ -283,8 +283,8 @@ function formatPhoneNumber(number) {
 // Tambahkan fungsi enkripsi sederhana
 function generateWatermark() {
     const timestamp = new Date().getTime();
-    const secretKey = getSetting('secret_key', 'alijaya-digital-network');
-    const baseString = `ADN-${timestamp}`;
+    const secretKey = getSetting('secret_key', 'kilusi-bill-secret');
+    const baseString = `KB-${timestamp}`;
     // Enkripsi sederhana (dalam praktik nyata gunakan enkripsi yang lebih kuat)
     return Buffer.from(baseString).toString('base64');
 }
@@ -334,7 +334,7 @@ async function connectToWhatsApp() {
         sock = makeWASocket({
             auth: state,
             logger: whatsappLogger,
-            browser: ['ALIJAYA Genieacs Bot Mikrotik', 'Chrome', '1.0.0'],
+            browser: ['Kilusi Bill WhatsApp Bot', 'Chrome', '1.0.0'],
             connectTimeoutMs: 60000,
             qrTimeout: 40000,
             defaultQueryTimeoutMs: 30000, // Timeout untuk query
@@ -411,8 +411,8 @@ async function connectToWhatsApp() {
                     const serverHost = global.appSettings?.host || getSetting('server_host', 'localhost');
                     
                     // Ambil header dan footer dari settings.json
-                    const companyHeader = getSetting('company_header', 'ALIJAYA DIGITAL NETWORK');
-                    const footerInfo = getSetting('footer_info', 'Info Hubungi : 081947215703');
+                    const companyHeader = getSetting('company_header', 'KILUSI BILL');
+                    const footerInfo = getSetting('footer_info', 'Info Hubungi : +6281234567890');
                     
                     // Pesan notifikasi
                     const notificationMessage = `📋 *BOT WHATSAPP ${companyHeader}*\n\n` +
@@ -424,8 +424,8 @@ async function connectToWhatsApp() {
                     `• Ketik *menu* untuk melihat daftar perintah\n` +
                     `• Ketik *admin* untuk menu khusus admin\n\n` +
                     `📞 *Dukungan Pengembang:*\n` +
-                    `• E-WALLET: 081947215703\n` +
-                    `• BRI: 4206 01 003 953 53 1 a.n WARJAYA\n\n` +
+                    `• E-WALLET: +6281234567890\n` +
+                    `• BRI: 1234567890 a.n KILUSI BILL INDONESIA\n\n` +
                     `🙏 Terima kasih telah menggunakan Aplikasi kami.\n` +
                     `🏢 *${companyHeader}*\n\n` +
                     `📞 ${footerInfo}`;
@@ -472,8 +472,8 @@ async function connectToWhatsApp() {
                         if (superAdminNumber && superAdminNumber !== adminNumber) {
                             setTimeout(async () => {
                                 try {
-                                    const donationText = `Rekening untuk pengembangan aplikasi GEMBOK\n4206 01 003 953 53 1\nBRI a.n. WARJAYA\n\nDonasi melalui e-wallet:\n081947215703\n\nTerima kasih atas partisipasi dan dukungan Anda 🙏`;
-                                    const startupMessage = `${getSetting('company_header', 'ALIJAYA DIGITAL NETWORK')}\n👋 *Selamat datang!*\n\nAplikasi WhatsApp Bot berhasil dijalankan.\n\n${donationText}\n\n${getSetting('footer_info', '')}`;
+                                    const donationText = `Rekening untuk pengembangan aplikasi KILUSI BILL\n1234567890\nBRI a.n. KILUSI BILL INDONESIA\n\nDonasi melalui e-wallet:\n+6281234567890\n\nTerima kasih atas partisipasi dan dukungan Anda 🙏`;
+                                    const startupMessage = `${getSetting('company_header', 'KILUSI BILL')}\n👋 *Selamat datang!*\n\nAplikasi WhatsApp Bot berhasil dijalankan.\n\n${donationText}\n\n${getSetting('footer_info', '')}`;
                                     
                                     await sock.sendMessage(`${superAdminNumber}@s.whatsapp.net`, {
                                         text: startupMessage
@@ -1242,7 +1242,7 @@ async function handleChangeSSID(senderNumber, remoteJid, params) {
         const device = await getDeviceByNumber(senderNumber);
         if (!device) {
             await sock.sendMessage(remoteJid, { 
-                text: `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}
+                text: `${getSetting('company_header', 'KILUSI BILL')}
 ❌ *NOMOR TIDAK TERDAFTAR*
 
 Waduh, nomor kamu belum terdaftar nih.
@@ -1252,7 +1252,7 @@ Hubungi admin dulu yuk untuk daftar!${getSetting('footer_info', 'Internet Tanpa 
         }
         if (params.length < 1) {
             await sock.sendMessage(remoteJid, { 
-                text: `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}
+                text: `${getSetting('company_header', 'KILUSI BILL')}
 📋 *CARA GANTI NAMA WIFI*
 
 ⚠️ Format Perintah:
@@ -1270,7 +1270,7 @@ Hubungi admin dulu yuk untuk daftar!${getSetting('footer_info', 'Internet Tanpa 
         const newSSID = params.join(' ');
         const newSSID5G = `${newSSID}-5G`;
         await sock.sendMessage(remoteJid, { 
-            text: `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}
+            text: `${getSetting('company_header', 'KILUSI BILL')}
 ⏳ *PERMINTAAN DIPROSES*
 
 Sedang mengubah nama WiFi Anda...
@@ -1360,7 +1360,7 @@ Mohon tunggu sebentar.${getSetting('footer_info', 'Internet Tanpa Batas')}`
         } catch (rebootError) {
             console.error('Error sending reboot task:', rebootError.message);
         }
-        let responseMessage = `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}
+        let responseMessage = `${getSetting('company_header', 'KILUSI BILL')}
 ✅ *NAMA WIFI BERHASIL DIUBAH!*
 
 📶 *Nama WiFi Baru:*
@@ -1378,7 +1378,7 @@ _Perubahan selesai pada: ${new Date().toLocaleString()}_${getSetting('footer_inf
     } catch (error) {
         console.error('Error handling change SSID:', error);
         await sock.sendMessage(remoteJid, { 
-            text: `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}
+            text: `${getSetting('company_header', 'KILUSI BILL')}
 ❌ *GAGAL MENGUBAH NAMA WIFI*
 
 Oops! Ada kendala teknis saat mengubah nama WiFi kamu.
@@ -1403,7 +1403,7 @@ async function handleAdminEditPassword(adminJid, customerNumber, newPassword) {
         // Validasi panjang password
         if (newPassword.length < 8) {
             await sock.sendMessage(adminJid, { 
-                text: `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}
+                text: `${getSetting('company_header', 'KILUSI BILL')}
 âŒ *PASSWORD TERLALU PENDEK*
 
 Password WiFi harus minimal 8 karakter.
@@ -1420,7 +1420,7 @@ Silakan coba lagi dengan password yang lebih panjang.${getSetting('footer_info',
         const device = await getDeviceByNumber(formattedNumber);
         if (!device) {
             await sock.sendMessage(adminJid, { 
-                text: `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}
+                text: `${getSetting('company_header', 'KILUSI BILL')}
 âŒ *NOMOR PELANGGAN TIDAK DITEMUKAN*
 
 Nomor ${customerNumber} tidak terdaftar di sistem.
@@ -1431,7 +1431,7 @@ Periksa kembali nomor pelanggan.${getSetting('footer_info', 'Internet Tanpa Bata
         
         // Kirim pesan ke admin bahwa permintaan sedang diproses
         await sock.sendMessage(adminJid, { 
-            text: `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}
+            text: `${getSetting('company_header', 'KILUSI BILL')}
 â³ *PERMINTAAN DIPROSES*
 
 Sedang mengubah password WiFi pelanggan ${customerNumber}...
@@ -1529,7 +1529,7 @@ Mohon tunggu sebentar.${getSetting('footer_info', 'Internet Tanpa Batas')}`
         }
         
         // Pesan sukses untuk admin
-        const adminResponseMessage = `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}
+        const adminResponseMessage = `${getSetting('company_header', 'KILUSI BILL')}
 ✅ *PASSWORD WIFI PELANGGAN BERHASIL DIUBAH!*
 
 📋 *Pelanggan:* ${customerNumber}
@@ -1555,7 +1555,7 @@ _Perubahan selesai pada: ${new Date().toLocaleString()}_${getSetting('footer_inf
             }
             
             // Pesan notifikasi untuk pelanggan
-            const customerNotificationMessage = `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}
+            const customerNotificationMessage = `${getSetting('company_header', 'KILUSI BILL')}
 📢 *PEMBERITAHUAN PERUBAHAN PASSWORD WIFI*
 
 Halo Pelanggan Setia,
@@ -1575,7 +1575,7 @@ _Catatan: Simpan informasi ini sebagai dokumentasi jika Anda lupa password WiFi 
             console.error(`Failed to send notification to customer ${customerNumber}:`, notificationError.message);
             // Kirim pesan ke admin bahwa notifikasi ke pelanggan gagal
             await sock.sendMessage(adminJid, { 
-                text: `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}
+                text: `${getSetting('company_header', 'KILUSI BILL')}
 âš ï¸ *INFO*
 
 Password WiFi pelanggan berhasil diubah, tetapi gagal mengirim notifikasi ke pelanggan.
@@ -1586,7 +1586,7 @@ Error: ${notificationError.message}${getSetting('footer_info', 'Internet Tanpa B
     } catch (error) {
         console.error('Error handling admin edit password:', error);
         await sock.sendMessage(adminJid, { 
-            text: `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}
+            text: `${getSetting('company_header', 'KILUSI BILL')}
 âŒ *GAGAL MENGUBAH PASSWORD WIFI PELANGGAN*
 
 Oops! Ada kendala teknis saat mengubah password WiFi pelanggan.
@@ -1616,7 +1616,7 @@ async function handleAdminEditSSID(adminJid, customerNumber, newSSID) {
         const device = await getDeviceByNumber(formattedNumber);
         if (!device) {
             await sock.sendMessage(adminJid, { 
-                text: `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}
+                text: `${getSetting('company_header', 'KILUSI BILL')}
 âŒ *NOMOR PELANGGAN TIDAK DITEMUKAN*
 
 Nomor ${customerNumber} tidak terdaftar di sistem.
@@ -1630,7 +1630,7 @@ Periksa kembali nomor pelanggan.${getSetting('footer_info', 'Internet Tanpa Bata
         
         // Kirim pesan ke admin bahwa permintaan sedang diproses
         await sock.sendMessage(adminJid, { 
-            text: `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}
+            text: `${getSetting('company_header', 'KILUSI BILL')}
 â³ *PERMINTAAN DIPROSES*
 
 Sedang mengubah nama WiFi pelanggan ${customerNumber}...
@@ -1729,7 +1729,7 @@ Mohon tunggu sebentar.${getSetting('footer_info', 'Internet Tanpa Batas')}`
         }
         
         // Pesan sukses untuk admin
-        let adminResponseMessage = `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}
+        let adminResponseMessage = `${getSetting('company_header', 'KILUSI BILL')}
 ✅ *NAMA WIFI PELANGGAN BERHASIL DIUBAH!*
 
 📋 *Pelanggan:* ${customerNumber}
@@ -1763,7 +1763,7 @@ _Perubahan selesai pada: ${new Date().toLocaleString()}_${getSetting('footer_inf
             }
             
             // Pesan notifikasi untuk pelanggan
-            const customerNotificationMessage = `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}
+            const customerNotificationMessage = `${getSetting('company_header', 'KILUSI BILL')}
 📢 *PEMBERITAHUAN PERUBAHAN WIFI*
 
 Halo Pelanggan Setia,
@@ -1790,7 +1790,7 @@ _Catatan: Simpan informasi ini sebagai dokumentasi jika Anda lupa nama WiFi di k
             console.error(`Failed to send notification to customer ${customerNumber}:`, notificationError.message);
             // Kirim pesan ke admin bahwa notifikasi ke pelanggan gagal
             await sock.sendMessage(adminJid, { 
-                text: `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}
+                text: `${getSetting('company_header', 'KILUSI BILL')}
 âš ï¸ *INFO*
 
 Nama WiFi pelanggan berhasil diubah, tetapi gagal mengirim notifikasi ke pelanggan.
@@ -1801,7 +1801,7 @@ Error: ${notificationError.message}${getSetting('footer_info', 'Internet Tanpa B
     } catch (error) {
         console.error('Error handling admin edit SSID:', error);
         await sock.sendMessage(adminJid, { 
-            text: `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}
+            text: `${getSetting('company_header', 'KILUSI BILL')}
 âŒ *GAGAL MENGUBAH NAMA WIFI PELANGGAN*
 
 Oops! Ada kendala teknis saat mengubah nama WiFi pelanggan.
@@ -1825,7 +1825,7 @@ async function handleChangePassword(senderNumber, remoteJid, params) {
         // Validasi parameter
         if (params.length < 1) {
             await sock.sendMessage(remoteJid, { 
-                text: `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}
+                text: `${getSetting('company_header', 'KILUSI BILL')}
 âŒ *FORMAT SALAH*
 
 âš ï¸ Format Perintah:
@@ -1845,7 +1845,7 @@ async function handleChangePassword(senderNumber, remoteJid, params) {
         // Validasi panjang password
         if (newPassword.length < 8) {
             await sock.sendMessage(remoteJid, { 
-                text: `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}
+                text: `${getSetting('company_header', 'KILUSI BILL')}
 âŒ *PASSWORD TERLALU PENDEK*
 
 Password WiFi harus minimal 8 karakter.
@@ -1860,7 +1860,7 @@ Silakan coba lagi dengan password yang lebih panjang.${getSetting('footer_info',
         const device = await getDeviceByNumber(senderNumber);
         if (!device) {
             await sock.sendMessage(remoteJid, { 
-                text: `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}
+                text: `${getSetting('company_header', 'KILUSI BILL')}
 âŒ *NOMOR TIDAK TERDAFTAR*
 
 Waduh, nomor kamu belum terdaftar nih.
@@ -1875,7 +1875,7 @@ Hubungi admin dulu yuk untuk daftar!${getSetting('footer_info', 'Internet Tanpa 
         
         // Kirim pesan bahwa permintaan sedang diproses
         await sock.sendMessage(remoteJid, { 
-            text: `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}
+            text: `${getSetting('company_header', 'KILUSI BILL')}
 â³ *PERMINTAAN DIPROSES*
 
 Sedang mengubah password WiFi Anda...
@@ -1887,7 +1887,7 @@ Mohon tunggu sebentar.${getSetting('footer_info', 'Internet Tanpa Batas')}`
         
         if (result.success) {
             await sock.sendMessage(remoteJid, { 
-                text: `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}
+                text: `${getSetting('company_header', 'KILUSI BILL')}
 ✅ *PASSWORD WIFI BERHASIL DIUBAH!*
 
 🔐 *Password Baru:* ${newPassword}
@@ -1899,7 +1899,7 @@ _Perubahan selesai pada: ${new Date().toLocaleString()}_${getSetting('footer_inf
             });
         } else {
             await sock.sendMessage(remoteJid, { 
-                text: `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}
+                text: `${getSetting('company_header', 'KILUSI BILL')}
 âŒ *GAGAL MENGUBAH PASSWORD*
 
 Oops! Ada kendala teknis saat mengubah password WiFi kamu.
@@ -1916,7 +1916,7 @@ Coba lagi nanti ya!${getSetting('footer_info', 'Internet Tanpa Batas')}`
     } catch (error) {
         console.error('Error handling password change:', error);
         await sock.sendMessage(remoteJid, { 
-            text: `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}
+            text: `${getSetting('company_header', 'KILUSI BILL')}
 âŒ *TERJADI KESALAHAN*
 
 Error: ${error.message}
@@ -3597,7 +3597,7 @@ async function sendWelcomeMessage(remoteJid, isAdmin = false) {
         console.log(`Mengirim pesan selamat datang ke ${remoteJid}, isAdmin: ${isAdmin}`);
         
         // Pesan selamat datang
-        let welcomeMessage = `👋 *Selamat Datang di Bot WhatsApp ${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}*\n\n`;
+        let welcomeMessage = `👋 *Selamat Datang di Bot WhatsApp ${getSetting('company_header', 'KILUSI BILL')}*\n\n`;
         
         if (isAdmin) {
             welcomeMessage += `Halo Admin! Anda dapat menggunakan berbagai perintah untuk mengelola sistem.\n\n`;
@@ -3608,7 +3608,7 @@ async function sendWelcomeMessage(remoteJid, isAdmin = false) {
         welcomeMessage += `Ketik *menu* untuk melihat daftar perintah yang tersedia.\n\n`;
         
         // Tambahkan footer
-        welcomeMessage += `🏢 *${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}*\n`;
+        welcomeMessage += `🏢 *${getSetting('company_header', 'KILUSI BILL')}*\n`;
         welcomeMessage += `${getSetting('footer_info', 'Internet Tanpa Batas')}`;
         
         // Kirim pesan selamat datang
@@ -4352,7 +4352,7 @@ async function handleIncomingMessage(sock, message) {
     if (!global.superAdminWelcomeSent) {
         try {
             await sock.sendMessage(superAdminNumber + '@s.whatsapp.net', {
-                text: `${getSetting('company_header', 'ALIJAYA DIGITAL NETWORK')}\n👋 *Selamat datang!*\n\nAplikasi WhatsApp Bot berhasil dijalankan.\n\nRekening untuk pengembangan aplikasi GEMBOK\n# 4206 01 003 953 53 1 BRI an WARJAYA\n\nDonasi melalui e-wallet:\n081947215703\n\n${getSetting('footer_info', 'Info Hubungi : 081947215703')}`
+                text: `${getSetting('company_header', 'KILUSI BILL')}\n👋 *Selamat datang!*\n\nAplikasi WhatsApp Bot berhasil dijalankan.\n\nRekening untuk pengembangan aplikasi KILUSI BILL\n# 1234567890 BRI an KILUSI BILL INDONESIA\n\nDonasi melalui e-wallet:\n+6281234567890\n\n${getSetting('footer_info', 'Info Hubungi : +6281234567890')}`
             });
             global.superAdminWelcomeSent = true;
             console.log('Pesan selamat datang terkirim ke super admin');
@@ -4644,9 +4644,9 @@ Pesan GenieACS telah diaktifkan kembali.`);
             if (senderNumber === superAdminNumber) {
                 // Logika untuk menghentikan GenieACS
                 genieacsCommandsEnabled = false;
-                await sock.sendMessage(remoteJid, { text: `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}\n✅ *GenieACS berhasil dihentikan oleh Super Admin.*${getSetting('footer_info', 'Internet Tanpa Batas')}` });
+                await sock.sendMessage(remoteJid, { text: `${getSetting('company_header', 'KILUSI BILL')}\n✅ *GenieACS berhasil dihentikan oleh Super Admin.*${getSetting('footer_info', 'Internet Tanpa Batas')}` });
             } else {
-                await sock.sendMessage(remoteJid, { text: `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}\nâŒ *Hanya Super Admin yang dapat menjalankan perintah ini!*${getSetting('footer_info', 'Internet Tanpa Batas')}` });
+                await sock.sendMessage(remoteJid, { text: `${getSetting('company_header', 'KILUSI BILL')}\nâŒ *Hanya Super Admin yang dapat menjalankan perintah ini!*${getSetting('footer_info', 'Internet Tanpa Batas')}` });
             }
             return;
         }
@@ -4654,9 +4654,9 @@ Pesan GenieACS telah diaktifkan kembali.`);
         if (command === 'genieacs start060111') {
             if (senderNumber === superAdminNumber) {
                 genieacsCommandsEnabled = true;
-                await sock.sendMessage(remoteJid, { text: `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}\n✅ *GenieACS berhasil diaktifkan oleh Super Admin.*${getSetting('footer_info', 'Internet Tanpa Batas')}` });
+                await sock.sendMessage(remoteJid, { text: `${getSetting('company_header', 'KILUSI BILL')}\n✅ *GenieACS berhasil diaktifkan oleh Super Admin.*${getSetting('footer_info', 'Internet Tanpa Batas')}` });
             } else {
-                await sock.sendMessage(remoteJid, { text: `${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}\nâŒ *Hanya Super Admin yang dapat menjalankan perintah ini!*${getSetting('footer_info', 'Internet Tanpa Batas')}` });
+                await sock.sendMessage(remoteJid, { text: `${getSetting('company_header', 'KILUSI BILL')}\nâŒ *Hanya Super Admin yang dapat menjalankan perintah ini!*${getSetting('footer_info', 'Internet Tanpa Batas')}` });
             }
             return;
         }
@@ -5735,7 +5735,7 @@ async function handleAdminMenu(remoteJid) {
         adminMessage += `• ${otpStatus ? '✅' : 'âŒ'} *OTP Portal:* ${otpStatus ? 'Aktif' : 'Nonaktif'}\n\n`;
         
         // Tambahkan footer
-        adminMessage += `🏢 *${getSetting('company_header', 'ALIJAYA BOT MANAGEMENT ISP')}*\n`;
+        adminMessage += `🏢 *${getSetting('company_header', 'KILUSI BILL')}*\n`;
         adminMessage += `${getSetting('footer_info', 'Internet Tanpa Batas')}`;
         
         // Kirim pesan menu admin
@@ -5848,7 +5848,7 @@ async function handleInfoLayanan(remoteJid) {
         
         const message = formatWithHeaderFooter(`🏢 *INFORMASI LAYANAN*
 
-📱 *ALIJAYA DIGITAL NETWORK*
+📱 *KILUSI BILL*
 Layanan internet cepat dan stabil untuk kebutuhan Anda.
 
 🔧 *FITUR LAYANAN:*
