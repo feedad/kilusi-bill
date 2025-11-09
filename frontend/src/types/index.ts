@@ -148,6 +148,162 @@ export interface DashboardStats {
 export interface ActivityItem {
   id: string
   type: 'login' | 'logout' | 'payment' | 'customer_created' | 'customer_updated' | 'invoice_generated'
+}
+
+// WhatsApp Types
+export interface WhatsAppTemplate {
+  key: string
+  title: string
+  template: string
+  enabled: boolean
+  variables?: string[]
+  category?: 'invoice' | 'payment' | 'service' | 'announcement'
+  usage_count?: number
+  last_used?: string
+}
+
+export interface WhatsAppSettings {
+  rateLimit: {
+    maxMessagesPerBatch: number
+    delayBetweenBatches: number
+    delayBetweenMessages: number
+    maxRetries: number
+    dailyMessageLimit: number
+    enabled: boolean
+  }
+  groups: {
+    enabled: boolean
+    ids: string[]
+    names?: string[]
+  }
+  templates: Record<string, WhatsAppTemplate>
+  adminNumbers: string[]
+  companyHeader: string
+  footerInfo: string
+  features: {
+    imageAttachments: boolean
+    autoPhoneFormat: boolean
+    analytics: boolean
+    backup: boolean
+    errorRecovery: boolean
+  }
+}
+
+export interface WhatsAppStatus {
+  connected: boolean
+  phoneNumber?: string
+  profileName?: string
+  lastSync?: string
+  dailyCount: number
+  monthlyCount: number
+  queueStatus: 'idle' | 'processing' | 'paused'
+  queueLength: number
+  successRate: number
+  avgResponseTime: number
+  uptime: number
+  qrCode?: string
+  version?: string
+  battery?: number
+  plugged?: boolean
+}
+
+export interface NotificationResult {
+  success: boolean
+  sent: number
+  failed: number
+  skipped: number
+  errors?: string[]
+  duration?: number
+  batchId?: string
+}
+
+export interface WhatsAppMessage {
+  id: string
+  to: string
+  message: string
+  type: 'text' | 'image' | 'document'
+  status: 'pending' | 'sent' | 'delivered' | 'failed'
+  template?: string
+  variables?: Record<string, any>
+  scheduledAt?: string
+  sentAt?: string
+  deliveredAt?: string
+  error?: string
+  retryCount?: number
+}
+
+export interface WhatsAppQueue {
+  id: string
+  batchId: string
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  totalMessages: number
+  processedMessages: number
+  failedMessages: number
+  createdAt: string
+  startedAt?: string
+  completedAt?: string
+  estimatedCompletion?: string
+  priority: 'low' | 'normal' | 'high'
+}
+
+export interface WhatsAppAnalytics {
+  period: {
+    start: string
+    end: string
+  }
+  summary: {
+    totalSent: number
+    successRate: number
+    avgResponseTime: number
+    cost: number
+    activeTemplates: number
+  }
+  daily: Array<{
+    date: string
+    sent: number
+    success: number
+    failed: number
+    cost: number
+  }>
+  templates: Array<{
+    template: string
+    usage: number
+    successRate: number
+  }>
+  hourly: Array<{
+    hour: number
+    count: number
+  }>
+  errors: Array<{
+    type: string
+    count: number
+    lastOccurred: string
+  }>
+}
+
+export interface WhatsAppTestConfig {
+  phoneNumber: string
+  templateKey: string
+  variables: Record<string, any>
+  customMessage?: string
+  includeImage?: boolean
+}
+
+export interface WhatsAppBroadcast {
+  id: string
+  name: string
+  type: 'announcement' | 'disruption' | 'custom'
+  message: string
+  recipientType: 'all' | 'active' | 'selected' | 'groups'
+  recipients: string[] | string[]
+  status: 'draft' | 'scheduled' | 'sending' | 'completed' | 'failed'
+  scheduledAt?: string
+  sentAt?: string
+  completedAt?: string
+  results?: NotificationResult
+  createdAt: string
+  createdBy: string
+}
   description: string
   userId?: string
   customerId?: string

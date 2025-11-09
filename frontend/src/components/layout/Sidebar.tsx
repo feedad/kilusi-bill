@@ -16,6 +16,7 @@ import {
   Wifi,
   Router,
   Smartphone,
+  MessageSquare,
   LogOut,
   X,
   Menu,
@@ -101,6 +102,12 @@ const navigation = [
     name: 'Mikrotik',
     href: '/admin/mikrotik',
     icon: Router,
+    roles: ['admin'],
+  },
+  {
+    name: 'WhatsApp',
+    href: '/admin/whatsapp',
+    icon: MessageSquare,
     roles: ['admin'],
   },
   {
