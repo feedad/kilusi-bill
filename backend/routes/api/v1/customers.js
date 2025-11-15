@@ -3,9 +3,10 @@ const router = express.Router();
 const { logger } = require('../../../config/logger');
 const { query } = require('../../../config/database');
 const { getActivePPPoEConnections } = require('../../../config/mikrotik');
+const { jwtAuth } = require('../../../middleware/jwtAuth');
 
 // GET /api/v1/customers - Get all customers with pagination and search
-router.get('/', async (req, res) => {
+router.get('/', jwtAuth, async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
@@ -45,6 +46,14 @@ router.get('/', async (req, res) => {
                 c.phone,
                 c.nik,
                 c.address,
+                c.area,
+                c.region_id,
+                c.odp_id,
+                c.router,
+                r.name as region_name,
+                r.id as region_uuid,
+                c.latitude,
+                c.longitude,
                 c.pppoe_username,
                 c.pppoe_password,
                 c.status,
@@ -53,10 +62,17 @@ router.get('/', async (req, res) => {
                 c.install_date,
                 c.active_date,
                 c.isolir_date,
+                c.siklus,
+                c.billing_type,
+                c.trial_active,
+                c.trial_expires_at,
                 -- Package information
                 p.name as package_name,
                 p.price as package_price,
                 p.speed as package_speed,
+                -- Router/NAS information
+                COALESCE(nas.shortname, nas.nasname) as router_name,
+                nas.nasname as router_ip,
                 -- Billing status
                 CASE
                     WHEN EXISTS (
@@ -79,6 +95,9 @@ router.get('/', async (req, res) => {
                 false as is_online
             FROM customers c
             LEFT JOIN packages p ON c.package_id = p.id
+            LEFT JOIN regions r ON c.region_id = r.id
+            -- Join with NAS table to get router info
+            LEFT JOIN nas ON (c.router != 'all' AND c.router::text = nas.id::text)
             ${whereClause}
             ORDER BY c.created_at DESC
             LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}
@@ -87,10 +106,56 @@ router.get('/', async (req, res) => {
         queryParams.push(limit, offset);
         const result = await query(dataQuery, queryParams);
 
+        // Calculate automatic isolir dates for customers
+        const customersWithAutoIsolir = result.rows.map((customer) => {
+            try {
+                // Calculate isolir date only if customer has active_date and siklus
+                if (customer.active_date && customer.siklus) {
+                    let calculatedIsolirDate;
+
+                    // Simple isolir date calculation based on siklus
+                    const activeDate = new Date(customer.active_date);
+
+                    switch (customer.siklus) {
+                        case 'profile':
+                        case 'tetap':
+                            // Add 30 days for profile/tetap cycle
+                            calculatedIsolirDate = new Date(activeDate.getTime() + 30 * 24 * 60 * 60 * 1000);
+                            break;
+                        case 'fixed':
+                            // Same day next month
+                            calculatedIsolirDate = new Date(activeDate);
+                            calculatedIsolirDate.setMonth(calculatedIsolirDate.getMonth() + 1);
+                            break;
+                        case 'monthly':
+                        case 'bulan':
+                            // 20th of next month
+                            calculatedIsolirDate = new Date(activeDate.getFullYear(), activeDate.getMonth() + 1, 20);
+                            break;
+                        default:
+                            // Default to 30 days
+                            calculatedIsolirDate = new Date(activeDate.getTime() + 30 * 24 * 60 * 60 * 1000);
+                    }
+
+                    // Format as YYYY-MM-DD
+                    const formattedDate = calculatedIsolirDate.toISOString().split('T')[0];
+
+                    return {
+                        ...customer,
+                        calculated_isolir_date: formattedDate
+                    };
+                }
+                return customer;
+            } catch (error) {
+                logger.error(`Error calculating isolir date for customer ${customer.id}:`, error);
+                return customer;
+            }
+        });
+
         res.json({
             success: true,
             data: {
-                customers: result.rows,
+                customers: customersWithAutoIsolir,
                 pagination: {
                     page,
                     limit,
@@ -110,23 +175,29 @@ router.get('/', async (req, res) => {
 });
 
 // GET /api/v1/customers/:id - Get customer by ID
-router.get('/:id', async (req, res) => {
+router.get('/:id', jwtAuth, async (req, res) => {
     try {
         const { id } = req.params;
 
-        const query = `
+        const customerQuery = `
             SELECT
                 c.*,
                 p.name as package_name,
                 p.price as package_price,
                 p.speed as package_speed,
-                p.description as package_description
+                p.description as package_description,
+                r.name as region_name,
+                COALESCE(nas.shortname, nas.nasname) as router_name,
+                nas.nasname as router_ip
             FROM customers c
             LEFT JOIN packages p ON c.package_id = p.id
+            LEFT JOIN regions r ON c.region_id = r.id
+            -- Join with NAS table to get router info
+            LEFT JOIN nas ON (c.router != 'all' AND c.router::text = nas.id::text)
             WHERE c.id = $1
         `;
 
-        const result = await query(query, [id]);
+        const result = await query(customerQuery, [id]);
 
         if (result.rows.length === 0) {
             return res.status(404).json({
@@ -136,6 +207,46 @@ router.get('/:id', async (req, res) => {
         }
 
         const customer = result.rows[0];
+
+        // Calculate automatic isolir date for this customer
+        try {
+            if (customer.active_date && customer.siklus) {
+                let calculatedIsolirDate;
+
+                // Simple isolir date calculation based on siklus
+                const activeDate = new Date(customer.active_date);
+
+                switch (customer.siklus) {
+                    case 'profile':
+                    case 'tetap':
+                        // Add 30 days for profile/tetap cycle
+                        calculatedIsolirDate = new Date(activeDate.getTime() + 30 * 24 * 60 * 60 * 1000);
+                        break;
+                    case 'fixed':
+                        // Same day next month
+                        calculatedIsolirDate = new Date(activeDate);
+                        calculatedIsolirDate.setMonth(calculatedIsolirDate.getMonth() + 1);
+                        break;
+                    case 'monthly':
+                    case 'bulan':
+                        // 20th of next month
+                        calculatedIsolirDate = new Date(activeDate.getFullYear(), activeDate.getMonth() + 1, 20);
+                        break;
+                    default:
+                        // Default to 30 days
+                        calculatedIsolirDate = new Date(activeDate.getTime() + 30 * 24 * 60 * 60 * 1000);
+                }
+
+                // Format as YYYY-MM-DD
+                customer.calculated_isolir_date = calculatedIsolirDate.toISOString().split('T')[0];
+            }
+        } catch (error) {
+            logger.error(`Error calculating isolir date for customer ${customer.id}:`, error);
+        }
+
+        // Get connection status from RADIUS
+        const radiusDb = require('../../../config/radius-postgres');
+        const connectionStatus = await radiusDb.getUserConnectionStatus(customer.pppoe_username);
 
         // Get customer invoices
         const invoicesQuery = `
@@ -181,6 +292,7 @@ router.get('/:id', async (req, res) => {
             data: {
                 customer: {
                     ...customer,
+                    connection_status: connectionStatus || { online: false, status: 'offline' },
                     invoices: invoicesResult.rows,
                     sessions: sessionsResult.rows
                 }
@@ -204,11 +316,29 @@ router.post('/', async (req, res) => {
             phone,
             email,
             address,
+            area,
+            region,  // Accept 'region' from frontend (region name)
+            region_id, // Accept 'region_id' from frontend (preferred)
             package_id,
             pppoe_username,
             pppoe_password,
+            siklus = 'profile',
+            billing_cycle, // Support legacy field name
+            billing_type = 'postpaid', // Add billing type support
             status = 'active'
         } = req.body;
+
+        // Handle siklus mapping (support both field names and value mapping)
+        let finalSiklus = siklus || billing_cycle || 'profile';
+
+        // Map frontend values to backend values
+        const siklusMapping = {
+            'profile': 'profile',
+            'tetap': 'fixed',
+            'bulan': 'monthly'
+        };
+
+        finalSiklus = siklusMapping[finalSiklus] || finalSiklus;
 
         // Validation
         if (!name || !phone || !package_id) {
@@ -246,17 +376,63 @@ router.post('/', async (req, res) => {
             }
         }
 
+        // Priority system for region data (same as PUT endpoint)
+        let finalArea = area;
+        let finalRegionId = region_id;
+
+        if (region_id) {
+            // New system: use region_id directly and update area from region_categories
+            console.log('✅ Using region_id (new system):', region_id);
+
+            // Update area field from regions table
+            const regionResult = await query('SELECT name FROM regions WHERE id = $1', [region_id]);
+            if (regionResult.rows.length > 0) {
+                finalArea = regionResult.rows[0].name;
+                console.log('🔄 Updated area from region_categories:', finalArea);
+            }
+        } else if (region && region !== area) {
+            // Old system: region contains selected region name, update area field and try to find region_id
+            finalArea = region;
+            console.log('🔄 Using region name as area (old system):', region);
+
+            // Try to find matching region_id from regions
+            const regionMatch = await query('SELECT id FROM regions WHERE name = $1', [region]);
+            if (regionMatch.rows.length > 0) {
+                finalRegionId = regionMatch.rows[0].id;
+                console.log('🔄 Found matching region_id:', finalRegionId);
+            }
+        } else {
+            console.log('🔄 Using original area field:', area);
+
+            // Try to find region_id from existing area
+            if (area) {
+                const regionMatch = await query('SELECT id FROM regions WHERE name = $1', [area]);
+                if (regionMatch.rows.length > 0) {
+                    finalRegionId = regionMatch.rows[0].id;
+                    console.log('🔄 Found existing region_id for area:', finalRegionId);
+                }
+            }
+        }
+
         // Insert customer
         const result = await query(`
             INSERT INTO customers (
-                name, phone, email, address, package_id,
-                pppoe_username, pppoe_password, status, created_at
+                name, phone, email, address, area, region_id, package_id,
+                pppoe_username, pppoe_password, siklus, billing_type, status, created_at
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP
             ) RETURNING *
-        `, [name, phone, email, address, package_id, pppoe_username, pppoe_password, status]);
+        `, [name, phone, email, address, finalArea, finalRegionId, package_id, pppoe_username, pppoe_password, finalSiklus, billing_type, status]);
 
         const customer = result.rows[0];
+
+        // Create invoice based on billing type
+        const billingService = require('../services/billing-service');
+        const invoiceResult = await billingService.createCustomerInvoice(
+            customer.id,
+            package_id,
+            billing_type
+        );
 
         // Emit event for RADIUS sync
         if (global.appEvents && pppoe_username && pppoe_password) {
@@ -265,8 +441,15 @@ router.post('/', async (req, res) => {
 
         res.status(201).json({
             success: true,
-            data: { customer },
-            message: 'Pelanggan berhasil ditambahkan'
+            data: {
+                customer,
+                invoice: invoiceResult.invoice,
+                billingInfo: {
+                    type: billing_type,
+                    message: invoiceResult.message
+                }
+            },
+            message: `Pelanggan berhasil ditambahkan (${billing_type === 'prepaid' ? 'Prabayar' : 'Pascabayar'})`
         });
 
     } catch (error) {
@@ -287,15 +470,85 @@ router.put('/:id', async (req, res) => {
             phone,
             email,
             address,
+            area,
+            region,  // Accept 'region' from frontend (region name)
+            region_id, // Accept 'region_id' from frontend (preferred)
             package_id,
             pppoe_username,
             pppoe_password,
+            siklus,
+            billing_cycle, // Support legacy field name
+            billing_type, // Support direct billing_type field
             status
         } = req.body;
 
+        // Handle siklus mapping (support both field names and value mapping)
+        let finalSiklus = siklus || billing_cycle;
+
+        // Map frontend values to backend values (if provided)
+        if (finalSiklus) {
+            const siklusMapping = {
+                'profile': 'profile',
+                'tetap': 'fixed',
+                'bulan': 'monthly'
+            };
+
+            finalSiklus = siklusMapping[finalSiklus] || finalSiklus;
+        }
+
+        // Debug logging untuk field mapping
+        console.log('🔍 DEBUG: Processing customer update');
+        console.log('📝 Original area field:', area);
+        console.log('📍 Original region field (name):', region);
+        console.log('🆔 Original region_id field:', region_id);
+
+        // Priority system for region data:
+        // 1. Use region_id if provided (new system)
+        // 2. Fallback to region name mapping (old system)
+        // 3. Fallback to area field (legacy)
+        let finalArea = area;
+        let finalRegionId = region_id;
+
+        if (region_id) {
+            // New system: use region_id directly and update area from region_categories
+            console.log('✅ Using region_id (new system):', region_id);
+
+            // Update area field from regions table
+            const regionResult = await query('SELECT name FROM regions WHERE id = $1', [region_id]);
+            if (regionResult.rows.length > 0) {
+                finalArea = regionResult.rows[0].name;
+                console.log('🔄 Updated area from region_categories:', finalArea);
+            }
+        } else if (region && region !== area) {
+            // Old system: region contains selected region name, update area field and try to find region_id
+            finalArea = region;
+            console.log('🔄 Using region name as area (old system):', region);
+
+            // Try to find matching region_id from regions
+            const regionMatch = await query('SELECT id FROM regions WHERE name = $1', [region]);
+            if (regionMatch.rows.length > 0) {
+                finalRegionId = regionMatch.rows[0].id;
+                console.log('🔄 Found matching region_id:', finalRegionId);
+            }
+        } else {
+            console.log('🔄 Using original area field:', area);
+
+            // Try to find region_id from existing area
+            if (area) {
+                const regionMatch = await query('SELECT id FROM regions WHERE name = $1', [area]);
+                if (regionMatch.rows.length > 0) {
+                    finalRegionId = regionMatch.rows[0].id;
+                    console.log('🔄 Found existing region_id for area:', finalRegionId);
+                }
+            }
+        }
+
+        console.log('✅ Final area to save:', finalArea);
+        console.log('✅ Final region_id to save:', finalRegionId);
+
         // Check if customer exists
         const existingCustomer = await query(
-            'SELECT * FROM customers WHERE id = $1',
+            'SELECT * FROM customers WHERE id = $1::varchar',
             [id]
         );
 
@@ -336,6 +589,7 @@ router.put('/:id', async (req, res) => {
             }
         }
 
+    
         // Update customer
         const result = await query(`
             UPDATE customers SET
@@ -343,14 +597,18 @@ router.put('/:id', async (req, res) => {
                 phone = COALESCE($2, phone),
                 email = COALESCE($3, email),
                 address = COALESCE($4, address),
-                package_id = COALESCE($5, package_id),
-                pppoe_username = COALESCE($6, pppoe_username),
-                pppoe_password = COALESCE($7, pppoe_password),
-                status = COALESCE($8, status),
+                area = COALESCE($5, area),
+                region_id = COALESCE($6, region_id),
+                package_id = COALESCE($7, package_id),
+                pppoe_username = COALESCE($8, pppoe_username),
+                pppoe_password = COALESCE($9, pppoe_password),
+                siklus = COALESCE($10, siklus),
+                billing_type = COALESCE($11, billing_type),
+                status = COALESCE($12, status),
                 updated_at = CURRENT_TIMESTAMP
-            WHERE id = $9
+            WHERE id = $13::varchar
             RETURNING *
-        `, [name, phone, email, address, package_id, pppoe_username, pppoe_password, status, id]);
+        `, [name, phone, email, address, finalArea, finalRegionId, package_id, pppoe_username, pppoe_password, finalSiklus, billing_type, status, id]);
 
         const customer = result.rows[0];
 

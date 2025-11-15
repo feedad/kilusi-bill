@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api/v1'
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ? `${process.env.NEXT_PUBLIC_API_URL}/api/v1` : 'http://localhost:3000/api/v1'
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
@@ -14,10 +14,18 @@ export const api = axios.create({
 // Request interceptor for authentication
 api.interceptors.request.use(
   (config) => {
-    // Get token from localStorage
-    const token = localStorage.getItem('auth_token')
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
+    // Get token from localStorage (authStore persist key)
+    try {
+      const authStorage = localStorage.getItem('auth-storage')
+      if (authStorage) {
+        const parsed = JSON.parse(authStorage)
+        const token = parsed.state?.token
+        if (token) {
+          config.headers.Authorization = `Bearer ${token}`
+        }
+      }
+    } catch (error) {
+      console.error('Error parsing auth storage:', error)
     }
     return config
   },
@@ -31,7 +39,8 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Clear token and redirect to login
+      // Clear auth storage and redirect to login
+      localStorage.removeItem('auth-storage')
       localStorage.removeItem('auth_token')
       localStorage.removeItem('user_data')
       window.location.href = '/login'
@@ -41,6 +50,8 @@ api.interceptors.response.use(
 )
 
 // API endpoints
+export { API_BASE_URL }
+
 export const endpoints = {
   // Authentication
   auth: {
@@ -82,6 +93,7 @@ export const endpoints = {
     packages: '/billing/packages',
     invoiceDetail: (id: string) => `/billing/invoices/${id}`,
     createInvoice: '/billing/invoices',
+    recordPayment: '/billing/payments',
   },
 
   // Dashboard
@@ -132,6 +144,7 @@ export const endpoints = {
     nasDetail: (id: string) => `/radius/nas/${id}`,
     testNas: (id: string) => `/radius/nas/${id}/test`,
     snmpStats: (id: string) => `/radius/nas/${id}/snmp-stats`,
+    connectionStatus: (username: string) => `/radius/connection-status/${username}`,
   },
 
   // Technician
@@ -141,6 +154,32 @@ export const endpoints = {
     acknowledgeAlert: (id: number) => `/technician/alerts/${id}/acknowledge`,
     performance: (timeframe?: string) => `/technician/performance${timeframe ? `?timeframe=${timeframe}` : ''}`,
     activities: '/technician/activities',
+  },
+
+  // ODP (Optical Distribution Point)
+  odp: {
+    list: '/odp',
+    create: '/odp',
+    update: (id: string) => `/odp/${id}`,
+    delete: (id: string) => `/odp/${id}`,
+    detail: (id: string) => `/odp/${id}`,
+  },
+
+  // WhatsApp
+  whatsapp: {
+    templates: '/whatsapp/templates',
+    template: (id: string) => `/whatsapp/templates/${id}`,
+    createTemplate: '/whatsapp/templates',
+    updateTemplate: (id: string) => `/whatsapp/templates/${id}`,
+    deleteTemplate: (id: string) => `/whatsapp/templates/${id}`,
+    testTemplate: (id: string) => `/whatsapp/templates/${id}/test`,
+    schedule: {
+      messages: '/whatsapp/schedule/messages',
+      message: '/whatsapp/schedule/message',
+      cancelMessage: (id: string) => `/whatsapp/schedule/messages/${id}`,
+    },
+    send: '/whatsapp/send/broadcast',
+    status: '/whatsapp/status',
   },
 }
 

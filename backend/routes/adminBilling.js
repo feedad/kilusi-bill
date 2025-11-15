@@ -598,7 +598,8 @@ router.post('/customers/sync-genieacs', adminAuth, async (req, res) => {
 router.post('/customers/update', adminAuth, async (req, res) => {
   try {
     const { phone, name, username, package_id, payment_status, pppoe_username, pppoe_password, connection_type, static_ip, enable_isolir, isolir_date, area, address, install_date, router_id } = req.body;
-    
+
+      
     if (!phone) {
       return res.redirect('/admin/customers?error=' + encodeURIComponent('Nomor HP wajib diisi'));
   }
@@ -629,7 +630,12 @@ router.post('/customers/update', adminAuth, async (req, res) => {
 
     // Address/Area and install date
     if (typeof address !== 'undefined') customerData.address = address;
-    if (typeof area !== 'undefined') customerData.area = area;
+    if (typeof area !== 'undefined') {
+      console.log('✅ Setting area field:', area);
+      customerData.area = area;
+    } else {
+      console.log('❌ Area field is undefined');
+    }
     if (install_date) {
       const d = new Date(install_date);
       if (!isNaN(d.getTime())) customerData.install_date = d.toISOString();

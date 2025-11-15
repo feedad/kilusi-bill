@@ -262,23 +262,23 @@ async function createCustomer(customerData) {
     try {
         const sql = `
             INSERT INTO customers (
-                username, name, phone, pppoe_username, email, address,
+                name, phone, pppoe_username, email, address, area,
                 latitude, longitude, package_id, pppoe_profile, status,
                 cable_type, cable_length, port_number, cable_status, cable_notes, device_id
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
             RETURNING *
         `;
-        
+
         const normalizedPhone = normalizePhone(customerData.phone);
-        
+
         const values = [
-            customerData.username,
             customerData.name,
             normalizedPhone,
             customerData.pppoe_username || null,
             customerData.email || null,
             customerData.address || null,
+            customerData.area || null,
             customerData.latitude || null,
             customerData.longitude || null,
             customerData.package_id || null,
@@ -307,13 +307,13 @@ async function createCustomer(customerData) {
 async function updateCustomer(id, customerData) {
     try {
         const sql = `
-            UPDATE customers 
-            SET name = $1, phone = $2, pppoe_username = $3, email = $4, 
-                address = $5, latitude = $6, longitude = $7, package_id = $8,
-                pppoe_profile = $9, status = $10, cable_type = $11, 
-                cable_length = $12, port_number = $13, cable_status = $14, 
-                cable_notes = $15, device_id = $16
-            WHERE id = $17
+            UPDATE customers
+            SET name = $1, phone = $2, pppoe_username = $3, email = $4,
+                address = $5, area = $6, latitude = $7, longitude = $8,
+                package_id = $9, pppoe_profile = $10, status = $11,
+                cable_type = $12, cable_length = $13, port_number = $14,
+                cable_status = $15, cable_notes = $16, device_id = $17
+            WHERE id = $18
             RETURNING *
         `;
         
@@ -325,6 +325,7 @@ async function updateCustomer(id, customerData) {
             customerData.pppoe_username,
             customerData.email,
             customerData.address,
+            customerData.area,
             customerData.latitude,
             customerData.longitude,
             customerData.package_id,

@@ -10,16 +10,39 @@ import {
 } from '@/types'
 
 class WhatsAppAPI {
-  private baseUrl = '/api/v1/whatsapp'
+  private baseUrl = process.env.NEXT_PUBLIC_API_URL ? `${process.env.NEXT_PUBLIC_API_URL}/whatsapp` : 'http://localhost:3000/whatsapp'
 
   // Connection & Status
   async getStatus(): Promise<ApiResponse<WhatsAppStatus>> {
     const response = await fetch(`${this.baseUrl}/status`)
+
+    // Handle 429 rate limiting errors
+    if (response.status === 429) {
+      return {
+        success: false,
+        error: 'Too many requests. Please wait a moment before trying again.',
+        data: null
+      }
+    }
+
     return response.json()
   }
 
   async getQRCode(): Promise<ApiResponse<{ qrCode: string; connected: boolean }>> {
-    const response = await fetch(`${this.baseUrl}/qrcode`)
+    const response = await fetch(`${this.baseUrl}/qr`)
+    return response.json()
+  }
+
+  async refreshQRCode(): Promise<ApiResponse<{
+    qrCode?: string;
+    connected: boolean;
+    status: string;
+    message: string;
+  }>> {
+    const response = await fetch(`${this.baseUrl}/qr/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    })
     return response.json()
   }
 
@@ -87,6 +110,50 @@ class WhatsAppAPI {
     return response.json()
   }
 
+  async createTemplate(template: {
+    id: string
+    name: string
+    content: string
+    category: string
+    enabled: boolean
+  }): Promise<ApiResponse<WhatsAppTemplate>> {
+    const response = await fetch(`${this.baseUrl}/templates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(template)
+    })
+    return response.json()
+  }
+
+  // Scheduling
+  async getScheduledMessages(): Promise<ApiResponse<any>> {
+    const response = await fetch(`${this.baseUrl}/schedule/messages`)
+    return response.json()
+  }
+
+  async scheduleMessage(data: {
+    recipient: string
+    message: string
+    scheduledAt: string
+    templateId?: string
+    variables?: Record<string, any>
+    recurring?: string
+  }): Promise<ApiResponse<any>> {
+    const response = await fetch(`${this.baseUrl}/schedule/message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    })
+    return response.json()
+  }
+
+  async cancelScheduledMessage(id: string): Promise<ApiResponse<any>> {
+    const response = await fetch(`${this.baseUrl}/schedule/messages/${id}`, {
+      method: 'DELETE'
+    })
+    return response.json()
+  }
+
   async updateTemplate(key: string, template: Partial<WhatsAppTemplate>): Promise<ApiResponse> {
     const response = await fetch(`${this.baseUrl}/templates/${key}`, {
       method: 'PUT',
@@ -133,6 +200,7 @@ class WhatsAppAPI {
   async sendMessage(config: {
     to: string
     message: string
+    type?: string
     template?: string
     variables?: Record<string, any>
     scheduledAt?: string
@@ -140,7 +208,11 @@ class WhatsAppAPI {
     const response = await fetch(`${this.baseUrl}/send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(config)
+      body: JSON.stringify({
+        phone: config.to,
+        message: config.message,
+        type: config.type || 'text'
+      })
     })
     return response.json()
   }
@@ -264,12 +336,70 @@ class WhatsAppAPI {
   }>> {
     const params = new URLSearchParams(filters as any).toString()
     const response = await fetch(`${this.baseUrl}/history?${params}`)
+
+    // Handle 429 rate limiting errors
+    if (response.status === 429) {
+      return {
+        success: false,
+        error: 'Too many requests. Please wait a moment before trying again.',
+        data: null
+      }
+    }
+
     return response.json()
   }
 
   async getLogs(type?: 'error' | 'info' | 'debug', limit?: number): Promise<ApiResponse<string[]>> {
     const params = new URLSearchParams({ type, limit: limit?.toString() } as any).toString()
     const response = await fetch(`${this.baseUrl}/logs?${params}`)
+    return response.json()
+  }
+
+  // Message History Management
+  async getMessageHistoryStats(): Promise<ApiResponse<{
+    totalMessages: number
+    sentMessages: number
+    failedMessages: number
+    activeMessages: number
+    scheduledMessages: number
+    oldestMessage: string
+    newestMessage: string
+    storageLevel: 'normal' | 'caution' | 'warning' | 'critical'
+    warningMessage?: string
+    needsCleanup: boolean
+    limits: {
+      max: number
+      warning: number
+      critical: number
+    }
+    storagePercentage: number
+  }>> {
+    const response = await fetch(`${this.baseUrl}/history/stats`)
+    return response.json()
+  }
+
+  async cleanupMessageHistory(keepCount: number = 500): Promise<ApiResponse<{
+    deletedCount: number
+    keptCount: number
+    cutoffDate?: string
+    deletedMessages?: any[]
+  }>> {
+    const response = await fetch(`${this.baseUrl}/history/cleanup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keepCount })
+    })
+    return response.json()
+  }
+
+  async clearAllMessageHistory(): Promise<ApiResponse<{
+    deletedCount: number
+    deletedIds: string[]
+  }>> {
+    const response = await fetch(`${this.baseUrl}/history/clear`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    })
     return response.json()
   }
 
@@ -327,6 +457,81 @@ class WhatsAppAPI {
       body: formData
     })
     return response.json()
+  }
+
+  // Regions and Customer Statistics
+  async getRegionsStats(): Promise<ApiResponse<Array<{
+    id: string
+    name: string
+    customerCount: number
+    activeCount: number
+  }>>> {
+    console.log('🌍 getRegionsStats called')
+    try {
+      const apiUrl = `${this.baseUrl}/regions-stats`
+      console.log('📡 Fetching regions stats from:', apiUrl)
+      const response = await fetch(apiUrl)
+      const result = await response.json()
+
+      console.log('📊 Regions stats API response:', result)
+
+      if (result.success && result.data && result.data.length > 0) {
+        // Use the data directly from the regions-stats endpoint
+        const regionsWithStats = result.data.map((region: any) => {
+          console.log('🏢 Processing region:', region)
+          return {
+            id: region.id,
+            name: region.name,
+            customerCount: region.customerCount || 0, // Use real data from API
+            activeCount: region.activeCount || 0       // Use real data from API
+          }
+        })
+
+        console.log('✅ Returning regions with stats:', regionsWithStats)
+        return {
+          success: true,
+          data: regionsWithStats.sort((a, b) => a.name.localeCompare(b.name))
+        }
+      } else {
+        console.log('❌ Regions API failed or no data:', result)
+      }
+
+      console.log('⚠️ API returned no regions data')
+      return {
+        success: true,
+        data: []
+      }
+    } catch (error) {
+      console.error('❌ Error in getRegionsStats:', error)
+      return {
+        success: false,
+        message: 'Failed to fetch regions data',
+        data: []
+      }
+    }
+  }
+
+  async getCustomerStats(): Promise<ApiResponse<{
+    total: number
+    active: number
+    inactive: number
+    suspended: number
+  }>> {
+    console.log('👥 getCustomerStats called')
+    try {
+      const apiUrl = `${this.baseUrl}/customer-stats`
+      console.log('📡 Fetching customer stats from:', apiUrl)
+      const response = await fetch(apiUrl)
+      const result = await response.json()
+      console.log('📊 Customer stats response:', result)
+      return result
+    } catch (error) {
+      console.error('❌ Error in getCustomerStats:', error)
+      return {
+        success: false,
+        data: { total: 0, active: 0, inactive: 0, suspended: 0 }
+      }
+    }
   }
 }
 

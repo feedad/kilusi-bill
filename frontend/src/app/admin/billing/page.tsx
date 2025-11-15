@@ -20,6 +20,7 @@ import {
   Clock,
   X,
   Loader2,
+  Wallet,
 } from 'lucide-react'
 import { Button } from '@/components/ui'
 import { Input } from '@/components/ui'
@@ -40,6 +41,24 @@ interface BillingRecord {
   payment_method: string | null
   description: string
   created_at: string
+  payments?: Payment[]
+}
+
+interface Payment {
+  id: string
+  amount: number
+  payment_method: string
+  payment_date: string
+  notes: string
+  created_at: string
+}
+
+interface PaymentFormData {
+  invoice_id: string
+  amount: number
+  payment_method: string
+  payment_date: string
+  notes: string
 }
 
 interface BillingStats {
@@ -59,6 +78,15 @@ export default function BillingPage() {
   const [filterStatus, setFilterStatus] = useState<'all' | 'paid' | 'unpaid' | 'overdue' | 'cancelled'>('all')
   const [selectedRecord, setSelectedRecord] = useState<BillingRecord | null>(null)
   const [showDetailModal, setShowDetailModal] = useState(false)
+  const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [paymentForm, setPaymentForm] = useState<PaymentFormData>({
+    invoice_id: '',
+    amount: 0,
+    payment_method: '',
+    payment_date: new Date().toISOString().split('T')[0],
+    notes: ''
+  })
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
 
   useEffect(() => {
@@ -104,6 +132,57 @@ export default function BillingPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handlePayment = async () => {
+    if (!selectedRecord || !paymentForm.invoice_id) return
+
+    try {
+      setIsProcessingPayment(true)
+
+      const response = await api.post(`${endpoints.billing.recordPayment}`, paymentForm)
+
+      if (response.data.success) {
+        // Reset form and close modal
+        setPaymentForm({
+          invoice_id: '',
+          amount: 0,
+          payment_method: '',
+          payment_date: new Date().toISOString().split('T')[0],
+          notes: ''
+        })
+        setShowPaymentModal(false)
+        setSelectedRecord(null)
+
+        // Refresh data
+        await fetchBillingRecords()
+
+        // Show success message
+        alert('Pembayaran berhasil dicatat!')
+      }
+    } catch (err: any) {
+      console.error('Error processing payment:', err)
+      alert(err.response?.data?.message || 'Terjadi kesalahan saat memproses pembayaran')
+    } finally {
+      setIsProcessingPayment(false)
+    }
+  }
+
+  const openPaymentModal = (record: BillingRecord) => {
+    if (record.status === 'paid') {
+      alert('Invoice ini sudah dibayar')
+      return
+    }
+
+    setSelectedRecord(record)
+    setPaymentForm({
+      invoice_id: record.id,
+      amount: record.amount,
+      payment_method: '',
+      payment_date: new Date().toISOString().split('T')[0],
+      notes: ''
+    })
+    setShowPaymentModal(true)
   }
 
   const filteredRecords = billingRecords.filter((record) => {
@@ -424,6 +503,17 @@ export default function BillingPage() {
                           >
                             <Eye className="h-4 w-4" />
                           </Button>
+                          {record.status !== 'paid' && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-success hover:text-success"
+                              onClick={() => openPaymentModal(record)}
+                              title="Bayar Tagihan"
+                            >
+                              <Wallet className="h-4 w-4" />
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
                             size="icon"
@@ -522,6 +612,155 @@ export default function BillingPage() {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Payment Modal */}
+      {showPaymentModal && selectedRecord && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-card rounded-lg max-w-md w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold text-foreground">Proses Pembayaran</h2>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => {
+                    setShowPaymentModal(false)
+                    setSelectedRecord(null)
+                    setPaymentForm({
+                      invoice_id: '',
+                      amount: 0,
+                      payment_method: '',
+                      payment_date: new Date().toISOString().split('T')[0],
+                      notes: ''
+                    })
+                  }}
+                >
+                  <X className="h-6 w-6" />
+                </Button>
+              </div>
+            </div>
+            <div className="p-6 space-y-4">
+              {/* Invoice Info */}
+              <div className="bg-muted/50 rounded-lg p-4 space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-sm text-muted-foreground">No. Invoice:</span>
+                  <span className="font-medium">{selectedRecord.invoice_number}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-muted-foreground">Pelanggan:</span>
+                  <span className="font-medium">{selectedRecord.customer_name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-muted-foreground">Jumlah Tagihan:</span>
+                  <span className="font-bold text-foreground">{formatCurrency(selectedRecord.amount)}</span>
+                </div>
+              </div>
+
+              {/* Payment Form */}
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-2">
+                    Jumlah Pembayaran
+                  </label>
+                  <Input
+                    type="number"
+                    value={paymentForm.amount}
+                    onChange={(e) => setPaymentForm({...paymentForm, amount: parseFloat(e.target.value) || 0})}
+                    placeholder="0"
+                    min={0}
+                    max={selectedRecord.amount}
+                    step={0.01}
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Maks: {formatCurrency(selectedRecord.amount)}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-2">
+                    Metode Pembayaran
+                  </label>
+                  <select
+                    value={paymentForm.payment_method}
+                    onChange={(e) => setPaymentForm({...paymentForm, payment_method: e.target.value})}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    required
+                  >
+                    <option value="">Pilih metode pembayaran</option>
+                    <option value="cash">Tunai</option>
+                    <option value="transfer">Transfer Bank</option>
+                    <option value="ewallet">E-Wallet</option>
+                    <option value="credit">Kartu Kredit</option>
+                    <option value="other">Lainnya</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-2">
+                    Tanggal Pembayaran
+                  </label>
+                  <Input
+                    type="date"
+                    value={paymentForm.payment_date}
+                    onChange={(e) => setPaymentForm({...paymentForm, payment_date: e.target.value})}
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-2">
+                    Catatan (Opsional)
+                  </label>
+                  <textarea
+                    value={paymentForm.notes}
+                    onChange={(e) => setPaymentForm({...paymentForm, notes: e.target.value})}
+                    placeholder="Tambahkan catatan pembayaran..."
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    rows={3}
+                  />
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex justify-end space-x-2 pt-4 border-t">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowPaymentModal(false)
+                    setSelectedRecord(null)
+                    setPaymentForm({
+                      invoice_id: '',
+                      amount: 0,
+                      payment_method: '',
+                      payment_date: new Date().toISOString().split('T')[0],
+                      notes: ''
+                    })
+                  }}
+                >
+                  Batal
+                </Button>
+                <Button
+                  onClick={handlePayment}
+                  disabled={isProcessingPayment || !paymentForm.payment_method || paymentForm.amount <= 0}
+                  className="flex items-center space-x-2"
+                >
+                  {isProcessingPayment ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Memproses...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Wallet className="h-4 w-4" />
+                      <span>Proses Pembayaran</span>
+                    </>
+                  )}
+                </Button>
+              </div>
             </div>
           </div>
         </div>

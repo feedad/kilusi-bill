@@ -23,6 +23,7 @@ import {
   Server,
   Monitor,
   MapPin,
+  Network,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -63,7 +64,13 @@ const navigation = [
     roles: ['admin', 'technician'],
   },
   {
-    name: 'Peta ONU',
+    name: 'ODP',
+    href: '/admin/odp',
+    icon: Network,
+    roles: ['admin'],
+  },
+  {
+    name: 'Network Map',
     href: '/admin/onu-map',
     icon: MapPin,
     roles: ['admin', 'technician'],

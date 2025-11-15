@@ -90,46 +90,64 @@ const CustomerMap = ({ customer }: CustomerMapProps) => {
   return (
     <div className="w-full h-96 rounded-lg overflow-hidden border relative bg-white">
       {/* Interactive OpenStreetMap iframe */}
-      <iframe
-        title={`Map for ${customer.name}`}
-        src={`https://www.openstreetmap.org/export/embed.html?bbox=${coordinates[1]-0.005},${coordinates[0]-0.005},${coordinates[1]+0.005},${coordinates[0]+0.005}&layer=mapnik&marker=${coordinates[0]},${coordinates[1]}`}
-        className="w-full h-full border-0"
-        style={{ minHeight: '384px' }}
-        loading="lazy"
-        allowFullScreen
-      />
+      {coordinates && typeof coordinates[0] === 'number' && typeof coordinates[1] === 'number' && (
+        <iframe
+          title={`Map for ${customer.name}`}
+          src={`https://www.openstreetmap.org/export/embed.html?bbox=${coordinates[1] - 0.005},${coordinates[0] - 0.005},${coordinates[1] + 0.005},${coordinates[0] + 0.005}&layer=mapnik&marker=${coordinates[0]},${coordinates[1]}`}
+          className="w-full h-full border-0"
+          style={{ minHeight: '384px' }}
+          loading="lazy"
+          allowFullScreen
+        />
+      )}
 
       {/* Customer info overlay */}
-      <div className="absolute top-4 left-4 bg-white bg-opacity-95 rounded-lg shadow-lg p-3 max-w-xs">
-        <div className="flex items-center space-x-2 mb-2">
-          <MapPin className="h-5 w-5 text-red-500 flex-shrink-0" />
-          <p className="text-sm font-semibold text-gray-800 truncate">{customer.name || 'Lokasi Pelanggan'}</p>
+      {coordinates && (
+        <div className="absolute top-4 left-4 bg-white bg-opacity-95 rounded-lg shadow-lg p-3 max-w-xs">
+          <div className="flex items-center space-x-2 mb-2">
+            <MapPin className="h-5 w-5 text-red-500 flex-shrink-0" />
+            <p className="text-sm font-semibold text-gray-800 truncate">{customer.name || 'Lokasi Pelanggan'}</p>
+          </div>
+          <p className="text-xs text-gray-600 mb-2">{customer.address}</p>
+          {coordinates && typeof coordinates[0] === 'number' && typeof coordinates[1] === 'number' && (
+            <div className="bg-gray-50 rounded px-2 py-1">
+              <p className="text-xs text-gray-700 font-mono">
+                {coordinates[0].toFixed(6)}, {coordinates[1].toFixed(6)}
+              </p>
+            </div>
+          )}
+          {coordinates && (typeof coordinates[0] !== 'number' || typeof coordinates[1] !== 'number') && (
+            <div className="bg-yellow-50 rounded px-2 py-1">
+              <p className="text-xs text-yellow-700">Koordinat tidak valid</p>
+            </div>
+          )}
+          {!coordinates && !loading && (
+            <div className="bg-yellow-50 rounded px-2 py-1">
+              <p className="text-xs text-yellow-700">Koordinat tidak tersedia</p>
+            </div>
+          )}
         </div>
-        <p className="text-xs text-gray-600 mb-2">{customer.address}</p>
-        <div className="bg-gray-50 rounded px-2 py-1">
-          <p className="text-xs text-gray-700 font-mono">
-            {coordinates[0].toFixed(6)}, {coordinates[1].toFixed(6)}
-          </p>
-        </div>
-      </div>
+      )}
 
       {/* Zoom controls info */}
       <div className="absolute bottom-4 right-4 bg-white bg-opacity-90 rounded px-2 py-1">
         <p className="text-xs text-gray-600">🖱️ Scroll untuk zoom • Drag untuk pan</p>
       </div>
 
-      {/* External map link (optional) */}
-      <div className="absolute bottom-4 left-4">
-        <a
-          href={`https://www.openstreetmap.org/?mlat=${coordinates[0]}&mlon=${coordinates[1]}&zoom=17`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-xs inline-flex items-center space-x-1 transition-colors"
-        >
-          <span>Buka di OSM</span>
-          <ExternalLink className="h-3 w-3" />
-        </a>
-      </div>
+      {/* External map link */}
+      {coordinates && typeof coordinates[0] === 'number' && typeof coordinates[1] === 'number' && (
+        <div className="absolute bottom-4 left-4">
+          <a
+            href={`https://www.openstreetmap.org/?mlat=${coordinates[0]}&mlon=${coordinates[1]}&zoom=17`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-xs inline-flex items-center space-x-1 transition-colors"
+          >
+            <span>Buka di OSM</span>
+            <ExternalLink className="h-3 w-3" />
+          </a>
+        </div>
+      )}
     </div>
   )
 }

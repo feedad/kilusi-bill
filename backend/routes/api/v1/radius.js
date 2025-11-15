@@ -1222,4 +1222,82 @@ router.get('/nas/:id/traffic', async (req, res) => {
     }
 });
 
+/**
+ * GET /radius/connection-status/:username
+ * Get user connection status from RADIUS
+ */
+router.get('/connection-status/:username', async (req, res) => {
+    try {
+        const { username } = req.params;
+
+        if (!username) {
+            return res.status(400).json({
+                success: false,
+                message: 'Username is required'
+            });
+        }
+
+        console.log(`[DEBUG] API: Getting connection status for ${username}`);
+
+        // Get connection status from RADIUS
+        const radiusDb = require('../../../config/radius-postgres');
+        const connectionStatus = await radiusDb.getUserConnectionStatus(username);
+
+        console.log(`[DEBUG] API: Connection status for ${username}:`, connectionStatus);
+
+        res.json({
+            success: true,
+            data: {
+                connectionStatus: connectionStatus
+            }
+        });
+
+    } catch (error) {
+        logger.error(`Error getting connection status for ${req.params.username}: ${error.message}`);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to get connection status'
+        });
+    }
+});
+
+/**
+ * GET /radius/connection-status-public/:username (no auth required for testing)
+ * Get user connection status from RADIUS - PUBLIC VERSION
+ */
+router.get('/connection-status-public/:username', async (req, res) => {
+    try {
+        const { username } = req.params;
+
+        if (!username) {
+            return res.status(400).json({
+                success: false,
+                message: 'Username is required'
+            });
+        }
+
+        console.log(`[DEBUG] PUBLIC API: Getting connection status for ${username}`);
+
+        // Get connection status from RADIUS
+        const radiusDb = require('../../../config/radius-postgres');
+        const connectionStatus = await radiusDb.getUserConnectionStatus(username);
+
+        console.log(`[DEBUG] PUBLIC API: Connection status for ${username}:`, connectionStatus);
+
+        res.json({
+            success: true,
+            data: {
+                connectionStatus: connectionStatus
+            }
+        });
+
+    } catch (error) {
+        logger.error(`Error getting connection status for ${req.params.username}: ${error.message}`);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to get connection status'
+        });
+    }
+});
+
 module.exports = router;

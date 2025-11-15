@@ -82,7 +82,7 @@ router.get('/invoices/:id', async (req, res) => {
     try {
         const { id } = req.params;
 
-        const query = `
+        const invoiceQuery = `
             SELECT
                 i.*,
                 c.name as customer_name,
@@ -94,10 +94,10 @@ router.get('/invoices/:id', async (req, res) => {
             FROM invoices i
             JOIN customers c ON i.customer_id = c.id
             LEFT JOIN packages p ON i.package_id = p.id
-            WHERE i.id = $1 AND i.deleted_at IS NULL
+            WHERE i.id = $1
         `;
 
-        const result = await pool.query(query, [id]);
+        const result = await query(invoiceQuery, [id]);
 
         if (result.rows.length === 0) {
             return res.status(404).json({
@@ -122,7 +122,7 @@ router.get('/invoices/:id', async (req, res) => {
             ORDER BY created_at DESC
         `;
 
-        const paymentsResult = await pool.query(paymentsQuery, [id]);
+        const paymentsResult = await query(paymentsQuery, [id]);
 
         res.json({
             success: true,
@@ -166,7 +166,7 @@ router.post('/invoices', async (req, res) => {
         const invoiceNumber = `INV-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
         // Insert invoice
-        const result = await pool.query(`
+        const result = await query(`
             INSERT INTO invoices (
                 customer_id, package_id, invoice_number, amount,
                 due_date, notes, status, created_at
@@ -212,8 +212,8 @@ router.post('/payments', async (req, res) => {
         }
 
         // Check if invoice exists
-        const invoiceQuery = await pool.query(
-            'SELECT * FROM invoices WHERE id = $1 AND deleted_at IS NULL',
+        const invoiceQuery = await query(
+            'SELECT * FROM invoices WHERE id = $1',
             [invoice_id]
         );
 
@@ -235,7 +235,7 @@ router.post('/payments', async (req, res) => {
         }
 
         // Insert payment
-        const paymentResult = await pool.query(`
+        const paymentResult = await query(`
             INSERT INTO payments (
                 invoice_id, amount, payment_method, payment_date,
                 notes, created_at
@@ -245,7 +245,7 @@ router.post('/payments', async (req, res) => {
         `, [invoice_id, amount, payment_method, payment_date || new Date(), notes]);
 
         // Update invoice status
-        const totalPaid = await pool.query(`
+        const totalPaid = await query(`
             SELECT COALESCE(SUM(amount), 0) as total_paid
             FROM payments
             WHERE invoice_id = $1
@@ -254,10 +254,32 @@ router.post('/payments', async (req, res) => {
         const totalPaidAmount = parseFloat(totalPaid.rows[0].total_paid);
 
         if (totalPaidAmount >= invoice.amount) {
-            await pool.query(
-                'UPDATE invoices SET status = $1, paid_at = CURRENT_TIMESTAMP WHERE id = $2',
+            await query(
+                'UPDATE invoices SET status = $1 WHERE id = $2',
                 ['paid', invoice_id]
             );
+
+            // Check if customer has any other unpaid invoices and update status if all paid
+            const unpaidInvoicesCheck = await query(`
+                SELECT COUNT(*) as unpaid_count
+                FROM invoices
+                WHERE customer_id = $1 AND status = 'unpaid'
+            `, [invoice.customer_id]);
+
+            const unpaidCount = parseInt(unpaidInvoicesCheck.rows[0].unpaid_count);
+
+            if (unpaidCount === 0) {
+                // All invoices paid, update customer status to active and clear isolation
+                await query(`
+                    UPDATE customers
+                    SET status = 'active', isolir_status = 'normal', updated_at = NOW()
+                    WHERE id = $1
+                `, [invoice.customer_id]);
+
+                logger.info(`✅ Customer ${invoice.customer_id} reactivated - all invoices paid`);
+            } else {
+                logger.info(`ℹ️ Customer ${invoice.customer_id} still has ${unpaidCount} unpaid invoices`);
+            }
         }
 
         const payment = paymentResult.rows[0];
@@ -280,18 +302,17 @@ router.post('/payments', async (req, res) => {
 // GET /api/v1/billing/packages - Get all packages
 router.get('/packages', async (req, res) => {
     try {
-        const query = `
+        const packagesQuery = `
             SELECT
                 p.*,
                 COUNT(c.id) as customer_count
             FROM packages p
-            LEFT JOIN customers c ON p.id = c.package_id AND c.deleted_at IS NULL
-            WHERE p.deleted_at IS NULL
+            LEFT JOIN customers c ON p.id = c.package_id
             GROUP BY p.id
             ORDER BY p.price ASC
         `;
 
-        const result = await pool.query(query);
+        const result = await query(packagesQuery);
 
         res.json({
             success: true,

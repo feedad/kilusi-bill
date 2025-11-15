@@ -23,7 +23,7 @@ async function getWhatsAppWebVersion(botName = 'WhatsApp Bot') {
         console.warn(`⚠️ [${botName}] Failed to fetch latest version, using fallback:`, error.message);
         // Fallback ke versi yang telah ditentukan
         // Format: [major, minor, patch]
-        return [2, 3000, 1025190524]; // Versi fallback yang stabil
+        return [2, 3000, 1026141732]; // Versi fallback yang lebih stabil (2024)
     }
 }
 
@@ -34,7 +34,7 @@ async function getWhatsAppWebVersion(botName = 'WhatsApp Bot') {
  */
 const WHATSAPP_WEB_VERSION = {
     // Versi fallback yang digunakan ketika gagal fetch versi terbaru
-    FALLBACK_VERSION: [2, 3000, 1025190524],
+    FALLBACK_VERSION: [2, 3000, 1026141732],
     
     // Fungsi untuk mendapatkan versi
     getVersion: getWhatsAppWebVersion

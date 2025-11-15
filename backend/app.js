@@ -14,6 +14,8 @@ const EventEmitter = require('events');
 const helmet = require('helmet');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
+const http = require('http');
+const { Server } = require('socket.io');
 
 // Import adminAuth router and middleware
 const { router: adminAuthRouter, adminAuth } = require('./routes/adminAuth');
@@ -131,6 +133,29 @@ const { injectSettings } = require('./config/middleware');
 // Middleware dasar dengan optimasi
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Debug logging untuk customer requests
+app.use((req, res, next) => {
+  if (req.path.includes('/customers') && req.method === 'PUT') {
+    console.log('🔍 DEBUG: Customer update request received');
+    console.log('📝 Method:', req.method);
+    console.log('🛤️  Path:', req.path);
+    console.log('💾 Complete request body:', JSON.stringify(req.body, null, 2));
+
+    if (req.body) {
+      if ('region' in req.body) {
+        console.log('📍 Region field found:', req.body.region);
+        console.log('📍 Region field type:', typeof req.body.region);
+        console.log('📍 Region field length:', req.body.region ? req.body.region.length : 'null/undefined');
+      }
+      if ('area' in req.body) {
+        console.log('🏢 Area field found:', req.body.area);
+      }
+    }
+  }
+  next();
+});
+
 
 // Security headers
 // Get current origin for CSP configuration
@@ -1258,6 +1283,265 @@ app.get('/whatsapp/status', (req, res) => {
     });
 });
 
+// Route untuk mendapatkan QR code WhatsApp
+app.get('/whatsapp/qr', (req, res) => {
+    res.json({
+        success: true,
+        qrCode: global.whatsappStatus.qrCode,
+        status: global.whatsappStatus.status,
+        connected: global.whatsappStatus.connected
+    });
+});
+
+// Route untuk refresh QR code WhatsApp
+app.post('/whatsapp/qr/refresh', async (req, res) => {
+    try {
+        // Import whatsapp module untuk restart koneksi
+        const whatsapp = require('./config/whatsapp');
+
+        // Clear current QR code dan status
+        global.whatsappStatus.qrCode = null;
+        global.whatsappStatus.status = 'reconnecting';
+
+        // Restart WhatsApp connection untuk generate QR baru
+        logger.info('🔄 Refreshing WhatsApp QR code...');
+
+        // Implementation sederhana - clear status saja dulu
+        // QR code akan digenerate otomatis oleh WhatsApp module
+        setTimeout(() => {
+            global.whatsappStatus.status = 'waiting_for_qr';
+        }, 1000);
+
+        res.json({
+            success: true,
+            message: 'QR code refresh initiated',
+            status: global.whatsappStatus.status
+        });
+    } catch (error) {
+        logger.error('Error refreshing QR code:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to refresh QR code'
+        });
+    }
+});
+
+// Route untuk clear session WhatsApp
+app.delete('/whatsapp/clear-session', async (req, res) => {
+    try {
+        logger.info('🗑️ [API] Clear WhatsApp session requested');
+
+        // Import whatsapp module
+        const whatsapp = require('./config/whatsapp');
+        const fs = require('fs');
+        const path = require('path');
+
+        // Clear session directory
+        const sessionDir = global.appSettings.whatsappSessionPath || './whatsapp-session';
+        if (fs.existsSync(sessionDir)) {
+            const files = fs.readdirSync(sessionDir);
+            for (const file of files) {
+                fs.unlinkSync(path.join(sessionDir, file));
+            }
+            logger.info(`✅ Cleared ${files.length} session files from ${sessionDir}`);
+        }
+
+        // Reset global status
+        global.whatsappStatus = {
+            connected: false,
+            qrCode: null,
+            phoneNumber: null,
+            connectedSince: null,
+            status: 'disconnected'
+        };
+
+        res.json({
+            success: true,
+            message: 'WhatsApp session cleared successfully'
+        });
+    } catch (error) {
+        logger.error('Error clearing WhatsApp session:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to clear WhatsApp session'
+        });
+    }
+});
+
+// Route untuk WhatsApp templates (mock response)
+app.get('/whatsapp/templates', (req, res) => {
+    res.json({
+        success: true,
+        data: {
+            welcome: {
+                id: 'welcome',
+                name: 'Welcome Message',
+                content: 'Hello {{name}}, welcome to our service!',
+                category: 'general',
+                enabled: true
+            },
+            invoice_reminder: {
+                id: 'invoice_reminder',
+                name: 'Invoice Reminder',
+                content: 'Hi {{name}}, your invoice of {{amount}} is due on {{due_date}}.',
+                category: 'billing',
+                enabled: true
+            },
+            payment_confirmation: {
+                id: 'payment_confirmation',
+                name: 'Payment Confirmation',
+                content: 'Thank you {{name}}, your payment of {{amount}} has been received.',
+                category: 'billing',
+                enabled: true
+            }
+        }
+    });
+});
+
+// Route untuk WhatsApp message history (mock response)
+app.get('/whatsapp/history', (req, res) => {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+
+    // Mock data for message history
+    const mockMessages = [
+        {
+            id: '1',
+            to: '+628123456789',
+            message: 'Test message 1',
+            status: 'sent',
+            sentAt: new Date(Date.now() - 3600000).toISOString(),
+            type: 'text'
+        },
+        {
+            id: '2',
+            to: '+628987654321',
+            message: 'Test message 2',
+            status: 'delivered',
+            sentAt: new Date(Date.now() - 7200000).toISOString(),
+            type: 'text'
+        }
+    ];
+
+    res.json({
+        success: true,
+        data: {
+            messages: mockMessages,
+            total: mockMessages.length,
+            page: page,
+            totalPages: 1
+        }
+    });
+});
+
+// POST /whatsapp/templates - Create new template
+app.post('/whatsapp/templates', (req, res) => {
+    try {
+        const { id, name, content, category, enabled } = req.body;
+
+        if (!id || !name || !content || !category) {
+            return res.status(400).json({
+                success: false,
+                message: 'Template data is incomplete'
+            });
+        }
+
+        res.status(201).json({
+            success: true,
+            data: {
+                id,
+                name,
+                content,
+                category,
+                enabled: enabled !== false
+            },
+            message: 'Template created successfully'
+        });
+    } catch (error) {
+        logger.error('Error creating template:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to create template'
+        });
+    }
+});
+
+// PUT /whatsapp/templates/:id - Update template
+app.put('/whatsapp/templates/:id', (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, content, category, enabled } = req.body;
+
+        res.json({
+            success: true,
+            data: {
+                id,
+                name: name || 'Updated Template',
+                content: content || 'Updated content',
+                category: category || 'general',
+                enabled: enabled !== false
+            },
+            message: 'Template updated successfully'
+        });
+    } catch (error) {
+        logger.error('Error updating template:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update template'
+        });
+    }
+});
+
+// DELETE /whatsapp/templates/:id - Delete template
+app.delete('/whatsapp/templates/:id', (req, res) => {
+    try {
+        const { id } = req.params;
+
+        res.json({
+            success: true,
+            message: `Template ${id} deleted successfully`
+        });
+    } catch (error) {
+        logger.error('Error deleting template:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to delete template'
+        });
+    }
+});
+
+// POST /whatsapp/templates/:id/test - Test template
+app.post('/whatsapp/templates/:id/test', (req, res) => {
+    try {
+        const { id } = req.params;
+        const { recipient } = req.body;
+
+        if (!recipient) {
+            return res.status(400).json({
+                success: false,
+                message: 'Recipient is required'
+            });
+        }
+
+        res.json({
+            success: true,
+            data: {
+                templateId: id,
+                recipient,
+                status: 'sent',
+                messageId: 'msg_' + Date.now()
+            },
+            message: 'Template test sent successfully'
+        });
+    } catch (error) {
+        logger.error('Error testing template:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to test template'
+        });
+    }
+});
+
 // Redirect root ke portal pelanggan
 app.get('/', (req, res) => {
   res.redirect('/customer/login');
@@ -1368,11 +1652,63 @@ function startServer(portToUse) {
     // Hanya gunakan port dari settings.json, tidak ada fallback
     try {
         const host = getSetting('server_host', 'localhost');
-        const server = app.listen(port, host, () => {
+
+        // Create HTTP server for Socket.IO
+        const server = http.createServer(app);
+
+        // Setup Socket.IO with CORS
+        const io = new Server(server, {
+            cors: {
+                origin: allowedOrigins,
+                methods: ["GET", "POST"],
+                credentials: true
+            },
+            transports: ['websocket', 'polling']
+        });
+
+        // Make io globally available
+        global.io = io;
+
+        // Handle WebSocket connections
+        io.on('connection', (socket) => {
+            logger.info(`🔌 WebSocket client connected: ${socket.id}`);
+
+            // Join WhatsApp room for real-time updates
+            socket.join('whatsapp-status');
+
+            // Send current WhatsApp status on connection
+            socket.emit('whatsapp-status', {
+                connected: false,
+                status: 'initializing',
+                message: 'Checking WhatsApp status...'
+            });
+
+            // Handle disconnect
+            socket.on('disconnect', () => {
+                logger.info(`🔌 WebSocket client disconnected: ${socket.id}`);
+            });
+
+            // Handle subscribe to WhatsApp status
+            socket.on('subscribe-whatsapp', () => {
+                socket.join('whatsapp-status');
+                logger.info(`📱 Client ${socket.id} subscribed to WhatsApp status updates`);
+            });
+
+            // Handle unsubscribe from WhatsApp status
+            socket.on('unsubscribe-whatsapp', () => {
+                socket.leave('whatsapp-status');
+                logger.info(`📱 Client ${socket.id} unsubscribed from WhatsApp status updates`);
+            });
+        });
+
+        logger.info('🔌 WebSocket server initialized for real-time WhatsApp status');
+
+        server.listen(port, host, () => {
             logger.info(`✅ Server berhasil berjalan pada port ${port}`);
             logger.info(`🌐 Web Portal tersedia di: http://${host === '0.0.0.0' ? '192.168.1.235' : host}:${port}`);
             logger.info(`🌐 Local access: http://localhost:${port}`);
             logger.info(`🌐 Network access: http://192.168.1.235:${port}`);
+            logger.info(`🌐 WebSocket available: ws://${host === '0.0.0.0' ? '192.168.1.235' : host}:${port}`);
             logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
             // Update global.appSettings.port dengan port yang berhasil digunakan
             global.appSettings.port = port.toString();

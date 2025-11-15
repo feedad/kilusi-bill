@@ -16,6 +16,12 @@ router.use('/realtime', jwtAuth, require('./realtime'));
 router.use('/radius', jwtAuth, require('./radius'));
 router.use('/genieacs', require('./genieacs'));
 router.use('/technician', jwtAuth, require('./technician'));
+router.use('/whatsapp', require('./whatsapp')); // Re-enabled WhatsApp functionality
+// Separate auth and non-auth billing cycle routes
+router.use('/billing-cycles', require('./billing-cycles-public'));
+router.use('/billing-cycles', jwtAuth, require('./billing-cycles'));
+router.use('/odp', jwtAuth, require('./odp'));
+router.use('/cable-routes', jwtAuth, require('./cable-routes'));
 
 // Health check endpoint
 router.get('/health', (req, res) => {

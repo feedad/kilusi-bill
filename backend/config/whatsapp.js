@@ -79,7 +79,7 @@ function getSuperAdminNumber() {
     }
 }
 
-const superAdminNumber = getSuperAdminNumber();
+// Use dynamic function to get current super admin number instead of global variable
 let genieacsCommandsEnabled = true;
 
 // Fungsi untuk mengecek apakah nomor adalah admin atau super admin
@@ -106,8 +106,9 @@ function isAdminNumber(number) {
         // Log debug
         console.log('DEBUG Admins from settings.json:', admins);
         console.log('DEBUG Nomor Masuk:', cleanNumber);
-        // Cek super admin (hanya jika superAdminNumber tersedia)
-        if (superAdminNumber && cleanNumber === superAdminNumber) return true;
+        // Cek super admin (gunakan function untuk pembacaan dinamis)
+        const currentSuperAdmin = getSuperAdminNumber();
+        if (currentSuperAdmin && cleanNumber === currentSuperAdmin.replace(/\D/g, '')) return true;
         // Cek di daftar admin
         if (admins.includes(cleanNumber)) return true;
         return false;
@@ -115,6 +116,28 @@ function isAdminNumber(number) {
         console.error('Error in isAdminNumber:', error);
         return false;
     }
+}
+
+// Fungsi helper untuk mendapatkan deskripsi disconnect reason
+function getDisconnectReasonText(statusCode) {
+    const reasons = {
+        [DisconnectReason.connectionLost]: 'Connection Lost',
+        [DisconnectReason.timedOut]: 'Connection Timed Out',
+        [DisconnectReason.connectionClosed]: 'Connection Closed',
+        [DisconnectReason.restartRequired]: 'Restart Required',
+        [DisconnectReason.loggedOut]: 'Logged Out',
+        [DisconnectReason.badSession]: 'Bad Session',
+        [DisconnectReason.multideviceMismatch]: 'Multi-device Mismatch',
+        428: 'Precondition Failed',
+        500: 'Internal Server Error',
+        503: 'Service Unavailable',
+        502: 'Bad Gateway',
+        401: 'Unauthorized',
+        403: 'Forbidden',
+        408: 'Request Timeout'
+    };
+
+    return reasons[statusCode] || `Unknown Error (${statusCode})`;
 }
 
 // Helper untuk menambahkan header dan footer pada pesan
@@ -296,10 +319,22 @@ function addWatermarkToMessage(message) {
     return message + '\u200B' + watermark + '\u200B';
 }
 
+// Global connection guard to prevent multiple simultaneous connections
+let isConnecting = false;
+let connectionPromise = null;
+
 // Update fungsi koneksi WhatsApp dengan penanganan error yang lebih baik
 async function connectToWhatsApp() {
-    try {
-        console.log('Memulai koneksi WhatsApp...');
+    // Prevent multiple simultaneous connection attempts
+    if (isConnecting) {
+        console.log('⚠️ WhatsApp connection already in progress, waiting...');
+        return connectionPromise;
+    }
+
+    isConnecting = true;
+    connectionPromise = new Promise(async (resolve, reject) => {
+        try {
+            console.log('Memulai koneksi WhatsApp...');
         
         // Pastikan direktori sesi ada
         const sessionDir = getSetting('whatsapp_session_path', './whatsapp-session');
@@ -334,48 +369,111 @@ async function connectToWhatsApp() {
         sock = makeWASocket({
             auth: state,
             logger: whatsappLogger,
-            browser: ['Kilusi Bill WhatsApp Bot', 'Chrome', '1.0.0'],
-            connectTimeoutMs: 60000,
-            qrTimeout: 40000,
-            defaultQueryTimeoutMs: 30000, // Timeout untuk query
-            retryRequestDelayMs: 1000,
-            version: whatsappVersion
+            browser: ['Kilusi Bill', 'Chrome', '120.0.0.0'],
+            connectTimeoutMs: 180000, // Further increased timeout for better stability
+            qrTimeout: 90000, // Further increased QR timeout
+            defaultQueryTimeoutMs: 90000, // Further increased query timeout
+            retryRequestDelayMs: 3000, // Even slower retry for better stability
+            maxMsgRetryCount: 5, // Maximum message retry attempts
+            connectionRetryDelayMs: 5000, // Delay between connection retries
+            keepAliveIntervalMs: 25000, // Keep-alive interval to maintain connection
+            version: whatsappVersion,
+            printQRInTerminal: false, // Disable duplicate QR in terminal
+            emitOwnEvents: false, // Disable own events to reduce noise
+            fireOnInitQueries: true, // Wait for initial sync
+            syncFullHistory: false, // Skip full history sync for faster connect
+            getMessage: true, // Enable better message handling
+            // Additional stability options
+            transactionLogs: false, // Disable transaction logs for performance
+            mobile: false, // We're connecting from web, not mobile
+            // Better connection handling
+            shouldSyncHistoryMessage: () => false, // Don't sync old messages
+            generateHighQualityLinkPreview: false, // Disable link previews for performance
+            // Enhanced options for Android device compatibility
+            patchMessageBeforeSending: (message) => message, // Don't modify messages
+            markOnlineOnConnect: true, // Mark as online when connected
         });
         
 
 
         // Tangani update koneksi
         sock.ev.on('connection.update', (update) => {
-            const { connection, lastDisconnect, qr } = update;
-            
+            const { connection, lastDisconnect, qr, isOnline, isNewLogin } = update;
+
             // Log update koneksi
             console.log('Connection update:', update);
-            
+
             // Tangani QR code
             if (qr) {
-                // Simpan QR code dalam format yang bersih
-                // Simpan QR code ke global status (untuk admin panel)
-                if (!global.whatsappStatus || global.whatsappStatus.qrCode !== qr) {
-                    global.whatsappStatus = {
-                        connected: false,
-                        qrCode: qr,
-                        phoneNumber: null,
-                        connectedSince: null,
-                        status: 'qr_code'
-                    };
-                }
+                // Update global status untuk QR code
+                global.whatsappStatus = {
+                    connected: false,
+                    qrCode: qr,
+                    phoneNumber: null,
+                    connectedSince: null,
+                    status: 'qr_code'
+                };
 
-                
                 // Tampilkan QR code di terminal
                 console.log('QR Code tersedia, siap untuk dipindai');
                 qrcode.generate(qr, { small: true });
             }
-            
-            // Tangani koneksi
-            if (connection === 'open') {
-                console.log('WhatsApp terhubung!');
+
+            // IMPORTANT: Handle isOnline status change for connection stability
+            if (isOnline !== undefined) {
+                console.log('📡 WhatsApp online status changed:', isOnline);
+                if (isOnline && global.whatsappStatus.connected) {
+                    console.log('✅ WhatsApp is now online and stable');
+                    // Send a stability ping to maintain connection with Android device
+                    setTimeout(async () => {
+                        try {
+                            if (sock && sock.ws && sock.ws.readyState === 1) {
+                                await sock.sendChatAck('status@broadcast', null, 'read');
+                                console.log('🔄 Connection stability ping sent to Android');
+                            }
+                        } catch (error) {
+                            console.log('⚠️ Stability ping failed:', error.message);
+                        }
+                    }, 1000);
+                }
+            }
+
+            // Handle new login event for proper Android synchronization
+            if (isNewLogin) {
+                console.log('🔑 New login detected, stabilizing connection for Android...');
+                // Give time for connection to stabilize and sync with Android device
+                setTimeout(() => {
+                    if (sock && sock.user) {
+                        console.log('✅ New login stabilized, Android device should show connected status');
+                        // Force a status update to the Android device
+                        global.whatsappStatus = {
+                            ...global.whatsappStatus,
+                            status: 'fully_connected',
+                            lastSync: new Date()
+                        };
+                    }
+                }, 3000);
+            }
+
+            // Tangani koneksi yang sedang berjalan
+            if (connection === 'connecting') {
+                console.log('🔄 WhatsApp sedang menghubungkan...');
+                global.whatsappStatus = {
+                    connected: false,
+                    qrCode: null,
+                    phoneNumber: null,
+                    connectedSince: null,
+                    status: 'connecting'
+                };
+            }
+
+            // Tangani koneksi berhasil
+            if (connection === 'open' || (!connection && !qr && sock.user)) {
+                console.log('✅ WhatsApp terhubung!');
+                console.log(`📱 Nomor: ${sock.user?.id?.split(':')[0] || 'Unknown'}`);
+                console.log(`⏰ Waktu: ${new Date().toLocaleString()}`);
                 const connectedSince = new Date();
-                
+
                 // Update status global
                 global.whatsappStatus = {
                     connected: true,
@@ -384,10 +482,43 @@ async function connectToWhatsApp() {
                     connectedSince: connectedSince,
                     status: 'connected'
                 };
-                
+
+                // Kirim notifikasi ke Android device bahwa koneksi berhasil
+                console.log('📱 Mengirim notifikasi koneksi ke perangkat Android...');
+
+                // Enhanced sync untuk memastikan status terupdate di Android dengan multiple attempts
+                const syncWithAndroid = async (attempt = 1) => {
+                    try {
+                        if (sock && sock.ws && sock.ws.readyState === 1) {
+                            // Send multiple sync signals to ensure Android device updates
+                            await sock.sendChatAck('status@broadcast', null, 'read');
+                            console.log(`✅ Status sync attempt ${attempt} berhasil ke perangkat Android`);
+
+                            // Update global status to trigger frontend updates
+                            global.whatsappStatus = {
+                                ...global.whatsappStatus,
+                                lastSync: new Date(),
+                                syncAttempts: attempt
+                            };
+
+                            // Additional sync for Android device
+                            if (attempt < 3) {
+                                setTimeout(() => syncWithAndroid(attempt + 1), 2000);
+                            }
+                        }
+                    } catch (error) {
+                        console.log(`⚠️ Status sync attempt ${attempt} gagal:`, error.message);
+                        if (attempt < 3) {
+                            setTimeout(() => syncWithAndroid(attempt + 1), 2000);
+                        }
+                    }
+                };
+
+                setTimeout(() => syncWithAndroid(1), 2000);
+
                 // Set sock instance untuk modul lain
                 setSock(sock);
-                
+
                 // Set sock instance untuk modul sendMessage
                 try {
                     const sendMessageModule = require('./sendMessage');
@@ -395,7 +526,7 @@ async function connectToWhatsApp() {
                 } catch (error) {
                     console.error('Error setting sock for sendMessage:', error);
                 }
-                
+
                 // Set sock instance untuk modul mikrotik-commands
                 try {
                     const mikrotikCommands = require('./mikrotik-commands');
@@ -496,9 +627,42 @@ async function connectToWhatsApp() {
             } else if (connection === 'close') {
                 const statusCode = lastDisconnect?.error?.output?.statusCode;
                 const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-                
+
                 console.log(`Koneksi WhatsApp terputus. Mencoba koneksi ulang: ${shouldReconnect}`);
-                
+                console.log(`Disconnect status code: ${statusCode} (${getDisconnectReasonText(statusCode)})`);
+
+                // Auto delete session untuk disconnect yang parah saja
+                const autoDeleteOnDisconnect = getSetting('auto_delete_session_on_disconnect', false); // Default false untuk stability
+                const severeDisconnectCodes = [
+                    DisconnectReason.badSession,
+                    401, // Unauthorized
+                    403, // Forbidden
+                    428  // Precondition Failed
+                ];
+
+                // Log disconnect details untuk debugging
+                console.log(`📊 Disconnect details:`, {
+                    statusCode,
+                    reason: getDisconnectReasonText(statusCode),
+                    lastDisconnectError: lastDisconnect?.error?.message,
+                    shouldReconnect
+                });
+
+                if (autoDeleteOnDisconnect && severeDisconnectCodes.includes(statusCode)) {
+                    console.log('🧹 Terdeteksi disconnect parah, menghapus session WhatsApp...');
+                    console.log('⏱️ Menunggu 3 detik sebelum menghapus session...');
+
+                    setTimeout(() => {
+                        deleteWhatsAppSession().then(() => {
+                            console.log('✅ Session berhasil dihapus, akan restart dengan session baru');
+                        }).catch(error => {
+                            console.error('❌ Gagal menghapus session:', error.message);
+                        });
+                    }, 3000); // Delay 3 detik untuk stability
+                } else {
+                    console.log('ℹ️ Disconnect normal, mencoba reconnect tanpa menghapus session');
+                }
+
                 // Update status global
                 global.whatsappStatus = {
                     connected: false,
@@ -507,7 +671,7 @@ async function connectToWhatsApp() {
                     connectedSince: null,
                     status: 'disconnected'
                 };
-                
+
                 // Reconnect jika bukan karena logout
                 if (shouldReconnect) {
                     setTimeout(() => {
@@ -519,7 +683,7 @@ async function connectToWhatsApp() {
         
         // Tangani credentials update
         sock.ev.on('creds.update', saveCreds);
-        
+
         // PERBAIKAN: Tangani pesan masuk dengan benar
         sock.ev.on('messages.upsert', async ({ messages, type }) => {
             if (type === 'notify') {
@@ -539,16 +703,32 @@ async function connectToWhatsApp() {
             }
         });
         
-        return sock;
+            return sock;
+        } catch (error) {
+            console.error('Error connecting to WhatsApp:', error);
+
+            // Coba koneksi ulang setelah interval
+            setTimeout(() => {
+                isConnecting = false;
+                connectionPromise = null;
+                connectToWhatsApp();
+            }, getSetting('reconnect_interval', 5000));
+
+            return null;
+        } finally {
+            // Reset connection guard when done
+            isConnecting = false;
+            connectionPromise = null;
+        }
+    });
+
+    try {
+        const result = await connectionPromise;
+        return result;
     } catch (error) {
-        console.error('Error connecting to WhatsApp:', error);
-        
-        // Coba koneksi ulang setelah interval
-        setTimeout(() => {
-            connectToWhatsApp();
-        }, getSetting('reconnect_interval', 5000));
-        
-        return null;
+        isConnecting = false;
+        connectionPromise = null;
+        throw error;
     }
 }
 
@@ -3540,7 +3720,7 @@ async function handleOfflineUsers(remoteJid) {
     }
 }
 
-const sendMessage = require('./sendMessage');
+const { sendMessage } = require('./sendMessage');
 
 // Export modul
 module.exports = {
@@ -4351,11 +4531,16 @@ async function handleIncomingMessage(sock, message) {
     // Kirim pesan selamat datang ke super admin saat aplikasi pertama kali berjalan
     if (!global.superAdminWelcomeSent) {
         try {
-            await sock.sendMessage(superAdminNumber + '@s.whatsapp.net', {
+            const superAdminNumber = fs.existsSync('./config/superadmin.txt') ?
+                fs.readFileSync('./config/superadmin.txt', 'utf8').trim() : process.env.ADMIN_NUMBER;
+
+            if (superAdminNumber) {
+                await sock.sendMessage(superAdminNumber + '@s.whatsapp.net', {
                 text: `${getSetting('company_header', 'KILUSI BILL')}\n👋 *Selamat datang!*\n\nAplikasi WhatsApp Bot berhasil dijalankan.\n\nRekening untuk pengembangan aplikasi KILUSI BILL\n# 1234567890 BRI an KILUSI BILL INDONESIA\n\nDonasi melalui e-wallet:\n+6281234567890\n\n${getSetting('footer_info', 'Info Hubungi : +6281234567890')}`
             });
             global.superAdminWelcomeSent = true;
             console.log('Pesan selamat datang terkirim ke super admin');
+            }
         } catch (err) {
             console.error('Gagal mengirim pesan selamat datang ke super admin:', err);
         }
@@ -4363,44 +4548,44 @@ async function handleIncomingMessage(sock, message) {
     try {
         // Validasi input
         if (!message || !message.key) {
-            logger.warn('Invalid message received', { message: typeof message });
+            console.warn('Invalid message received', { message: typeof message });
             return;
         }
-        
+
         // Ekstrak informasi pesan
         const remoteJid = message.key.remoteJid;
         if (!remoteJid) {
-            logger.warn('Message without remoteJid received', { messageKey: message.key });
+            console.warn('Message without remoteJid received', { messageKey: message.key });
             return;
         }
-        
+
         // Skip jika pesan dari grup dan bukan dari admin
         if (remoteJid.includes('@g.us')) {
-            logger.debug('Message from group received', { groupJid: remoteJid });
+            console.debug('Message from group received', { groupJid: remoteJid });
             const participant = message.key.participant;
             if (!participant || !isAdminNumber(participant.split('@')[0])) {
-                logger.debug('Group message not from admin, ignoring', { participant });
+                console.debug('Group message not from admin, ignoring', { participant });
                 return;
             }
-            logger.info('Group message from admin, processing', { participant });
+            console.info('Group message from admin, processing', { participant });
         }
-        
+
         // Cek tipe pesan dan ekstrak teks
         let messageText = '';
         if (!message.message) {
-            logger.debug('Message without content received', { messageType: 'unknown' });
+            console.debug('Message without content received', { messageType: 'unknown' });
             return;
         }
-        
+
         if (message.message.conversation) {
             messageText = message.message.conversation;
-            logger.debug('Conversation message received');
-        } else if (message.message.extendedTextMessage) {
+            console.debug('Conversation message received');
+        } else if (message.extendedTextMessage) {
             messageText = message.message.extendedTextMessage.text;
-            logger.debug('Extended text message received');
+            console.debug('Extended text message received');
         } else {
             // Tipe pesan tidak didukung
-            logger.debug('Unsupported message type received', { 
+            console.debug('Unsupported message type received', { 
                 messageTypes: Object.keys(message.message) 
             });
             return;
@@ -4411,20 +4596,20 @@ async function handleIncomingMessage(sock, message) {
         try {
             senderNumber = remoteJid.split('@')[0];
         } catch (error) {
-            logger.error('Error extracting sender number', { remoteJid, error: error.message });
+            console.error('Error extracting sender number', { remoteJid, error: error.message });
             return;
         }
         
-        logger.info(`Message received`, { sender: senderNumber, messageLength: messageText.length });
-        logger.debug(`Message content`, { sender: senderNumber, message: messageText });
+        console.log(`Message received from ${senderNumber}, length: ${messageText.length}`);
+        console.debug(`Message content: ${messageText}`);
         
         // Cek apakah pengirim adalah admin
         const isAdmin = isAdminNumber(senderNumber);
-        logger.debug(`Sender admin status`, { sender: senderNumber, isAdmin });
+        console.debug(`Sender admin status: ${senderNumber}, admin: ${isAdmin}`);
         
         // Jika pesan kosong, abaikan
         if (!messageText.trim()) {
-            logger.debug('Empty message, ignoring');
+            console.debug('Empty message, ignoring');
             return;
         }
         

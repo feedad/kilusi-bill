@@ -1,10 +1,15 @@
 const express = require('express');
 const { Pool } = require('pg');
+const { getSetting } = require('../../../config/settingsManager');
 const router = express.Router();
 
 // Initialize PostgreSQL connection
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgresql://postgres:Bismillah321@172.22.10.28:5432/kilusi_bill'
+  host: getSetting('postgres_host') || 'localhost',
+  port: parseInt(getSetting('postgres_port')) || 5432,
+  database: getSetting('postgres_database') || 'kilusi_bill',
+  user: getSetting('postgres_user') || 'kilusi_user',
+  password: getSetting('postgres_password') || 'kilusi1234'
 });
 
 // Get all regions

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useWhatsAppStore } from '@/store/whatsappStore'
+import { useWhatsAppWebSocket } from '@/hooks/useWhatsAppWebSocket'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -14,17 +15,16 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import {
-  Smartphone,
   QrCode,
   RefreshCw,
   CheckCircle,
   AlertCircle,
-  Wifi,
-  Clock,
-  Copy,
-  ExternalLink,
+  Trash2,
   X
 } from 'lucide-react'
+
+// QR code generation
+import QRCode from 'qrcode'
 
 export default function QRCodeModal() {
   const {
@@ -38,16 +38,55 @@ export default function QRCodeModal() {
     fetchStatus
   } = useWhatsAppStore()
 
+  // Enhanced WebSocket connection for real-time QR updates
+  useWhatsAppWebSocket({
+    onConnectionChange: (connected) => {
+      if (connected) {
+        console.log('📱 WhatsApp connected via real-time update')
+        // Auto-close modal when connected
+        hideQRCodeModal()
+      }
+    },
+    onMessageReceived: (data) => {
+      console.log('📨 Real-time message in QR modal:', data)
+      // Could show a notification or update UI
+    }
+  })
+
   const [refreshing, setRefreshing] = useState(false)
   const [timeLeft, setTimeLeft] = useState(60)
 
   useEffect(() => {
     if (showQRCode && !status?.connected) {
+      // Auto-refresh QR code when modal opens if we don't have a current one
+      const checkAndRefreshQR = async () => {
+        console.log('🔄 Modal opened, checking QR code status...', {
+          hasQR: !!qrCode,
+          qrLength: qrCode?.length || 0
+        })
+
+        if (!qrCode || qrCode.length < 50) { // QR codes should be substantial strings
+          console.log('🔄 No valid QR code available, fetching fresh QR code...')
+          try {
+            // Use the store's refreshQRCode method to force fresh generation
+            await useWhatsAppStore.getState().refreshQRCode()
+            setTimeLeft(120) // Set 2 minutes timer
+          } catch (error) {
+            console.error('Failed to fetch fresh QR code:', error)
+          }
+        } else {
+          console.log('✅ Valid QR code already available')
+        }
+      }
+
+      // Check immediately when modal opens (with a smaller delay)
+      setTimeout(checkAndRefreshQR, 500)
+
       const timer = setInterval(() => {
         setTimeLeft(prev => {
           if (prev <= 1) {
             refreshQRCode()
-            return 60
+            return 120 // Increased to 2 minutes to reduce API calls
           }
           return prev - 1
         })
@@ -55,14 +94,14 @@ export default function QRCodeModal() {
 
       return () => clearInterval(timer)
     }
-  }, [showQRCode, status?.connected, refreshQRCode])
+  }, [showQRCode, status?.connected, refreshQRCode, qrCode])
 
   useEffect(() => {
     if (showQRCode) {
-      // Check connection status every 2 seconds
+      // Check connection status every 30 seconds (reduced to avoid rate limiting)
       const statusTimer = setInterval(() => {
         fetchStatus()
-      }, 2000)
+      }, 30000)
 
       return () => clearInterval(statusTimer)
     }
@@ -70,13 +109,82 @@ export default function QRCodeModal() {
 
   const handleRefresh = async () => {
     setRefreshing(true)
+    console.log('🔄 Manual QR refresh requested')
     try {
-      await refreshQRCode()
-      setTimeLeft(60)
+      // Clear current QR code to force regeneration
+      setQrDataUrl(null)
+
+      // Use the store's refreshQRCode method (faster and more reliable)
+      await useWhatsAppStore.getState().refreshQRCode()
+      setTimeLeft(120) // Set 2 minutes timer
+
+      console.log('✅ QR refresh completed')
+    } catch (error) {
+      console.error('❌ Failed to refresh QR code:', error)
     } finally {
       setRefreshing(false)
     }
   }
+
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
+
+  // Generate QR code data URL from string
+  const generateQRDataURL = async (qrString: string) => {
+    if (!qrString || qrString.length < 50) {
+      console.log('🔍 No valid QR string provided', {
+        hasString: !!qrString,
+        length: qrString?.length || 0
+      })
+      return null
+    }
+
+    // Check if it's already a data URL (backend generated)
+    if (qrString.startsWith('data:image/png;base64,')) {
+      console.log('✅ QR code is already a data URL')
+      return qrString
+    }
+
+    try {
+      console.log('🔍 Generating QR code for string:', qrString.substring(0, 50) + '...')
+      const dataUrl = await QRCode.toDataURL(qrString, {
+        width: 256,
+        margin: 2,
+        color: {
+          dark: '#000000',
+          light: '#FFFFFF'
+        }
+      })
+      console.log('✅ QR code generated successfully, data URL length:', dataUrl.length)
+      return dataUrl
+    } catch (error) {
+      console.error('❌ Error generating QR code:', error)
+      return null
+    }
+  }
+
+  // Update QR data URL when QR code string changes
+  useEffect(() => {
+    console.log('🔄 QR Code effect triggered, qrCode:', {
+      hasQR: !!qrCode,
+      length: qrCode?.length || 0,
+      isDataURL: qrCode?.startsWith('data:image/png;base64,') || false,
+      preview: qrCode ? qrCode.substring(0, 50) + '...' : 'null'
+    })
+
+    if (qrCode && qrCode.length > 50) {
+      generateQRDataURL(qrCode).then(dataUrl => {
+        setQrDataUrl(dataUrl)
+        if (dataUrl) {
+          console.log('✅ QR data URL set successfully')
+        } else {
+          console.log('❌ Failed to generate QR data URL')
+        }
+      })
+    } else {
+      console.log('🔄 Setting qrDataUrl to null - no valid QR code')
+      setQrDataUrl(null)
+    }
+  }, [qrCode])
 
   const handleCopyLink = () => {
     if (qrCode) {
@@ -90,23 +198,54 @@ export default function QRCodeModal() {
     }
   }
 
-  const handleOpenWhatsApp = () => {
-    window.open('https://web.whatsapp.com/', '_blank')
+  // Clear WhatsApp session function
+  const handleClearSession = async () => {
+    const confirmed = window.confirm(
+      'Apakah Anda yakin ingin menghapus session WhatsApp?\n\n' +
+      'Ini akan:\n' +
+      '• Menghapus semua session data\n' +
+      '• Memutuskan koneksi WhatsApp saat ini\n' +
+      '• Memerlukan scan QR code ulang\n\n' +
+      'Lanjutkan?'
+    )
+
+    if (!confirmed) return
+
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://192.168.1.235:3000'}/whatsapp/clear-session`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        alert('✅ Session WhatsApp berhasil dihapus!\n\nQR code baru akan dibuat.')
+        // Refresh status after clearing session
+        await fetchStatus()
+        // Generate new QR code
+        await handleRefresh()
+      } else {
+        alert('❌ Gagal menghapus session: ' + (result.message || 'Unknown error'))
+      }
+    } catch (error) {
+      console.error('Error clearing WhatsApp session:', error)
+      alert('❌ Terjadi kesalahan saat menghapus session')
+    }
   }
 
-  if (!showQRCode || !qrCode) return null
+  if (!showQRCode) return null
 
   return (
     <Dialog open={showQRCode} onOpenChange={hideQRCodeModal}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-sm max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+          <DialogTitle className="flex items-center gap-2 text-center">
             <QrCode className="w-5 h-5" />
-            Connect WhatsApp
+            WhatsApp QR Code
           </DialogTitle>
-          <DialogDescription>
-            Scan this QR code with your WhatsApp mobile app to connect
-          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
@@ -114,160 +253,132 @@ export default function QRCodeModal() {
             <Alert className="border-green-200 bg-green-50">
               <CheckCircle className="h-4 w-4 text-green-600" />
               <AlertDescription className="text-green-700">
-                WhatsApp connected successfully! You can close this dialog.
+                WhatsApp connected successfully!
               </AlertDescription>
             </Alert>
           ) : (
             <Alert className="border-blue-200 bg-blue-50">
               <AlertCircle className="h-4 w-4 text-blue-600" />
               <AlertDescription className="text-blue-700">
-                {connecting ? 'Connecting...' : 'Scan the QR code below with WhatsApp'}
+                {connecting ? 'Connecting...' : 'Scan QR code below'}
               </AlertDescription>
             </Alert>
           )}
 
           {!status?.connected && (
-            <Card className="text-center">
-              <CardContent className="pt-6">
-                <div className="relative inline-block">
-                  <div className="w-64 h-64 bg-white rounded-lg p-2 border-2 border-gray-200">
-                    {qrCode ? (
-                      <img
-                        src={qrCode}
-                        alt="WhatsApp QR Code"
-                        className="w-full h-full object-contain"
-                        onError={(e) => {
-                          // Fallback for broken QR code
-                          e.currentTarget.style.display = 'none'
-                        }}
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <div className="text-center">
-                          <QrCode className="w-16 h-16 mx-auto text-gray-300 mb-2" />
-                          <p className="text-sm text-gray-500">Loading QR code...</p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {connecting && (
-                    <div className="absolute inset-0 bg-white bg-opacity-90 rounded-lg flex items-center justify-center">
+            <div className="text-center">
+              <div className="relative inline-block">
+                <div className="w-64 h-64 bg-white rounded-lg p-2 border-2 border-gray-200 mx-auto">
+                  {qrDataUrl ? (
+                    <img
+                      src={qrDataUrl}
+                      alt="WhatsApp QR Code"
+                      className="w-full h-full object-contain"
+                      onError={(e) => {
+                        console.error('❌ QR code image failed to load')
+                        e.currentTarget.style.display = 'none'
+                        setQrDataUrl(null)
+                      }}
+                      onLoad={() => {
+                        console.log('✅ QR code image loaded successfully')
+                      }}
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
                       <div className="text-center">
-                        <RefreshCw className="w-8 h-8 mx-auto text-blue-500 animate-spin mb-2" />
-                        <p className="text-sm font-medium">Connecting...</p>
+                        <QrCode className="w-16 h-16 mx-auto text-gray-300 mb-2 animate-pulse" />
+                        <p className="text-sm text-gray-500">
+                          {qrCode && qrCode.length > 50 ? 'Generating image...' : 'Waiting for QR code...'}
+                        </p>
+                        {qrCode && (
+                          <p className="text-xs text-gray-400 mt-1">
+                            Raw QR length: {qrCode.length}
+                          </p>
+                        )}
                       </div>
                     </div>
                   )}
                 </div>
 
-                <div className="mt-4 space-y-2">
-                  <div className="flex items-center justify-center gap-2">
-                    <Clock className="w-4 h-4 text-gray-500" />
-                    <span className="text-sm text-gray-500">
-                      Refreshes in {timeLeft}s
-                    </span>
+                {connecting && (
+                  <div className="absolute inset-0 bg-white bg-opacity-90 rounded-lg flex items-center justify-center">
+                    <div className="text-center">
+                      <RefreshCw className="w-8 h-8 mx-auto text-blue-500 animate-spin mb-2" />
+                      <p className="text-sm font-medium">Connecting...</p>
+                    </div>
                   </div>
+                )}
 
-                  <div className="flex items-center justify-center gap-1">
-                    <Badge variant="outline" className="text-xs">
-                      <Smartphone className="w-3 h-3 mr-1" />
-                      Mobile App Required
-                    </Badge>
-                    <Badge variant="outline" className="text-xs">
-                      <Wifi className="w-3 h-3 mr-1" />
-                      Internet Connection
-                    </Badge>
+                {refreshing && (
+                  <div className="absolute inset-0 bg-white bg-opacity-90 rounded-lg flex items-center justify-center">
+                    <div className="text-center">
+                      <RefreshCw className="w-8 h-8 mx-auto text-orange-500 animate-spin mb-2" />
+                      <p className="text-sm font-medium">Refreshing QR...</p>
+                    </div>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          <div className="space-y-3">
-            <div className="text-sm text-gray-600 text-center">
-              <p className="font-medium mb-1">How to connect:</p>
-              <ol className="text-left space-y-1 text-xs">
-                <li>1. Open WhatsApp on your mobile device</li>
-                <li>2. Tap Menu or Settings &gt; Linked Devices</li>
-                <li>3. Tap "Link a device" or "Connect device"</li>
-                <li>4. Point your camera at the QR code</li>
-              </ol>
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleRefresh}
-                  disabled={refreshing || connecting}
-                  className="flex-1"
-                >
-                  <RefreshCw className={`w-4 h-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
-                  {refreshing ? 'Refreshing...' : 'Refresh QR'}
-                </Button>
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleCopyLink}
-                  disabled={!qrCode}
-                  className="flex-1"
-                >
-                  <Copy className="w-4 h-4 mr-2" />
-                  Copy Link
-                </Button>
+                )}
               </div>
 
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleOpenWhatsApp}
-                className="w-full"
-              >
-                <ExternalLink className="w-4 h-4 mr-2" />
-                Open WhatsApp Web
-              </Button>
+              <div className="mt-3 space-y-1">
+                <p className="text-xs text-gray-500">
+                  Auto-refresh in {timeLeft}s
+                </p>
+                {qrCode && (
+                  <p className="text-xs text-gray-400">
+                    Status: {qrCode.startsWith('data:image/png;base64,') ? 'Ready to scan' : 'Processing...'}
+                  </p>
+                )}
+              </div>
             </div>
-          </div>
-
-          {status && (
-            <Card className="bg-gray-50">
-              <CardContent className="pt-4">
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="font-medium">Status:</span>
-                    <Badge variant={status.connected ? 'default' : 'secondary'}>
-                      {status.connected ? 'Connected' : 'Waiting for scan'}
-                    </Badge>
-                  </div>
-
-                  {status.phoneNumber && (
-                    <div className="flex justify-between">
-                      <span className="font-medium">Phone:</span>
-                      <span>{status.phoneNumber}</span>
-                    </div>
-                  )}
-
-                  {status.profileName && (
-                    <div className="flex justify-between">
-                      <span className="font-medium">Profile:</span>
-                      <span>{status.profileName}</span>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
           )}
 
-          <div className="flex justify-end">
+          {/* Action Buttons */}
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRefresh}
+              disabled={refreshing || connecting}
+              className="flex-1"
+            >
+              <RefreshCw className={`w-4 h-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+              Generate QR
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleClearSession}
+              disabled={connecting}
+              className="text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+            >
+              <Trash2 className="w-4 h-4" />
+            </Button>
+          </div>
+
+          {/* Simple Instructions */}
+          <div className="text-xs text-gray-600 text-center space-y-1">
+            <p className="font-medium">How to connect:</p>
+            <p>1. Open WhatsApp → Linked Devices</p>
+            <p>2. Tap "Link a device"</p>
+            <p>3. Scan this QR code</p>
+          </div>
+
+          {/* Status */}
+          {status && (
+            <div className="text-center">
+              <Badge variant={status.connected ? 'default' : 'secondary'}>
+                {status.connected ? '✓ Connected' : '⏳ Waiting'}
+              </Badge>
+            </div>
+          )}
+
+          <div className="flex justify-center">
             <Button
               variant="ghost"
               size="sm"
               onClick={hideQRCodeModal}
             >
-              <X className="w-4 h-4 mr-2" />
               Close
             </Button>
           </div>

@@ -269,6 +269,63 @@ async function getActivePPPoEConnections() {
 }
 
 /**
+ * Get user connection status by username
+ */
+async function getUserConnectionStatus(username) {
+    if (!username) {
+        return { online: false, status: 'offline', last_seen: null };
+    }
+
+    try {
+        // Check if user has active session in radacct
+        const activeSession = await getOne(`
+            SELECT
+                username,
+                nasipaddress,
+                framedipaddress,
+                acctstarttime,
+                acctsessiontime,
+                callingstationid
+            FROM radacct
+            WHERE username = $1 AND acctstoptime IS NULL
+            ORDER BY acctstarttime DESC
+            LIMIT 1
+        `, [username]);
+
+        if (activeSession) {
+            return {
+                online: true,
+                status: 'online',
+                ip_address: activeSession.framedipaddress,
+                nas_ip: activeSession.nasipaddress,
+                session_start: activeSession.acctstarttime,
+                session_time: activeSession.acctsessiontime,
+                mac_address: activeSession.callingstationid
+            };
+        }
+
+        // Check last session time
+        const lastSession = await getOne(`
+            SELECT acctstarttime, acctstoptime
+            FROM radacct
+            WHERE username = $1
+            ORDER BY acctstoptime DESC
+            LIMIT 1
+        `, [username]);
+
+        return {
+            online: false,
+            status: 'offline',
+            last_seen: lastSession?.acctstoptime || null
+        };
+
+    } catch (error) {
+        logger.error(`Error getting connection status for ${username}: ${error.message}`);
+        return { online: false, status: 'offline', last_seen: null };
+    }
+}
+
+/**
  * Get active sessions (alias for getActivePPPoEConnections)
  */
 async function getActiveSessions() {
@@ -514,6 +571,7 @@ module.exports = {
     deleteRadiusUser,
     getActivePPPoEConnections,
     getActiveSessions,
+    getUserConnectionStatus,
     getUserReplyAttributes,
     accountingStart,
     accountingUpdate,

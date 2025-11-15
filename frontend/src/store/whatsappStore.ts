@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { useEffect } from 'react'
 import {
   WhatsAppSettings,
   WhatsAppStatus,
@@ -10,6 +11,7 @@ import {
   WhatsAppBroadcast
 } from '@/types'
 import { whatsappAPI } from '@/lib/whatsapp-api'
+import { wsService, WhatsAppStatusUpdate } from '@/lib/ws-service'
 import { useAppStore } from './appStore'
 
 interface WhatsAppStore {
@@ -100,12 +102,19 @@ interface WhatsAppStore {
   startAutoRefresh: () => void
   stopAutoRefresh: () => void
   toggleAutoRefresh: () => void
+
+  // WebSocket Integration
+  initializeWebSocket: () => void
+  cleanupWebSocket: () => void
+  handleRealtimeStatusUpdate: (update: WhatsAppStatusUpdate) => void
 }
 
 export const useWhatsAppStore = create<WhatsAppStore>()(
   persist(
     (set, get) => {
       let refreshTimer: NodeJS.Timeout | null = null
+      let lastApiCall = 0
+      const API_COOLDOWN = 2000 // 2 seconds minimum between API calls
 
       return {
         // Initial state
@@ -126,12 +135,22 @@ export const useWhatsAppStore = create<WhatsAppStore>()(
         error: null,
         success: null,
         lastUpdated: 0,
-        refreshInterval: 30000, // 30 seconds
+        refreshInterval: 90000, // 90 seconds (increased to avoid rate limiting)
         autoRefresh: true,
 
         // Connection Management
         fetchStatus: async () => {
           const { setLoading, setError } = get()
+          const now = Date.now()
+
+          // Rate limiting: don't make API calls if we've made one recently
+          if (now - lastApiCall < API_COOLDOWN) {
+            console.log('API call rate limited')
+            return
+          }
+
+          lastApiCall = now
+
           try {
             setLoading(true)
             const response = await whatsappAPI.getStatus()
@@ -148,10 +167,10 @@ export const useWhatsAppStore = create<WhatsAppStore>()(
                 queueLength: response.data.queueLength || 0
               })
 
-              // Check if QR code is needed
-              if (!response.data.connected && !get().qrCode) {
-                get().getQRCode()
-              }
+              // Check if QR code is needed (DISABLED: Don't auto-show QR on disconnect)
+              // if (!response.data.connected && !get().qrCode) {
+              //   get().getQRCode()
+              // }
             } else {
               setError(response.error || 'Failed to fetch WhatsApp status')
             }
@@ -168,20 +187,17 @@ export const useWhatsAppStore = create<WhatsAppStore>()(
           try {
             setConnecting(true)
             setError(null)
-            const response = await whatsappAPI.connect()
-            if (response.success) {
-              setSuccess(response.message || 'WhatsApp connection initiated')
-              // Show QR code modal
-              get().showQRCodeModal()
-              // Start polling for QR code
-              get().getQRCode()
-              return true
-            } else {
-              setError(response.error || 'Failed to connect WhatsApp')
-              return false
-            }
+
+            // Show QR code modal immediately when user clicks Connect
+            get().showQRCodeModal()
+
+            // Don't call connect API immediately to avoid rate limiting
+            // The QR modal will handle connection initiation
+            setSuccess('Click "Generate QR Code" to start connection')
+            return true
           } catch (error) {
-            setError('Network error while connecting WhatsApp')
+            setError('Failed to open connection modal')
+            get().hideQRCodeModal()
             return false
           } finally {
             setConnecting(false)
@@ -233,30 +249,79 @@ export const useWhatsAppStore = create<WhatsAppStore>()(
 
         getQRCode: async () => {
           try {
+            console.log('📱 Fetching QR code from API...')
             const response = await whatsappAPI.getQRCode()
+            console.log('📱 QR code API response:', {
+              success: response.success,
+              hasData: !!response.data,
+              status: response.data?.status,
+              hasQR: !!response.data?.qrCode,
+              qrLength: response.data?.qrCode?.length || 0
+            })
+
             if (response.success && response.data) {
-              set({
+              // Only update QR code, preserve existing showQRCode state
+              set((state) => ({
                 qrCode: response.data.qrCode,
-                showQRCode: !response.data.connected
-              })
+                // Preserve showQRCode state to not override manual modal control
+                showQRCode: state.showQRCode
+              }))
 
               // If connected, hide QR modal and refresh status
               if (response.data.connected) {
                 get().hideQRCodeModal()
                 get().fetchStatus()
               }
+            } else {
+              console.warn('📱 QR code API returned no data:', response)
             }
           } catch (error) {
-            console.error('Error fetching QR code:', error)
+            console.error('❌ Error fetching QR code:', error)
           }
         },
 
         refreshQRCode: async () => {
           const { setError } = get()
           try {
-            await get().getQRCode()
+            console.log('📱 Refreshing QR code...')
+            // Use the refresh endpoint instead of getQRCode for better reliability
+            const response = await whatsappAPI.refreshQRCode()
+            console.log('📱 QR refresh API response:', {
+              success: response.success,
+              hasData: !!response.data,
+              status: response.data?.status,
+              hasQR: !!response.data?.qrCode,
+              qrLength: response.data?.qrCode?.length || 0,
+              connected: response.data?.connected
+            })
+
+            if (response.success && response.data) {
+              // Update QR code with refreshed data
+              set((state) => ({
+                qrCode: response.data.qrCode,
+                // Preserve showQRCode state to not override manual modal control
+                showQRCode: state.showQRCode
+              }))
+
+              // If connected, hide QR modal and refresh status
+              if (response.data.connected) {
+                get().hideQRCodeModal()
+                get().fetchStatus()
+              }
+            } else {
+              // If refresh failed, try the regular getQRCode method
+              console.log('📱 Refresh failed, trying regular getQRCode...')
+              await get().getQRCode()
+            }
           } catch (error) {
+            console.error('❌ Failed to refresh QR code:', error)
             setError('Failed to refresh QR code')
+            // Fallback to regular getQRCode
+            try {
+              await get().getQRCode()
+            } catch (fallbackError) {
+              console.error('❌ Fallback QR code fetch also failed:', fallbackError)
+            }
           }
         },
 
@@ -627,6 +692,83 @@ export const useWhatsAppStore = create<WhatsAppStore>()(
           } else {
             stopAutoRefresh()
           }
+        },
+
+        // WebSocket Integration
+        initializeWebSocket: () => {
+          const { handleRealtimeStatusUpdate } = get()
+
+          // Set up real-time status updates
+          wsService.on('whatsapp-status-update', handleRealtimeStatusUpdate)
+
+          // Ensure we're subscribed to WhatsApp status updates
+          if (wsService.isConnected) {
+            wsService.subscribeToWhatsAppStatus()
+          }
+
+          console.log('📱 WhatsApp WebSocket integration initialized')
+        },
+
+        cleanupWebSocket: () => {
+          const { handleRealtimeStatusUpdate } = get()
+
+          // Remove event listeners
+          wsService.off('whatsapp-status-update', handleRealtimeStatusUpdate)
+
+          console.log('📱 WhatsApp WebSocket integration cleaned up')
+        },
+
+        handleRealtimeStatusUpdate: (update: WhatsAppStatusUpdate) => {
+          const { status: currentStatus, qrCode: currentQRCode } = get()
+
+          console.log('📱 Real-time WhatsApp status update:', update)
+
+          // Update status based on real-time data
+          if (update.connected !== currentStatus?.connected) {
+            // Connection status changed
+            if (update.connected) {
+              // WhatsApp connected
+              set({
+                qrCode: null,
+                showQRCode: false,
+                connecting: false,
+                success: 'WhatsApp connected successfully!'
+              })
+
+              // Hide QR modal if it's open
+              get().hideQRCodeModal()
+
+              // Refresh full status
+              get().fetchStatus()
+            } else {
+              // WhatsApp disconnected
+              set({
+                connecting: false,
+                error: 'WhatsApp disconnected'
+              })
+
+              // Refresh full status
+              get().fetchStatus()
+            }
+          }
+
+          // Handle QR code updates (DISABLED: Don't auto-show QR modal on disconnect)
+          // if (update.qrCode && update.qrCode !== currentQRCode && !update.connected) {
+          //   set({
+          //     qrCode: update.qrCode,
+          //     showQRCode: true
+          //   })
+          // }
+
+          // Only update QR code data, but don't auto-show modal
+          if (update.qrCode && update.qrCode !== currentQRCode) {
+            set({
+              qrCode: update.qrCode
+            })
+          }
+
+          // Update last modified time
+          set({ lastUpdated: Date.now() })
         }
       }
     },
@@ -641,7 +783,9 @@ export const useWhatsAppStore = create<WhatsAppStore>()(
   )
 )
 
-// Auto-start refresh when store is initialized
+// Auto-start refresh and WebSocket when store is initialized
 if (typeof window !== 'undefined') {
-  useWhatsAppStore.getState().startAutoRefresh()
+  const store = useWhatsAppStore.getState()
+  store.startAutoRefresh()
+  store.initializeWebSocket()
 }
