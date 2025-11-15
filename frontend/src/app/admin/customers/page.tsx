@@ -405,13 +405,26 @@ export default function CustomersPage() {
       if (response.data.success) {
         const routersData = response.data.data?.nas || []
         console.log('📡 Routers fetched:', routersData)
+        // Add "All Routers" option at the beginning
+        const allRoutersOption = {
+          id: 'all',
+          shortname: 'All Routers',
+          nasname: 'All Routers',
+          name: 'All Routers',
+          ip: 'all',
+          type: 'all',
+          description: 'Select all routers'
+        }
         // Ensure each router has proper name field
-        const formattedRouters = routersData.map((router: any) => ({
-          ...router,
-          id: router.id,
-          name: router.shortname || router.nasname || `Router ${router.id}`,
-          ip: router.nasname
-        }))
+        const formattedRouters = [
+          allRoutersOption,
+          ...routersData.map((router: any) => ({
+            ...router,
+            id: router.id,
+            name: router.shortname || router.nasname || `Router ${router.id}`,
+            ip: router.nasname
+          }))
+        ]
         console.log('📡 Formatted routers:', formattedRouters)
         setRouters(formattedRouters)
       }
@@ -625,16 +638,23 @@ export default function CustomersPage() {
       setSubmittingBulk(true)
       setError(null)
 
+      // If "All Routers" is selected, set router to null or empty string
+      const routerValue = newRouter === 'all' ? '' : newRouter
+
       const promises = Array.from(selectedCustomers).map(customerId =>
-        api.put(endpoints.customers.update(customerId), { router: newRouter })
+        api.put(endpoints.customers.update(customerId), { router: routerValue })
       )
 
       const results = await Promise.allSettled(promises)
       const successful = results.filter(r => r.status === 'fulfilled').length
       const failed = results.filter(r => r.status === 'rejected').length
 
+      const actionText = newRouter === 'all' ? 'dihapus dari router' : 'dipindahkan ke router baru'
+
       if (failed > 0) {
-        setError(`${failed} pelanggan gagal diupdate, ${successful} berhasil`)
+        setError(`${failed} pelanggan gagal ${actionText}, ${successful} berhasil`)
+      } else {
+        console.log(`✅ ${successful} pelanggan berhasil ${actionText}`)
       }
 
       setSelectedCustomers(new Set())
