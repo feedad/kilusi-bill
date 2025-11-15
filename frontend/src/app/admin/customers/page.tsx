@@ -95,6 +95,7 @@ interface Router {
   id: number
   shortname: string
   nasname: string
+  name?: string
   type: string
   description: string
   status: string
@@ -115,6 +116,7 @@ interface FormData {
   billing_type: string
   siklus: string
   router: string
+  status: string
   region: string
   // status field removed - customer status will be determined automatically by billing cycle
   odp_id?: string
@@ -177,7 +179,7 @@ export default function CustomersPage() {
     billing_type: 'postpaid',
     siklus: 'profile',
     router: 'all',
-    status: '',
+    status: 'active', // Default status for bulk operations
     region: '',
     // status field removed - customer status will be determined automatically by billing cycle
     odp_id: '',
@@ -401,9 +403,17 @@ export default function CustomersPage() {
     try {
       const response = await api.get(endpoints.radius.nas)
       if (response.data.success) {
-        const routersData = response.data.data.nas || []
+        const routersData = response.data.data?.nas || []
         console.log('📡 Routers fetched:', routersData)
-        setRouters(routersData)
+        // Ensure each router has proper name field
+        const formattedRouters = routersData.map((router: any) => ({
+          ...router,
+          id: router.id,
+          name: router.shortname || router.nasname || `Router ${router.id}`,
+          ip: router.nasname
+        }))
+        console.log('📡 Formatted routers:', formattedRouters)
+        setRouters(formattedRouters)
       }
     } catch (err: any) {
       console.error('Error fetching routers:', err)
@@ -1266,45 +1276,6 @@ export default function CustomersPage() {
               >
                 <Activity className="h-4 w-4" />
                 Refresh Status
-              </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={async () => {
-                  console.log('🧪 MANUAL TEST: Fetching apptest status...')
-                  try {
-                    // Test hardcoded URL
-                    const hardcodedUrl = '/radius/connection-status/apptest'
-                    console.log('🧪 Hardcoded URL:', hardcodedUrl)
-                    console.log('🧪 Full URL:', `${process.env.NEXT_PUBLIC_API_URL}/api/v1${hardcodedUrl}`)
-                    console.log('🧪 Endpoints function result:', endpoints.radius.connectionStatus('apptest'))
-
-                    const response = await api.get(hardcodedUrl)
-                    console.log('🧪 MANUAL RESPONSE:', response.data)
-
-                    const connectionStatus = response.data?.data?.connectionStatus || response.data?.connectionStatus || { online: false, status: 'offline' }
-                    console.log('🧪 CONNECTION STATUS:', connectionStatus)
-
-                    // Update specific customer
-                    setCustomers(prev => prev.map(c =>
-                      c.pppoe_username === 'apptest'
-                        ? { ...c, connection_status: connectionStatus }
-                        : c
-                    ))
-
-                    // Test if UI updates
-                    setTimeout(() => {
-                      const updated = customers.find(c => c.pppoe_username === 'apptest')
-                      console.log('🧪 Updated customer in state:', updated?.connection_status)
-                    }, 100)
-
-                  } catch (error) {
-                    console.error('🧪 MANUAL ERROR:', error)
-                  }
-                }}
-                className="flex items-center gap-2"
-              >
-                Test apptest
               </Button>
               {lastStatusRefresh && (
                 <span className="text-xs text-muted-foreground">
