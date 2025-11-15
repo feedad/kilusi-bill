@@ -18,6 +18,7 @@ import {
   MapPin,
   Edit,
   Trash2,
+  Check,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react'
@@ -141,6 +142,10 @@ export default function CustomersPage() {
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive' | 'suspended'>('all')
+  const [filterPackage, setFilterPackage] = useState('all')
+  const [filterRouter, setFilterRouter] = useState('all')
+  const [filterRegion, setFilterRegion] = useState('all')
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
   const [showDetailModal, setShowDetailModal] = useState(false)
   const [showCreateModal, setShowCreateModal] = useState(false)
@@ -155,6 +160,10 @@ export default function CustomersPage() {
   const [totalItems, setTotalItems] = useState(0)
   const [sortField, setSortField] = useState<'customer_id' | 'isolir_date' | 'region' | null>(null)
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
+  const [selectedCustomers, setSelectedCustomers] = useState<Set<string>>(new Set())
+  const [showBulkActions, setShowBulkActions] = useState(false)
+  const [bulkAction, setBulkAction] = useState<'delete' | 'changeRouter' | 'changeStatus' | 'changeRegion' | 'changeCycle' | null>(null)
+  const [submittingBulk, setSubmittingBulk] = useState(false)
   const [formData, setFormData] = useState<FormData>({
     name: '',
     phone: '',
@@ -168,6 +177,7 @@ export default function CustomersPage() {
     billing_type: 'postpaid',
     siklus: 'profile',
     router: 'all',
+    status: '',
     region: '',
     // status field removed - customer status will be determined automatically by billing cycle
     odp_id: '',
@@ -180,12 +190,13 @@ export default function CustomersPage() {
   const [lastStatusRefresh, setLastStatusRefresh] = useState<Date | null>(null)
 
   useEffect(() => {
+    fetchDashboardStats()
     fetchCustomers()
     fetchPackages()
     fetchRegions()
     fetchRouters()
     fetchODPs()
-  }, [currentPage, pageSize, searchQuery, filterStatus, sortField, sortDirection])
+  }, [currentPage, pageSize, searchQuery, filterStatus, filterPackage, filterRouter, filterRegion, sortField, sortDirection])
 
   // Auto refresh connection status every 30 seconds
   useEffect(() => {
@@ -200,6 +211,39 @@ export default function CustomersPage() {
     return () => clearInterval(interval)
   }, [customers])
 
+  // Function to fetch dashboard statistics
+  const fetchDashboardStats = async () => {
+    try {
+      const statsResponse = await api.get('/dashboard/stats')
+      if (statsResponse.data?.success) {
+        const data = statsResponse.data.data
+
+        // Calculate suspended customers from total
+        const suspendedCustomers = data.totalCustomers - data.activeCustomers - data.inactiveCustomers
+
+        setStats({
+          totalCustomers: data.totalCustomers || 0,
+          activeCustomers: data.activeCustomers || 0,
+          inactiveCustomers: data.inactiveCustomers || 0,
+          suspendedCustomers: suspendedCustomers || 0,
+          totalRevenue: data.totalRevenue || 0,
+          outstandingBalance: 0,
+        })
+      }
+    } catch (error) {
+      console.error('Error fetching dashboard stats:', error)
+      // Fallback to zero stats if API fails
+      setStats({
+        totalCustomers: 0,
+        activeCustomers: 0,
+        inactiveCustomers: 0,
+        suspendedCustomers: 0,
+        totalRevenue: 0,
+        outstandingBalance: 0,
+      })
+    }
+  }
+
   const fetchCustomers = async () => {
     try {
       setLoading(true)
@@ -210,6 +254,9 @@ export default function CustomersPage() {
         limit: pageSize.toString(),
         search: searchQuery,
         status: filterStatus === 'all' ? '' : filterStatus,
+        package_id: filterPackage === 'all' ? '' : filterPackage,
+        router_id: filterRouter === 'all' ? '' : filterRouter,
+        region_id: filterRegion === 'all' ? '' : filterRegion,
         sort_field: sortField || '',
         sort_direction: sortDirection,
       })
@@ -228,15 +275,6 @@ export default function CustomersPage() {
         setCustomers(customersWithDefaultStatus)
         const pagination = response.data.data.pagination || {}
         setTotalItems(pagination.total || 0)
-
-        setStats({
-          totalCustomers: customersWithDefaultStatus.length,
-          activeCustomers: customersWithDefaultStatus.filter((c: Customer) => c.status === 'active').length,
-          inactiveCustomers: customersWithDefaultStatus.filter((c: Customer) => c.status === 'inactive').length,
-          suspendedCustomers: customersWithDefaultStatus.filter((c: Customer) => c.status === 'suspended').length,
-          totalRevenue: customersWithDefaultStatus.reduce((sum: number, c: Customer) => sum + (c.package_price || 0), 0),
-          outstandingBalance: 0,
-        })
 
         // Fetch connection status for first few customers (for better UX)
         const visibleCustomers = customersWithDefaultStatus.slice(0, Math.min(10, customersWithDefaultStatus.length))
@@ -364,6 +402,7 @@ export default function CustomersPage() {
       const response = await api.get(endpoints.radius.nas)
       if (response.data.success) {
         const routersData = response.data.data.nas || []
+        console.log('📡 Routers fetched:', routersData)
         setRouters(routersData)
       }
     } catch (err: any) {
@@ -508,6 +547,193 @@ export default function CustomersPage() {
       setError(err.response?.data?.message || err.message || 'Gagal menghapus pelanggan')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  // Bulk operation functions
+  const handleSelectCustomer = (customerId: string, checked: boolean) => {
+    setSelectedCustomers(prev => {
+      const newSet = new Set(prev)
+      if (checked) {
+        newSet.add(customerId)
+      } else {
+        newSet.delete(customerId)
+      }
+      return newSet
+    })
+  }
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      const allIds = customers.map(c => c.id)
+      setSelectedCustomers(new Set(allIds))
+    } else {
+      setSelectedCustomers(new Set())
+    }
+  }
+
+  const handleBulkDelete = async () => {
+    if (selectedCustomers.size === 0) return
+
+    if (!window.confirm(`Apakah Anda yakin ingin menghapus ${selectedCustomers.size} pelanggan?`)) {
+      return
+    }
+
+    try {
+      setSubmittingBulk(true)
+      setError(null)
+
+      const promises = Array.from(selectedCustomers).map(customerId =>
+        api.delete(endpoints.customers.delete(customerId))
+      )
+
+      const results = await Promise.allSettled(promises)
+      const successful = results.filter(r => r.status === 'fulfilled').length
+      const failed = results.filter(r => r.status === 'rejected').length
+
+      if (failed > 0) {
+        setError(`${failed} pelanggan gagal dihapus, ${successful} berhasil`)
+      }
+
+      setSelectedCustomers(new Set())
+      setShowBulkActions(false)
+      fetchCustomers()
+      fetchDashboardStats()
+
+    } catch (err: any) {
+      console.error('Error in bulk delete:', err)
+      setError(err.response?.data?.message || err.message || 'Gagal menghapus pelanggan')
+    } finally {
+      setSubmittingBulk(false)
+    }
+  }
+
+  const handleBulkChangeRouter = async (newRouter: string) => {
+    if (selectedCustomers.size === 0) return
+
+    try {
+      setSubmittingBulk(true)
+      setError(null)
+
+      const promises = Array.from(selectedCustomers).map(customerId =>
+        api.put(endpoints.customers.update(customerId), { router: newRouter })
+      )
+
+      const results = await Promise.allSettled(promises)
+      const successful = results.filter(r => r.status === 'fulfilled').length
+      const failed = results.filter(r => r.status === 'rejected').length
+
+      if (failed > 0) {
+        setError(`${failed} pelanggan gagal diupdate, ${successful} berhasil`)
+      }
+
+      setSelectedCustomers(new Set())
+      setShowBulkActions(false)
+      setBulkAction(null)
+      fetchCustomers()
+
+    } catch (err: any) {
+      console.error('Error in bulk router change:', err)
+      setError(err.response?.data?.message || err.message || 'Gagal mengubah router')
+    } finally {
+      setSubmittingBulk(false)
+    }
+  }
+
+  const handleBulkChangeStatus = async (newStatus: string) => {
+    if (selectedCustomers.size === 0) return
+
+    try {
+      setSubmittingBulk(true)
+      setError(null)
+
+      const promises = Array.from(selectedCustomers).map(customerId =>
+        api.put(endpoints.customers.update(customerId), { status: newStatus })
+      )
+
+      const results = await Promise.allSettled(promises)
+      const successful = results.filter(r => r.status === 'fulfilled').length
+      const failed = results.filter(r => r.status === 'rejected').length
+
+      if (failed > 0) {
+        setError(`${failed} pelanggan gagal diupdate, ${successful} berhasil`)
+      }
+
+      setSelectedCustomers(new Set())
+      setShowBulkActions(false)
+      setBulkAction(null)
+      fetchCustomers()
+      fetchDashboardStats()
+
+    } catch (err: any) {
+      console.error('Error in bulk status change:', err)
+      setError(err.response?.data?.message || err.message || 'Gagal mengubah status')
+    } finally {
+      setSubmittingBulk(false)
+    }
+  }
+
+  const handleBulkChangeRegion = async (newRegion: string) => {
+    if (selectedCustomers.size === 0) return
+
+    try {
+      setSubmittingBulk(true)
+      setError(null)
+
+      const promises = Array.from(selectedCustomers).map(customerId =>
+        api.put(endpoints.customers.update(customerId), { region_id: newRegion })
+      )
+
+      const results = await Promise.allSettled(promises)
+      const successful = results.filter(r => r.status === 'fulfilled').length
+      const failed = results.filter(r => r.status === 'rejected').length
+
+      if (failed > 0) {
+        setError(`${failed} pelanggan gagal diupdate, ${successful} berhasil`)
+      }
+
+      setSelectedCustomers(new Set())
+      setShowBulkActions(false)
+      setBulkAction(null)
+      fetchCustomers()
+
+    } catch (err: any) {
+      console.error('Error in bulk region change:', err)
+      setError(err.response?.data?.message || err.message || 'Gagal mengubah wilayah')
+    } finally {
+      setSubmittingBulk(false)
+    }
+  }
+
+  const handleBulkChangeCycle = async (newCycle: string) => {
+    if (selectedCustomers.size === 0) return
+
+    try {
+      setSubmittingBulk(true)
+      setError(null)
+
+      const promises = Array.from(selectedCustomers).map(customerId =>
+        api.put(endpoints.customers.update(customerId), { siklus: newCycle })
+      )
+
+      const results = await Promise.allSettled(promises)
+      const successful = results.filter(r => r.status === 'fulfilled').length
+      const failed = results.filter(r => r.status === 'rejected').length
+
+      if (failed > 0) {
+        setError(`${failed} pelanggan gagal diupdate, ${successful} berhasil`)
+      }
+
+      setSelectedCustomers(new Set())
+      setShowBulkActions(false)
+      setBulkAction(null)
+      fetchCustomers()
+
+    } catch (err: any) {
+      console.error('Error in bulk cycle change:', err)
+      setError(err.response?.data?.message || err.message || 'Gagal mengubah siklus')
+    } finally {
+      setSubmittingBulk(false)
     }
   }
 
@@ -730,6 +956,30 @@ export default function CustomersPage() {
     setCurrentPage(1) // Reset to first page when filtering
   }
 
+  const handlePackageFilterChange = (value: string) => {
+    setFilterPackage(value)
+    setCurrentPage(1) // Reset to first page when filtering
+  }
+
+  const handleRouterFilterChange = (value: string) => {
+    setFilterRouter(value)
+    setCurrentPage(1) // Reset to first page when filtering
+  }
+
+  const handleRegionFilterChange = (value: string) => {
+    setFilterRegion(value)
+    setCurrentPage(1) // Reset to first page when filtering
+  }
+
+  const clearAllFilters = () => {
+    setFilterStatus('all')
+    setFilterPackage('all')
+    setFilterRouter('all')
+    setFilterRegion('all')
+    setSearchQuery('')
+    setCurrentPage(1) // Reset to first page
+  }
+
   const handlePageSizeChange = (value: string) => {
     setPageSize(parseInt(value))
     setCurrentPage(1) // Reset to first page when changing page size
@@ -886,13 +1136,104 @@ export default function CustomersPage() {
                 <option value="inactive">Tidak Aktif</option>
                 <option value="suspended">Ditangguh</option>
               </select>
-              <Button variant="outline" size="icon">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                className="flex items-center gap-2"
+              >
                 <Filter className="h-4 w-4" />
+                {showAdvancedFilters ? 'Sembunyikan' : 'Filter Lanjutan'}
               </Button>
+              {(filterStatus !== 'all' || filterPackage !== 'all' || filterRouter !== 'all' || filterRegion !== 'all' || searchQuery) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearAllFilters}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  Hapus Filter
+                </Button>
+              )}
             </div>
           </div>
         </CardContent>
       </Card>
+
+      {/* Advanced Filters */}
+      {showAdvancedFilters && (
+        <Card>
+          <CardContent className="pt-6">
+            <h3 className="text-lg font-medium mb-4">Filter Lanjutan</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Package Filter */}
+              <div>
+                <label className="block text-sm font-medium mb-2">Filter Paket</label>
+                <select
+                  value={filterPackage}
+                  onChange={(e) => handlePackageFilterChange(e.target.value)}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                >
+                  <option value="all">Semua Paket</option>
+                  {packages.map((pkg) => (
+                    <option key={pkg.id} value={pkg.id}>
+                      {pkg.name} ({formatCurrency(pkg.price)})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Router Filter */}
+              <div>
+                <label className="block text-sm font-medium mb-2">Filter Router</label>
+                <select
+                  value={filterRouter}
+                  onChange={(e) => handleRouterFilterChange(e.target.value)}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                >
+                  <option value="all">Semua Router</option>
+                  {routers.map((router) => (
+                    <option key={router.id} value={router.id}>
+                      {router.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Region Filter */}
+              <div>
+                <label className="block text-sm font-medium mb-2">Filter Wilayah</label>
+                <select
+                  value={filterRegion}
+                  onChange={(e) => handleRegionFilterChange(e.target.value)}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                >
+                  <option value="all">Semua Wilayah</option>
+                  {regions.map((region) => (
+                    <option key={region.id} value={region.id}>
+                      {region.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Active Filters Summary */}
+              <div>
+                <label className="block text-sm font-medium mb-2">Filter Aktif</label>
+                <div className="text-sm text-muted-foreground">
+                  {filterStatus !== 'all' && <div>• Status: {filterStatus}</div>}
+                  {filterPackage !== 'all' && <div>• Paket: {packages.find(p => p.id === filterPackage)?.name}</div>}
+                  {filterRouter !== 'all' && <div>• Router: {routers.find(r => r.id === filterRouter)?.name}</div>}
+                  {filterRegion !== 'all' && <div>• Wilayah: {regions.find(r => r.id === filterRegion)?.name}</div>}
+                  {searchQuery && <div>• Pencarian: "{searchQuery}"</div>}
+                  {filterStatus === 'all' && filterPackage === 'all' && filterRouter === 'all' &&
+                   filterRegion === 'all' && !searchQuery && <div>Tidak ada filter aktif</div>}
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Customers Table */}
       <Card>
@@ -974,10 +1315,233 @@ export default function CustomersPage() {
           </div>
         </CardHeader>
         <CardContent>
+          {/* Bulk Actions Bar */}
+          {selectedCustomers.size > 0 && (
+            <div className="mb-4 p-3 bg-primary/10 border border-primary/20 rounded-lg flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-medium">
+                  {selectedCustomers.size} pelanggan dipilih
+                </span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={handleBulkDelete}
+                    disabled={submittingBulk}
+                    className="flex items-center gap-2"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Hapus
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setBulkAction('changeRouter')}
+                    disabled={submittingBulk}
+                    className="flex items-center gap-2"
+                  >
+                    <Edit className="w-4 h-4" />
+                    Ganti Router
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setBulkAction('changeStatus')}
+                    disabled={submittingBulk}
+                    className="flex items-center gap-2"
+                  >
+                    <Shield className="w-4 h-4" />
+                    Aktif/Nonaktif
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setBulkAction('changeRegion')}
+                    disabled={submittingBulk}
+                    className="flex items-center gap-2"
+                  >
+                    <MapPin className="w-4 h-4" />
+                    Ganti Wilayah
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setBulkAction('changeCycle')}
+                    disabled={submittingBulk}
+                    className="flex items-center gap-2"
+                  >
+                    <Activity className="w-4 h-4" />
+                    Ganti Siklus
+                  </Button>
+                </div>
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setSelectedCustomers(new Set())}
+              >
+                Batal
+              </Button>
+            </div>
+          )}
+
+          {/* Router Selection Modal */}
+          {bulkAction === 'changeRouter' && (
+            <div className="mb-4 p-4 border rounded-lg bg-background">
+              <h4 className="font-medium mb-3">Pilih Router Baru</h4>
+              <div className="flex items-center gap-3">
+                <select
+                  value={formData.router || ''}
+                  onChange={(e) => setFormData(prev => ({ ...prev, router: e.target.value }))}
+                  className="px-3 py-2 border rounded-md bg-background"
+                  disabled={submittingBulk}
+                >
+                  <option value="">Pilih Router</option>
+                  {routers.map((router) => (
+                    <option key={router.id} value={router.id}>
+                      {router.name}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  size="sm"
+                  onClick={() => handleBulkChangeRouter(formData.router || '')}
+                  disabled={submittingBulk || !formData.router}
+                >
+                  {submittingBulk ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  Terapkan
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setBulkAction(null)}
+                >
+                  Batal
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Status Change Modal */}
+          {bulkAction === 'changeStatus' && (
+            <div className="mb-4 p-4 border rounded-lg bg-background">
+              <h4 className="font-medium mb-3">Ubah Status Pelanggan</h4>
+              <div className="flex items-center gap-3">
+                <select
+                  value={formData.status || ''}
+                  onChange={(e) => setFormData(prev => ({ ...prev, status: e.target.value }))}
+                  className="px-3 py-2 border rounded-md bg-background"
+                  disabled={submittingBulk}
+                >
+                  <option value="">Pilih Status</option>
+                  <option value="active">Aktif</option>
+                  <option value="inactive">Tidak Aktif</option>
+                  <option value="suspended">Ditangguhkan</option>
+                </select>
+                <Button
+                  size="sm"
+                  onClick={() => handleBulkChangeStatus(formData.status || '')}
+                  disabled={submittingBulk || !formData.status}
+                >
+                  {submittingBulk ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  Terapkan
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setBulkAction(null)}
+                >
+                  Batal
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Region Change Modal */}
+          {bulkAction === 'changeRegion' && (
+            <div className="mb-4 p-4 border rounded-lg bg-background">
+              <h4 className="font-medium mb-3">Pilih Wilayah Baru</h4>
+              <div className="flex items-center gap-3">
+                <select
+                  value={formData.region || ''}
+                  onChange={(e) => setFormData(prev => ({ ...prev, region: e.target.value }))}
+                  className="px-3 py-2 border rounded-md bg-background"
+                  disabled={submittingBulk}
+                >
+                  <option value="">Pilih Wilayah</option>
+                  {regions.map((region) => (
+                    <option key={region.id} value={region.id}>
+                      {region.name}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  size="sm"
+                  onClick={() => handleBulkChangeRegion(formData.region || '')}
+                  disabled={submittingBulk || !formData.region}
+                >
+                  {submittingBulk ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  Terapkan
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setBulkAction(null)}
+                >
+                  Batal
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Cycle Change Modal */}
+          {bulkAction === 'changeCycle' && (
+            <div className="mb-4 p-4 border rounded-lg bg-background">
+              <h4 className="font-medium mb-3">Pilih Siklus Tagihan Baru</h4>
+              <div className="flex items-center gap-3">
+                <select
+                  value={formData.siklus || ''}
+                  onChange={(e) => setFormData(prev => ({ ...prev, siklus: e.target.value }))}
+                  className="px-3 py-2 border rounded-md bg-background"
+                  disabled={submittingBulk}
+                >
+                  <option value="">Pilih Siklus</option>
+                  <option value="profile">Profile</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="quarterly">Quarterly</option>
+                  <option value="yearly">Yearly</option>
+                </select>
+                <Button
+                  size="sm"
+                  onClick={() => handleBulkChangeCycle(formData.siklus || '')}
+                  disabled={submittingBulk || !formData.siklus}
+                >
+                  {submittingBulk ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  Terapkan
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setBulkAction(null)}
+                >
+                  Batal
+                </Button>
+              </div>
+            </div>
+          )}
+
           <div className="overflow-x-auto">
             <table className="w-full border-collapse">
               <thead>
                 <tr className="border-b bg-muted/50">
+                  <th className="text-center p-3 font-semibold text-foreground whitespace-nowrap w-12">
+                    <input
+                      type="checkbox"
+                      checked={selectedCustomers.size === customers.length && customers.length > 0}
+                      onChange={(e) => handleSelectAll(e.target.checked)}
+                      className="w-4 h-4 rounded border-gray-300"
+                    />
+                  </th>
                   <th className="text-center p-3 font-semibold text-foreground whitespace-nowrap w-12">
                     Koneksi
                   </th>
@@ -1069,6 +1633,14 @@ export default function CustomersPage() {
                         setShowDetailModal(true)
                       }}
                     >
+                      <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={selectedCustomers.has(customer.id)}
+                          onChange={(e) => handleSelectCustomer(customer.id, e.target.checked)}
+                          className="w-4 h-4 rounded border-gray-300"
+                        />
+                      </td>
                       <td className="p-3 text-center">
                         {fetchingStatus === customer.id ? (
                           <Loader2 className="w-5 h-5 animate-spin text-muted-foreground mx-auto" />
