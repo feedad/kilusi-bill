@@ -49,6 +49,14 @@ router.get('/stats', async (req, res) => {
         const inactiveCustomersQuery = await query("SELECT COUNT(*) as count FROM customers WHERE status = 'inactive'");
         const inactiveCustomers = parseInt(inactiveCustomersQuery.rows[0].count);
 
+        // Get new customers this month
+        const newCustomersQuery = await query(`
+            SELECT COUNT(*) as count
+            FROM customers
+            WHERE DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE)
+        `);
+        const newCustomersThisMonth = parseInt(newCustomersQuery.rows[0].count);
+
         // Get total packages
         const totalPackagesQuery = await query('SELECT COUNT(*) as count FROM packages');
         const totalPackages = parseInt(totalPackagesQuery.rows[0].count);
@@ -93,6 +101,7 @@ router.get('/stats', async (req, res) => {
                 totalCustomers,
                 activeCustomers,
                 inactiveCustomers,
+                newCustomersThisMonth,
                 totalPackages,
                 totalInvoices,
                 paidInvoices,

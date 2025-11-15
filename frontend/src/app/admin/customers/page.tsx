@@ -133,6 +133,7 @@ interface CustomerStats {
   suspendedCustomers: number
   totalRevenue: number
   outstandingBalance: number
+  newCustomersThisMonth: number
 }
 
 export default function CustomersPage() {
@@ -230,6 +231,7 @@ export default function CustomersPage() {
           suspendedCustomers: suspendedCustomers || 0,
           totalRevenue: data.totalRevenue || 0,
           outstandingBalance: 0,
+          newCustomersThisMonth: data.newCustomersThisMonth || 0,
         })
       }
     } catch (error) {
@@ -242,6 +244,7 @@ export default function CustomersPage() {
         suspendedCustomers: 0,
         totalRevenue: 0,
         outstandingBalance: 0,
+        newCustomersThisMonth: 0,
       })
     }
   }
@@ -1115,14 +1118,14 @@ export default function CustomersPage() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-foreground">Total Pendapatan</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium text-foreground">Customer Baru</CardTitle>
+            <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent className="pt-0">
             <div className="text-2xl font-bold text-foreground">
-              {formatCurrency(stats?.totalRevenue || 0)}
+              {stats?.newCustomersThisMonth || 0}
             </div>
-            <p className="text-xs text-muted-foreground">Semua waktu</p>
+            <p className="text-xs text-muted-foreground">Bulan {new Date().toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}</p>
           </CardContent>
         </Card>
 
