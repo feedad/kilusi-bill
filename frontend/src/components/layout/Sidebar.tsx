@@ -1,6 +1,6 @@
 'use client'
 
-import React from 'react'
+import React, { useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuthStore } from '@/store/authStore'
@@ -24,6 +24,10 @@ import {
   Monitor,
   MapPin,
   Network,
+  DollarSign,
+  Calculator,
+  Gift,
+  Loader2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -82,24 +86,24 @@ const navigation = [
     roles: ['admin'],
   },
   {
-    name: 'Billing',
+    name: 'Billing & Invoice',
     href: '/admin/billing',
     icon: CreditCard,
     roles: ['admin'],
   },
   {
-    name: 'Invoice',
-    href: '/admin/invoices',
-    icon: FileText,
+    name: 'Akunting',
+    href: '/admin/accounting',
+    icon: Calculator,
     roles: ['admin'],
   },
   {
-    name: 'Pembayaran',
-    href: '/admin/payments',
-    icon: Activity,
+    name: 'Diskon & Referral',
+    href: '/admin/discounts-referrals',
+    icon: Gift,
     roles: ['admin'],
   },
-  {
+    {
     name: 'Hotspot',
     href: '/admin/hotspot',
     icon: Wifi,
@@ -123,7 +127,7 @@ const navigation = [
     icon: Server,
     roles: ['admin'],
   },
-  {
+    {
     name: 'Pengaturan',
     href: '/admin/settings',
     icon: Settings,
@@ -135,14 +139,25 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const pathname = usePathname()
   const { user, logout } = useAuthStore()
   const { sidebarOpen, setSidebarOpen } = useAppStore()
+  const [isLoggingOut, setIsLoggingOut] = useState(false)
 
   const filteredNavigation = navigation.filter((item) =>
     user?.role ? item.roles.includes(user.role) : false
   )
 
-  const handleLogout = () => {
-    logout()
-    onClose()
+  const handleLogout = async () => {
+    setIsLoggingOut(true)
+    try {
+      await logout()
+      onClose()
+      // Redirect will be handled by AuthProvider and window.location.reload()
+    } catch (error) {
+      console.error('Logout error:', error)
+      // Still redirect even if API fails
+      onClose()
+    } finally {
+      setIsLoggingOut(false)
+    }
   }
 
   return (
@@ -219,10 +234,15 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           </div>
           <button
             onClick={handleLogout}
-            className="ml-3 flex-shrink-0 p-1 text-muted-foreground hover:text-white"
-            title="Logout"
+            disabled={isLoggingOut}
+            className="ml-3 flex-shrink-0 p-1 text-muted-foreground hover:text-white disabled:opacity-50"
+            title={isLoggingOut ? "Logging out..." : "Logout"}
           >
-            <LogOut className="h-5 w-5" />
+            {isLoggingOut ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              <LogOut className="h-5 w-5" />
+            )}
           </button>
         </div>
       </div>

@@ -39,11 +39,17 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Clear auth storage and redirect to login
-      localStorage.removeItem('auth-storage')
-      localStorage.removeItem('auth_token')
-      localStorage.removeItem('user_data')
-      window.location.href = '/login'
+      // Clear auth storage tapi JANGAN auto-redirect
+      // Biarkan komponen React yang menghandle redirect
+      console.warn('Unauthorized - clearing auth storage')
+
+      try {
+        localStorage.removeItem('auth-storage')
+        localStorage.removeItem('auth_token')
+        localStorage.removeItem('user_data')
+      } catch (e) {
+        console.error('Error clearing localStorage:', e)
+      }
     }
     return Promise.reject(error)
   }
@@ -75,6 +81,7 @@ export const endpoints = {
     update: (id: string) => `/customers/${id}`,
     delete: (id: string) => `/customers/${id}`,
     detail: (id: string) => `/customers/${id}`,
+    nextSequence: '/customers/next-sequence',
   },
 
   // Packages
@@ -180,6 +187,38 @@ export const endpoints = {
     },
     send: '/whatsapp/send/broadcast',
     status: '/whatsapp/status',
+  },
+
+  // Customer Settings
+  customerSettings: {
+    defaults: '/customer-settings/defaults',
+    default: (fieldName: string) => `/customer-settings/defaults/${fieldName}`,
+  },
+
+  // Installation Fees
+  installationFees: {
+    list: '/installation-fees',
+    create: '/installation-fees',
+    update: (id: string) => `/installation-fees/${id}`,
+    delete: (id: string) => `/installation-fees/${id}`,
+    calculate: (billingType: string) => `/installation-fees/calculate/${billingType}`,
+    getByType: (billingType: string) => `/installation-fees/${billingType}`,
+  },
+
+  // Accounting
+  accounting: {
+    categories: '/accounting/categories',
+    transactions: '/accounting/transactions',
+    summary: '/accounting/summary',
+    profitLossReport: '/accounting/report/profit-loss',
+  },
+
+  // Auto Expenses
+  autoExpenses: {
+    settings: '/auto-expenses/settings',
+    recurring: '/auto-expenses/recurring',
+    triggerTechnicianFee: '/auto-expenses/trigger-technician-fee',
+    triggerMarketingFee: '/auto-expenses/trigger-marketing-fee',
   },
 }
 

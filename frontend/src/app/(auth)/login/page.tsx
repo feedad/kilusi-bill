@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/authStore'
 import { useAppStore } from '@/store/appStore'
 import { Button, Input, Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui'
-import { Server } from 'lucide-react'
+import { Server, X } from 'lucide-react'
 import { LoginFormData } from '@/types'
 
 export default function LoginPage() {
@@ -21,6 +21,7 @@ export default function LoginPage() {
   })
 
   const [errors, setErrors] = useState<Partial<LoginFormData>>({})
+  const [loginError, setLoginError] = useState<string | null>(null)
 
   const validateForm = (): boolean => {
     const newErrors: Partial<LoginFormData> = {}
@@ -38,11 +39,18 @@ export default function LoginPage() {
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+    e.preventDefault() // Mencegah form submission default behavior
+    e.stopPropagation() // Mencegah event bubbling
 
-    if (!validateForm()) return
+    if (!validateForm()) return false
+
+    // Clear previous error
+    setLoginError(null)
 
     try {
+      // Tambahkan logging untuk debugging
+      console.log('Attempting login with:', formData.username)
+
       await login(formData.username, formData.password)
 
       addNotification({
@@ -53,6 +61,8 @@ export default function LoginPage() {
 
       // Redirect based on user role
       const user = useAuthStore.getState().user
+      console.log('Login successful, user:', user)
+
       if (user?.role === 'admin') {
         router.push('/admin/dashboard')
       } else if (user?.role === 'technician') {
@@ -60,20 +70,47 @@ export default function LoginPage() {
       } else {
         router.push('/customer/dashboard')
       }
-    } catch (error) {
-      addNotification({
-        type: 'error',
-        title: 'Login Failed',
-        message: error instanceof Error ? error.message : 'Invalid credentials',
-      })
+
+      return true
+    } catch (error: any) {
+      // Prevent page reload by ensuring all errors are caught
+      console.error('Login error caught:', error)
+
+      // Set specific error message
+      let errorMessage = 'Username atau password salah. Silakan coba lagi.'
+
+      if (error.response?.data?.message) {
+        errorMessage = error.response.data.message
+      } else if (error.response?.status === 401) {
+        errorMessage = 'Username atau password salah. Silakan periksa kembali.'
+      } else if (error.response?.status === 429) {
+        errorMessage = 'Terlalu banyak percobaan login. Silakan coba lagi nanti.'
+      } else if (error.response?.status >= 500) {
+        errorMessage = 'Server sedang bermasalah. Silakan coba lagi nanti.'
+      } else if (error.code === 'NETWORK_ERROR' || error.message?.includes('Network Error')) {
+        errorMessage = 'Tidak dapat terhubung ke server. Periksa koneksi internet Anda.'
+      } else if (error.name === 'TypeError' && error.message?.includes('fetch')) {
+        errorMessage = 'Gagal terhubung ke server. Periksa koneksi internet.'
+      } else if (error.message) {
+        errorMessage = error.message
+      }
+
+      // Set error state dan mencegah form refresh
+      setLoginError(errorMessage)
+
+      // Return false untuk mencegah form submission default
+      return false
     }
   }
 
   const handleInputChange = (field: keyof LoginFormData, value: string | boolean) => {
     setFormData(prev => ({ ...prev, [field]: value }))
-    // Clear error when user starts typing
-    if (errors[field]) {
-      setErrors(prev => ({ ...prev, [field]: undefined }))
+    // Clear errors when user starts typing
+    setErrors(prev => ({ ...prev, [field]: undefined }))
+
+    // Clear login error only when user actually types something (not for checkbox)
+    if (typeof value === 'string' && value.length > 0) {
+      setLoginError(null)
     }
   }
 
@@ -105,7 +142,43 @@ export default function LoginPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-6">
+            <form onSubmit={handleSubmit} className="space-y-6" noValidate>
+              {/* Error Alert - More prominent and persistent */}
+              {loginError && (
+                <div className="bg-red-50 border-2 border-red-300 rounded-lg p-4 mb-4 shadow-lg animate-pulse hover:shadow-xl transition-shadow duration-200">
+                  <div className="flex">
+                    <div className="flex-shrink-0">
+                      <svg className="h-6 w-6 text-red-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <div className="ml-3 flex-1">
+                      <h3 className="text-base font-bold text-red-800">
+                        ⚠️ Login Gagal
+                      </h3>
+                      <div className="mt-1 text-sm text-red-700">
+                        {loginError}
+                      </div>
+                      <div className="mt-2">
+                        <p className="text-xs text-red-600">
+                          💡 <strong>Tips:</strong> Periksa kembali username dan password Anda, atau gunakan demo credentials di bawah.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="ml-4 pl-4 border-l border-red-200">
+                      <button
+                        type="button"
+                        onClick={() => setLoginError(null)}
+                        className="inline-flex text-red-400 hover:text-red-600 focus:outline-none transition-colors"
+                        title="Tutup pesan error"
+                      >
+                        <X className="h-5 w-5" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <Input
                 id="username"
                 type="text"
@@ -166,12 +239,24 @@ export default function LoginPage() {
             {/* Demo credentials */}
             <div className="mt-6 border-t pt-6">
               <div className="text-sm text-gray-600">
-                <p className="font-medium mb-2">Demo Credentials:</p>
+                <p className="font-medium mb-2">💡 Credential Demo:</p>
                 <div className="space-y-1 text-xs">
-                  <p><strong>Admin:</strong> admin / admin123</p>
-                  <p><strong>Technician:</strong> tech / password</p>
-                  <p><strong>Customer:</strong> customer / password</p>
+                  <div className="bg-gray-50 p-2 rounded">
+                    <p><strong>Admin:</strong> admin / admin123</p>
+                    <p className="text-gray-500">Akses: Dashboard, Pelanggan, Billing, dll.</p>
+                  </div>
+                  <div className="bg-blue-50 p-2 rounded">
+                    <p><strong>Technician:</strong> tech / password</p>
+                    <p className="text-blue-500">Akses: Dashboard Teknisi, ODP, Realtime</p>
+                  </div>
+                  <div className="bg-green-50 p-2 rounded">
+                    <p><strong>Customer:</strong> customer / password</p>
+                    <p className="text-green-500">Akses: Portal pelanggan</p>
+                  </div>
                 </div>
+                <p className="mt-2 text-xs text-gray-500 italic">
+                  *Gunakan credential ini untuk testing. Ganti password di production!
+                </p>
               </div>
             </div>
           </CardContent>

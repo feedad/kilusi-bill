@@ -304,12 +304,6 @@ export interface WhatsAppBroadcast {
   createdAt: string
   createdBy: string
 }
-  description: string
-  userId?: string
-  customerId?: string
-  timestamp: string
-  metadata?: Record<string, any>
-}
 
 // Settings Types
 export interface Settings {

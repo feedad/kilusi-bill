@@ -92,23 +92,32 @@ const CoordinateMap = ({
   onCoordinatesChange,
   readOnly = false
 }: CoordinateMapProps) => {
-  const [currentLat, setCurrentLat] = useState<number>(latitude || -6.563234)
-  const [currentLng, setCurrentLng] = useState<number>(longitude || 107.741418)
+  // Ensure latitude and longitude are numbers - accept both number and string
+  const safeLatitude = (typeof latitude === 'number' && !isNaN(latitude)) ? latitude :
+                      (typeof latitude === 'string' && !isNaN(parseFloat(latitude))) ? parseFloat(latitude) : -6.563234;
+  const safeLongitude = (typeof longitude === 'number' && !isNaN(longitude)) ? longitude :
+                       (typeof longitude === 'string' && !isNaN(parseFloat(longitude))) ? parseFloat(longitude) : 107.741418;
+
+  const [currentLat, setCurrentLat] = useState<number>(safeLatitude)
+  const [currentLng, setCurrentLng] = useState<number>(safeLongitude)
   const [loading, setLoading] = useState(false)
   const [isClient, setIsClient] = useState(false)
   const [error, setError] = useState<string>('')
   const [mapReady, setMapReady] = useState(false)
-  const [markerPosition, setMarkerPosition] = useState<LatLngExpression>([latitude || -6.563234, longitude || 107.741418])
-  const [mapCenter, setMapCenter] = useState<LatLngExpression>([latitude || -6.563234, longitude || 107.741418])
+  const [markerPosition, setMarkerPosition] = useState<LatLngExpression>([safeLatitude, safeLongitude])
+  const [mapCenter, setMapCenter] = useState<LatLngExpression>([safeLatitude, safeLongitude])
 
   // Ensure we're on the client side and load Leaflet CSS
   useEffect(() => {
     setIsClient(true)
-    if (latitude && longitude) {
-      setCurrentLat(latitude)
-      setCurrentLng(longitude)
-      setMarkerPosition([latitude, longitude])
-      setMapCenter([latitude, longitude])
+    if ((typeof latitude === 'number' && !isNaN(latitude)) || (typeof latitude === 'string' && !isNaN(parseFloat(latitude)))) {
+      const lat = typeof latitude === 'string' ? parseFloat(latitude) : latitude;
+      const lng = typeof longitude === 'string' ? parseFloat(longitude) : longitude;
+
+      setCurrentLat(lat)
+      setCurrentLng(lng)
+      setMarkerPosition([lat, lng])
+      setMapCenter([lat, lng])
     }
 
     // Load Leaflet CSS and fix marker icons
@@ -129,8 +138,8 @@ const CoordinateMap = ({
   // Handle marker position update
   const handleMapClick = (lat: number, lng: number) => {
     if (readOnly) return
-    setCurrentLat(lat)
-    setCurrentLng(lng)
+    setCurrentLat(typeof lat === 'number' && !isNaN(lat) ? lat : safeLatitude)
+    setCurrentLng(typeof lng === 'number' && !isNaN(lng) ? lng : safeLongitude)
     setMarkerPosition([lat, lng])
     setMapCenter([lat, lng])
     onCoordinatesChange(lat, lng)
@@ -141,8 +150,8 @@ const CoordinateMap = ({
     if (readOnly) return
     const lat = e.target.getLatLng().lat
     const lng = e.target.getLatLng().lng
-    setCurrentLat(lat)
-    setCurrentLng(lng)
+    setCurrentLat(typeof lat === 'number' && !isNaN(lat) ? lat : safeLatitude)
+    setCurrentLng(typeof lng === 'number' && !isNaN(lng) ? lng : safeLongitude)
     setMarkerPosition([lat, lng])
     setMapCenter([lat, lng])
     onCoordinatesChange(lat, lng)
@@ -162,8 +171,8 @@ const CoordinateMap = ({
       (position) => {
         const lat = position.coords.latitude
         const lng = position.coords.longitude
-        setCurrentLat(lat)
-        setCurrentLng(lng)
+        setCurrentLat(typeof lat === 'number' && !isNaN(lat) ? lat : safeLatitude)
+        setCurrentLng(typeof lng === 'number' && !isNaN(lng) ? lng : safeLongitude)
         setMarkerPosition([lat, lng])
         setMapCenter([lat, lng])
         onCoordinatesChange(lat, lng)
@@ -218,8 +227,8 @@ const CoordinateMap = ({
       if (data && data.length > 0) {
         const lat = parseFloat(data[0].lat)
         const lng = parseFloat(data[0].lon)
-        setCurrentLat(lat)
-        setCurrentLng(lng)
+        setCurrentLat(typeof lat === 'number' && !isNaN(lat) ? lat : safeLatitude)
+        setCurrentLng(typeof lng === 'number' && !isNaN(lng) ? lng : safeLongitude)
         setMarkerPosition([lat, lng])
         setMapCenter([lat, lng])
         onCoordinatesChange(lat, lng)
@@ -271,7 +280,7 @@ const CoordinateMap = ({
               <Popup>
                 <div className="text-sm">
                   <strong>Lokasi Pelanggan</strong><br />
-                  Koordinat: {currentLat.toFixed(6)}, {currentLng.toFixed(6)}
+                  Koordinat: {typeof currentLat === 'number' ? currentLat.toFixed(6) : 'N/A'}, {typeof currentLng === 'number' ? currentLng.toFixed(6) : 'N/A'}
                 </div>
               </Popup>
             </Marker>
@@ -286,7 +295,7 @@ const CoordinateMap = ({
               <Popup>
                 <div className="text-sm">
                   <strong>Lokasi Pelanggan</strong><br />
-                  Koordinat: {currentLat.toFixed(6)}, {currentLng.toFixed(6)}
+                  Koordinat: {typeof currentLat === 'number' ? currentLat.toFixed(6) : 'N/A'}, {typeof currentLng === 'number' ? currentLng.toFixed(6) : 'N/A'}
                 </div>
               </Popup>
             </Marker>
@@ -309,7 +318,7 @@ const CoordinateMap = ({
           )}
           <div className="bg-gray-50 rounded px-2 py-1">
             <p className="text-xs text-gray-700 font-mono">
-              {currentLat.toFixed(6)}, {currentLng.toFixed(6)}
+              {typeof currentLat === 'number' ? currentLat.toFixed(6) : 'N/A'}, {typeof currentLng === 'number' ? currentLng.toFixed(6) : 'N/A'}
             </p>
           </div>
         </div>
@@ -356,7 +365,7 @@ const CoordinateMap = ({
         {/* Link to OpenStreetMap for manual adjustment */}
         <div className="absolute top-4 right-4 z-20">
           <a
-            href={`https://www.openstreetmap.org/?mlat=${currentLat}&mlon=${currentLng}&zoom=17`}
+            href={`https://www.openstreetmap.org/?mlat=${typeof currentLat === 'number' ? currentLat : -6.563234}&mlon=${typeof currentLng === 'number' ? currentLng : 107.741418}&zoom=17`}
             target="_blank"
             rel="noopener noreferrer"
             className="bg-white bg-opacity-90 hover:bg-opacity-100 text-gray-700 p-2 rounded text-xs transition-colors"

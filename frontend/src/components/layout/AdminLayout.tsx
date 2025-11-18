@@ -1,11 +1,12 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useAuthStore } from '@/store/authStore'
 import { useAppStore } from '@/store/appStore'
 import { Sidebar } from './Sidebar'
 import { Header } from './Header'
 import { FullPageLoader } from '@/components/ui'
+import { useRouter, usePathname } from 'next/navigation'
 
 interface AdminLayoutProps {
   children: React.ReactNode
@@ -15,7 +16,17 @@ export function AdminLayout({ children }: AdminLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const { isAuthenticated, user } = useAuthStore()
   const { globalLoading } = useAppStore()
+  const router = useRouter()
+  const pathname = usePathname()
 
+  // useEffect(() => {
+  //   // Redirect to login if not authenticated
+  //   if (!isAuthenticated || !user) {
+  //     router.push('/login')
+  //   }
+  // }, [isAuthenticated, user, router])
+
+  // Show loader while not authenticated
   if (!isAuthenticated || !user) {
     return <FullPageLoader />
   }

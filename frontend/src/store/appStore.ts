@@ -22,13 +22,13 @@ interface AppState {
   setSidebarOpen: (open: boolean) => void
   setTheme: (theme: 'light' | 'dark') => void
   setGlobalLoading: (loading: boolean) => void
-  addNotification: (notification: Notification) => void
+  addNotification: (notification: NotificationInput) => void
   removeNotification: (id: string) => void
   clearNotifications: () => void
   updateSettings: (settings: Partial<AppState['settings']>) => void
 }
 
-interface Notification {
+export interface Notification {
   id: string
   type: 'success' | 'error' | 'warning' | 'info'
   title: string
@@ -36,6 +36,8 @@ interface Notification {
   duration?: number
   timestamp: number
 }
+
+export type NotificationInput = Omit<Notification, 'id' | 'timestamp'>
 
 export const useAppStore = create<AppState>()(
   persist(
@@ -67,7 +69,7 @@ export const useAppStore = create<AppState>()(
 
       setGlobalLoading: (loading: boolean) => set({ globalLoading: loading }),
 
-      addNotification: (notification: Omit<Notification, 'id' | 'timestamp'>) => {
+      addNotification: (notification: NotificationInput) => {
         const newNotification: Notification = {
           ...notification,
           id: Date.now().toString(),

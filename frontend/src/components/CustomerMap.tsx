@@ -8,8 +8,8 @@ interface Customer {
   name?: string
   address?: string
   phone?: string
-  latitude?: number
-  longitude?: number
+  latitude?: number | string
+  longitude?: number | string
 }
 
 interface CustomerMapProps {
@@ -31,10 +31,31 @@ const CustomerMap = ({ customer }: CustomerMapProps) => {
       if (!customer.address || !isClient) return
 
       // If customer already has coordinates, use them
+      // Handle both string and number coordinates from database
       if (customer.latitude && customer.longitude) {
-        setCoordinates([customer.latitude, customer.longitude])
-        setLoading(false)
-        return
+        const lat = typeof customer.latitude === 'string' ? parseFloat(customer.latitude) : customer.latitude
+        const lng = typeof customer.longitude === 'string' ? parseFloat(customer.longitude) : customer.longitude
+
+        console.log('CustomerMap - Processing coordinates:', {
+          original: { latitude: customer.latitude, longitude: customer.longitude },
+          converted: { lat, lng },
+          types: { latType: typeof lat, lngType: typeof lng, isValid: !isNaN(lat) && !isNaN(lng) }
+        })
+
+        if (!isNaN(lat) && !isNaN(lng)) {
+          setCoordinates([lat, lng])
+          setLoading(false)
+          return
+        } else {
+          console.warn('CustomerMap - Invalid coordinates after conversion:', { lat, lng, original: { latitude: customer.latitude, longitude: customer.longitude } })
+        }
+      } else {
+        console.log('CustomerMap - No coordinates available for customer:', {
+          customerId: customer.id,
+          latitude: customer.latitude,
+          longitude: customer.longitude,
+          address: customer.address
+        })
       }
 
       // Otherwise, geocode the address
@@ -76,12 +97,17 @@ const CustomerMap = ({ customer }: CustomerMapProps) => {
     )
   }
 
-  if (!coordinates) {
+  if (!coordinates || !Array.isArray(coordinates) || coordinates.length !== 2) {
     return (
       <div className="w-full h-64 bg-gray-100 rounded-lg flex items-center justify-center border">
         <div className="text-center">
           <MapPin className="h-8 w-8 text-gray-400 mx-auto mb-2" />
           <p className="text-sm text-gray-600">Lokasi tidak tersedia</p>
+          {customer.latitude && customer.longitude && (
+            <p className="text-xs text-gray-500 mt-1">
+              Koordinat: {customer.latitude}, {customer.longitude}
+            </p>
+          )}
         </div>
       </div>
     )
@@ -90,10 +116,10 @@ const CustomerMap = ({ customer }: CustomerMapProps) => {
   return (
     <div className="w-full h-96 rounded-lg overflow-hidden border relative bg-white">
       {/* Interactive OpenStreetMap iframe */}
-      {coordinates && typeof coordinates[0] === 'number' && typeof coordinates[1] === 'number' && (
+      {coordinates && Array.isArray(coordinates) && coordinates.length === 2 && !isNaN(coordinates[0]) && !isNaN(coordinates[1]) && (
         <iframe
           title={`Map for ${customer.name}`}
-          src={`https://www.openstreetmap.org/export/embed.html?bbox=${coordinates[1] - 0.005},${coordinates[0] - 0.005},${coordinates[1] + 0.005},${coordinates[0] + 0.005}&layer=mapnik&marker=${coordinates[0]},${coordinates[1]}`}
+          src={`https://www.openstreetmap.org/export/embed.html?bbox=${(typeof coordinates[1] === 'number' ? coordinates[1] : parseFloat(coordinates[1])) - 0.005},${(typeof coordinates[0] === 'number' ? coordinates[0] : parseFloat(coordinates[0])) - 0.005},${(typeof coordinates[1] === 'number' ? coordinates[1] : parseFloat(coordinates[1])) + 0.005},${(typeof coordinates[0] === 'number' ? coordinates[0] : parseFloat(coordinates[0])) + 0.005}&layer=mapnik&marker=${typeof coordinates[0] === 'number' ? coordinates[0] : parseFloat(coordinates[0])},${typeof coordinates[1] === 'number' ? coordinates[1] : parseFloat(coordinates[1])}`}
           className="w-full h-full border-0"
           style={{ minHeight: '384px' }}
           loading="lazy"
@@ -109,21 +135,27 @@ const CustomerMap = ({ customer }: CustomerMapProps) => {
             <p className="text-sm font-semibold text-gray-800 truncate">{customer.name || 'Lokasi Pelanggan'}</p>
           </div>
           <p className="text-xs text-gray-600 mb-2">{customer.address}</p>
-          {coordinates && typeof coordinates[0] === 'number' && typeof coordinates[1] === 'number' && (
+          {coordinates && Array.isArray(coordinates) && coordinates.length === 2 && !isNaN(coordinates[0]) && !isNaN(coordinates[1]) && (
             <div className="bg-gray-50 rounded px-2 py-1">
               <p className="text-xs text-gray-700 font-mono">
-                {coordinates[0].toFixed(6)}, {coordinates[1].toFixed(6)}
+                {typeof coordinates[0] === 'number' ? coordinates[0].toFixed(6) : parseFloat(coordinates[0]).toFixed(6)}, {typeof coordinates[1] === 'number' ? coordinates[1].toFixed(6) : parseFloat(coordinates[1]).toFixed(6)}
               </p>
             </div>
           )}
-          {coordinates && (typeof coordinates[0] !== 'number' || typeof coordinates[1] !== 'number') && (
+          {coordinates && (!Array.isArray(coordinates) || coordinates.length !== 2 || isNaN(coordinates[0]) || isNaN(coordinates[1])) && (
             <div className="bg-yellow-50 rounded px-2 py-1">
               <p className="text-xs text-yellow-700">Koordinat tidak valid</p>
+              <p className="text-xs text-yellow-600">
+                Data: {JSON.stringify(coordinates)}
+              </p>
             </div>
           )}
           {!coordinates && !loading && (
             <div className="bg-yellow-50 rounded px-2 py-1">
               <p className="text-xs text-yellow-700">Koordinat tidak tersedia</p>
+              <p className="text-xs text-yellow-600">
+                Customer: {customer.latitude}, {customer.longitude}
+              </p>
             </div>
           )}
         </div>
@@ -135,10 +167,10 @@ const CustomerMap = ({ customer }: CustomerMapProps) => {
       </div>
 
       {/* External map link */}
-      {coordinates && typeof coordinates[0] === 'number' && typeof coordinates[1] === 'number' && (
+      {coordinates && Array.isArray(coordinates) && coordinates.length === 2 && !isNaN(coordinates[0]) && !isNaN(coordinates[1]) && (
         <div className="absolute bottom-4 left-4">
           <a
-            href={`https://www.openstreetmap.org/?mlat=${coordinates[0]}&mlon=${coordinates[1]}&zoom=17`}
+            href={`https://www.openstreetmap.org/?mlat=${typeof coordinates[0] === 'number' ? coordinates[0] : parseFloat(coordinates[0])}&mlon=${typeof coordinates[1] === 'number' ? coordinates[1] : parseFloat(coordinates[1])}&zoom=17`}
             target="_blank"
             rel="noopener noreferrer"
             className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-xs inline-flex items-center space-x-1 transition-colors"

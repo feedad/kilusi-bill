@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -283,6 +283,9 @@ export default function ODPManagementPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // Network map ref
+  const networkMapRef = useRef<any>(null)
+
   // Modal states
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
@@ -419,6 +422,10 @@ export default function ODPManagementPage() {
       setLoading(true)
       try {
         await Promise.all([fetchODPs(), fetchStats(), fetchParentODPs(), fetchCustomers(), fetchCableRoutes()])
+        // Refresh network map after data is loaded
+        if (networkMapRef.current) {
+          await networkMapRef.current.refreshData()
+        }
       } finally {
         setLoading(false)
       }
@@ -833,7 +840,7 @@ export default function ODPManagementPage() {
         </TabsContent>
 
         <TabsContent value="map">
-          <SimpleNetworkMap />
+          <SimpleNetworkMap ref={networkMapRef} />
         </TabsContent>
       </Tabs>
 

@@ -58,14 +58,23 @@ export const useAuthStore = create<AuthState>()(
           await api.post(endpoints.auth.logout)
         } catch (error) {
           // Ignore logout API errors
+          console.log('Logout API error:', error)
         } finally {
           // Clear authorization header
           delete api.defaults.headers.common['Authorization']
+
+          // Clear all auth state
           set({
             user: null,
             token: null,
             isAuthenticated: false,
+            isLoading: false,
           })
+
+          // Force reload to clear any cached state
+          if (typeof window !== 'undefined') {
+            window.location.href = '/login'
+          }
         }
       },
 

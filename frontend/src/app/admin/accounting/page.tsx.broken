@@ -1,0 +1,2084 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { Badge } from '@/components/ui/badge'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { DataTable, type DataTableColumn } from '@/components/ui/table'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import {
+  Plus,
+  Edit2,
+  Trash2,
+  TrendingUp,
+  TrendingDown,
+  DollarSign,
+  Calendar,
+  Download,
+  RefreshCw,
+  Search,
+  Filter,
+  Settings,
+  Tag
+} from 'lucide-react'
+import { api, endpoints } from '@/lib/api'
+import Script from 'next/script'
+
+// Type declaration for html2pdf library
+declare global {
+  interface Window {
+    html2pdf: any
+  }
+}
+
+interface AccountingCategory {
+  id: number
+  name: string
+  type: 'revenue' | 'expense'
+  description?: string
+  color: string
+  icon: string
+  is_active: boolean
+}
+
+interface AccountingTransaction {
+  id: number
+  type: 'revenue' | 'expense'
+  amount: number
+  description: string
+  reference_type?: string
+  reference_id?: number
+  date: string
+  attachment_url?: string
+  notes?: string
+  category?: {
+    name: string
+    color: string
+    icon: string
+  }
+  created_by?: string
+  created_at: string
+  updated_at: string
+}
+
+interface AccountingSummary {
+  revenue: number
+  revenue_count: number
+  expense: number
+  expense_count: number
+  profit: number
+  total_transactions: number
+}
+
+interface ProfitLossData {
+  period: string
+  revenue: number
+  expense: number
+  profit: number
+  total_transactions: number
+  profit_margin: string
+}
+
+export default function AccountingPage() {
+  const [transactions, setTransactions] = useState<AccountingTransaction[]>([])
+  const [categories, setCategories] = useState<AccountingCategory[]>([])
+  const [summary, setSummary] = useState<AccountingSummary | null>(null)
+  const [profitLossData, setProfitLossData] = useState<ProfitLossData[]>([])
+
+  const [loading, setLoading] = useState(true)
+  const [formLoading, setFormLoading] = useState(false)
+  const [showTransactionDialog, setShowTransactionDialog] = useState(false)
+  const [editingTransaction, setEditingTransaction] = useState<AccountingTransaction | null>(null)
+  const [showSettingsDialog, setShowSettingsDialog] = useState(false)
+  const [showCategoryDialog, setShowCategoryDialog] = useState(false)
+
+  // Category management state
+  const [editingCategory, setEditingCategory] = useState<AccountingCategory | null>(null)
+  const [categoryForm, setCategoryForm] = useState({
+    name: '',
+    type: 'expense' as 'revenue' | 'expense',
+    description: '',
+    color: '#ef4444',
+    icon: 'credit-card'
+  })
+
+  // Scheduled expense form state
+  const [scheduledExpenseForm, setScheduledExpenseForm] = useState({
+    name: '',
+    amount: '',
+    categoryId: '',
+    scheduleType: 'monthly' as 'monthly' | 'yearly' | 'weekly',
+    startDate: new Date().toISOString().split('T')[0],
+    description: ''
+  })
+  const [editingScheduledExpense, setEditingScheduledExpense] = useState<string | null>(null)
+
+  // Auto transaction settings
+  const [autoSettings, setAutoSettings] = useState({
+    technicianFee: 100000,
+    marketingFee: 50000,
+    autoCreateExpenses: true,
+    scheduledExpenses: [] as Array<{
+      id: string
+      name: string
+      amount: number
+      categoryId: string
+      scheduleType: 'monthly' | 'yearly' | 'weekly'
+      startDate: string
+      nextDueDate: string
+      isActive: boolean
+      description?: string
+    }>
+  })
+
+  // Filter states
+  const [activeTab, setActiveTab] = useState('transactions')
+  const [searchTerm, setSearchTerm] = useState('')
+  const [filterType, setFilterType] = useState<'all' | 'revenue' | 'expense'>('all')
+  const [filterCategory, setFilterCategory] = useState<string>('')
+  const [filterStartDate, setFilterStartDate] = useState('')
+  const [filterEndDate, setFilterEndDate] = useState('')
+
+  const [formData, setFormData] = useState({
+    type: 'revenue' as 'revenue' | 'expense',
+    category_id: '',
+    amount: '',
+    description: '',
+    reference_type: '',
+    reference_id: '',
+    date: new Date().toISOString().split('T')[0],
+    attachment_url: '',
+    notes: ''
+  })
+
+  // Function to generate sample data for testing
+  const generateSampleData = async () => {
+    try {
+      // Sample categories
+      const sampleCategories = [
+        { name: 'Paket Internet', type: 'revenue', description: 'Pembayaran langganan internet', color: '#10b981', icon: 'wifi' },
+        { name: 'Instalasi Baru', type: 'revenue', description: 'Biaya instalasi pelanggan baru', color: '#3b82f6', icon: 'plus-circle' },
+        { name: 'Fee Teknisi', type: 'expense', description: 'Biaya fee teknisi instalasi', color: '#ef4444', icon: 'wrench' },
+        { name: 'Fee Marketing', type: 'expense', description: 'Biaya fee marketing', color: '#f59e0b', icon: 'megaphone' },
+        { name: 'Sewa Kantor', type: 'expense', description: 'Biaya sewa kantor bulanan', color: '#8b5cf6', icon: 'home' },
+        { name: 'Listrik', type: 'expense', description: 'Biaya listrik kantor', color: '#f97316', icon: 'zap' },
+        { name: 'Internet Office', type: 'expense', description: 'Biaya internet kantor', color: '#06b6d4', icon: 'globe' },
+        { name: 'Gaji Karyawan', type: 'expense', description: 'Gaji karyawan bulanan', color: '#ec4899', icon: 'users' }
+      ]
+
+      // Create categories first
+      let categoryCreationErrors = []
+      for (const category of sampleCategories) {
+        try {
+          await api.post(endpoints.accounting.categories, category)
+          console.log('Category created successfully:', category.name)
+        } catch (error: any) {
+          // Category might already exist, check if it's a duplicate key error
+          if (error.response?.data?.error?.includes('duplicate key') ||
+              error.response?.data?.message?.includes('already exists') ||
+              error.response?.data?.message?.includes('sudah ada') ||
+              error.response?.data?.error?.includes('accounting_categories_name_key') ||
+              error.response?.status === 409) {
+            console.log('Category already exists:', category.name)
+          } else {
+            console.error('Error creating category:', category.name, error.response?.data || error.message)
+            categoryCreationErrors.push(category.name)
+          }
+        }
+      }
+
+      if (categoryCreationErrors.length > 0) {
+        console.log('Some categories failed to create:', categoryCreationErrors)
+        // Continue anyway as categories might already exist
+      }
+
+      // Get categories to get their IDs
+      const categoriesResponse = await api.get(endpoints.accounting.categories)
+      console.log('Categories response:', categoriesResponse.data)
+
+      // Handle different response formats - simplified approach
+      let categories = []
+      if (categoriesResponse.data?.data && Array.isArray(categoriesResponse.data.data)) {
+        // Backend returns { success: true, data: categories[] }
+        categories = categoriesResponse.data.data
+      } else if (categoriesResponse.data?.categories && Array.isArray(categoriesResponse.data.categories)) {
+        // Alternative format { success: true, data: { categories: [] } }
+        categories = categoriesResponse.data.categories
+      } else if (Array.isArray(categoriesResponse.data)) {
+        // Direct array format { success: true, data: [] }
+        categories = categoriesResponse.data
+      } else {
+        console.error('Unexpected response format:', categoriesResponse.data)
+        categories = []
+      }
+
+      console.log('Processed categories:', categories)
+
+      // Ensure categories is an array
+      if (!Array.isArray(categories) || categories.length === 0) {
+        console.error('Categories response is not an array or is empty:', categories)
+        alert('Tidak bisa mengambil data kategori. Silakan refresh halaman dan coba lagi.')
+        return
+      }
+
+      // Create a map of category names to IDs for easier lookup
+      const categoryMap = new Map()
+      categories.forEach((cat: any) => {
+        if (cat && cat.name) {
+          categoryMap.set(cat.name.toLowerCase().trim(), cat)
+        }
+      })
+
+      console.log('Category map created:', Array.from(categoryMap.keys()))
+
+      // Helper function to find category by name (case-insensitive)
+      const findCategory = (name: string) => {
+        return categoryMap.get(name.toLowerCase().trim())
+      }
+
+      // Find category IDs using case-insensitive matching
+      const internetPkg = findCategory('Paket Internet')
+      const instalasi = findCategory('Instalasi Baru')
+      const feeTeknisi = findCategory('Fee Teknisi')
+      const feeMarketing = findCategory('Fee Marketing')
+      const sewaKantor = findCategory('Sewa Kantor')
+      const listrik = findCategory('Listrik')
+      const internetOffice = findCategory('Internet Office')
+      const gaji = findCategory('Gaji Karyawan')
+
+      console.log('Found categories:', {
+        internetPkg, instalasi, feeTeknisi, feeMarketing,
+        sewaKantor, listrik, internetOffice, gaji
+      })
+
+      // Check if all required categories exist
+      if (!internetPkg || !instalasi || !feeTeknisi || !feeMarketing || !sewaKantor || !listrik || !internetOffice || !gaji) {
+        console.warn('Some categories not found, using alternative approach')
+        // Instead of failing, use existing categories or create minimal transactions
+        const existingCategories = categories.slice(0, 8) // Use first 8 categories
+        if (existingCategories.length === 0) {
+          alert('Tidak ada kategori yang tersedia. Silakan buat kategori terlebih dahulu.')
+          return
+        }
+
+        // Use available categories for sample data
+        console.log('Using available categories:', existingCategories)
+        // We'll modify the transaction creation below to use available categories
+      }
+
+      // Create sample transactions dynamically based on available categories
+      let sampleTransactions = []
+
+      // Use available categories to create sample data
+      if (categories.length > 0) {
+        const revenueCategories = categories.filter((cat: any) => cat.type === 'revenue')
+        const expenseCategories = categories.filter((cat: any) => cat.type === 'expense')
+
+        console.log('Available revenue categories:', revenueCategories.length)
+        console.log('Available expense categories:', expenseCategories.length)
+
+        // Generate revenue transactions (15 transactions)
+        for (let i = 0; i < 15; i++) {
+          if (revenueCategories.length === 0) break
+
+          const category = revenueCategories[i % revenueCategories.length]
+          const month = Math.floor(i / 5) + 1 // 1, 2, or 3
+          const day = 10 + (i % 20) // Days 10-29
+          sampleTransactions.push({
+            type: 'revenue',
+            category_id: category.id,
+            amount: 150000 + Math.floor(Math.random() * 300000), // 150k-450k
+            description: `Pembayaran ${category.name} - Pelanggan ${i + 1}`,
+            date: `2025-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`,
+            reference_type: 'customer',
+            reference_id: (i + 1).toString()
+          })
+        }
+
+        // Generate expense transactions (13 transactions)
+        for (let i = 0; i < 13; i++) {
+          if (expenseCategories.length === 0) break
+
+          const category = expenseCategories[i % expenseCategories.length]
+          const month = Math.floor(i / 4) + 1 // 1, 2, or 3
+          const day = 1 + (i % 25) // Days 1-25
+          sampleTransactions.push({
+            type: 'expense',
+            category_id: category.id,
+            amount: 50000 + Math.floor(Math.random() * 2000000), // 50k-2M
+            description: `Pengeluaran ${category.name} - ${['Januari', 'Februari', 'Maret'][month - 1]} 2025`,
+            date: `2025-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`,
+            notes: `Catatan untuk ${category.name} bulan ${['Januari', 'Februari', 'Maret'][month - 1]}`
+          })
+        }
+
+        console.log(`Generated ${sampleTransactions.length} sample transactions`)
+      } else {
+        alert('Tidak ada kategori yang tersedia. Silakan buat kategori terlebih dahulu.')
+        return
+      }
+
+      // Filter out transactions with missing category IDs
+      const validTransactions = sampleTransactions.filter(t => t.category_id)
+      console.log(`Valid transactions to create: ${validTransactions.length}`)
+
+      // Create transactions using the dynamically generated valid transactions
+      for (const transaction of validTransactions) {
+        try {
+          await api.post(endpoints.accounting.transactions, transaction)
+        } catch (error) {
+          console.log('Transaction might already exist or failed:', transaction.description)
+        }
+      }
+
+      const successMessage = `Data contoh berhasil dibuat!
+
+Kategori: ${sampleCategories.length} kategori
+Transaksi: ${sampleTransactions.length} transaksi
+Periode: Januari - Maret 2025
+
+Refresh halaman untuk melihat data.`
+      alert(successMessage)
+      await loadAllData()
+    } catch (error) {
+      console.error('Error generating sample data:', error)
+      alert('Gagal membuat data contoh. Silakan coba lagi.')
+    }
+  }
+
+  const fetchTransactions = async () => {
+    try {
+      const params = new URLSearchParams()
+      if (filterType !== 'all') params.append('type', filterType)
+      if (filterCategory) params.append('category_id', filterCategory)
+      if (filterStartDate) params.append('start_date', filterStartDate)
+      if (filterEndDate) params.append('end_date', filterEndDate)
+      if (searchTerm) params.append('search', searchTerm)
+
+      const response = await api.get(`${endpoints.accounting.transactions}?${params}`)
+      if (response.data.success) {
+        setTransactions(response.data.data.transactions)
+      }
+    } catch (error) {
+      console.error('Error fetching transactions:', error)
+    }
+  }
+
+  const fetchCategories = async () => {
+    try {
+      const response = await api.get(endpoints.accounting.categories)
+      if (response.data.success && response.data.data?.categories) {
+        setCategories(response.data.data.categories)
+      } else {
+        setCategories([])
+      }
+    } catch (error) {
+      console.error('Error fetching categories:', error)
+      setCategories([])
+    }
+  }
+
+  const fetchSummary = async () => {
+    try {
+      const params = new URLSearchParams()
+      if (filterStartDate) params.append('start_date', filterStartDate)
+      if (filterEndDate) params.append('end_date', filterEndDate)
+
+      const response = await api.get(`${endpoints.accounting.summary}?${params}`)
+      if (response.data.success) {
+        setSummary(response.data.data.summary)
+      }
+    } catch (error) {
+      console.error('Error fetching summary:', error)
+    }
+  }
+
+  const fetchProfitLoss = async () => {
+    try {
+      const params = new URLSearchParams()
+      if (filterStartDate) params.append('start_date', filterStartDate)
+      if (filterEndDate) params.append('end_date', filterEndDate)
+      params.append('group_by', 'month')
+
+      const response = await api.get(`${endpoints.accounting.profitLossReport}?${params}`)
+      if (response.data.success) {
+        setProfitLossData(response.data.data.report_data)
+      }
+    } catch (error) {
+      console.error('Error fetching profit loss data:', error)
+    }
+  }
+
+  const loadAllData = async () => {
+    setLoading(true)
+    await Promise.all([
+      fetchTransactions(),
+      fetchCategories(),
+      fetchSummary(),
+      fetchProfitLoss()
+    ])
+    setLoading(false)
+  }
+
+  // Category CRUD handlers
+  const handleSaveCategory = async () => {
+    try {
+      const categoryData = {
+        name: categoryForm.name,
+        type: categoryForm.type,
+        description: categoryForm.description,
+        color: categoryForm.color,
+        icon: categoryForm.icon
+      }
+
+      let response
+      if (editingCategory) {
+        response = await api.put(`${endpoints.accounting.categories}/${editingCategory.id}`, categoryData)
+      } else {
+        response = await api.post(endpoints.accounting.categories, categoryData)
+      }
+
+      if (response.data.success) {
+        await fetchCategories() // Refresh categories
+        setEditingCategory(null)
+        setCategoryForm({
+          name: '',
+          type: 'expense',
+          description: '',
+          color: '#ef4444',
+          icon: 'credit-card'
+        })
+        // TODO: Show success notification
+        console.log('Category saved successfully')
+      }
+    } catch (error) {
+      console.error('Error saving category:', error)
+      // TODO: Show error notification
+    }
+  }
+
+  const handleEditCategory = (category: AccountingCategory) => {
+    setEditingCategory(category)
+    setCategoryForm({
+      name: category.name,
+      type: category.type,
+      description: category.description || '',
+      color: category.color,
+      icon: category.icon
+    })
+  }
+
+  const handleDeleteCategory = async (categoryId: number) => {
+    if (!confirm('Apakah Anda yakin ingin menghapus kategori ini?')) {
+      return
+    }
+
+    try {
+      const response = await api.delete(`${endpoints.accounting.categories}/${categoryId}`)
+      if (response.data.success) {
+        await fetchCategories() // Refresh categories
+        // TODO: Show success notification
+        console.log('Category deleted successfully')
+      }
+    } catch (error) {
+      console.error('Error deleting category:', error)
+      // TODO: Show error notification
+    }
+  }
+
+  // Scheduled expense handlers
+  const handleSaveScheduledExpense = () => {
+    if (!scheduledExpenseForm.name || !scheduledExpenseForm.amount || !scheduledExpenseForm.categoryId || !scheduledExpenseForm.scheduleType || !scheduledExpenseForm.startDate) {
+      alert('Semua field wajib kecuali deskripsi harus diisi')
+      return
+    }
+
+    if (editingScheduledExpense !== null) {
+      // Edit existing scheduled expense
+      const updatedExpenses = autoSettings.scheduledExpenses.map(expense =>
+        expense.id === editingScheduledExpense
+          ? {
+              ...scheduledExpenseForm,
+              amount: parseFloat(scheduledExpenseForm.amount.toString()),
+              id: editingScheduledExpense,
+              nextDueDate: scheduledExpenseForm.startDate,
+              isActive: true
+            }
+          : expense
+      )
+      setAutoSettings(prev => ({
+        ...prev,
+        scheduledExpenses: updatedExpenses
+      }))
+      alert('Pengeluaran terjadwal berhasil diperbarui')
+    } else {
+      // Add new scheduled expense
+      const newExpense = {
+        id: Date.now().toString(),
+        name: scheduledExpenseForm.name,
+        amount: parseFloat(scheduledExpenseForm.amount.toString()),
+        categoryId: scheduledExpenseForm.categoryId,
+        scheduleType: scheduledExpenseForm.scheduleType,
+        startDate: scheduledExpenseForm.startDate,
+        description: scheduledExpenseForm.description,
+        nextDueDate: scheduledExpenseForm.startDate,
+        isActive: true
+      }
+      setAutoSettings(prev => ({
+        ...prev,
+        scheduledExpenses: [...prev.scheduledExpenses, newExpense]
+      }))
+      alert('Pengeluaran terjadwal berhasil ditambahkan')
+    }
+
+    // Reset form
+    setScheduledExpenseForm({
+      name: '',
+      amount: '',
+      categoryId: '',
+      scheduleType: 'monthly',
+      startDate: '',
+      description: ''
+    })
+    setEditingScheduledExpense(null)
+  }
+
+  const handleEditScheduledExpense = (id: string) => {
+    const expense = autoSettings.scheduledExpenses.find(exp => exp.id === id)
+    const index = autoSettings.scheduledExpenses.findIndex(exp => exp.id === id)
+    if (expense && index !== -1) {
+      setScheduledExpenseForm({
+        name: expense.name,
+        amount: expense.amount.toString(),
+        categoryId: expense.categoryId,
+        scheduleType: expense.scheduleType,
+        startDate: expense.startDate,
+        description: expense.description || ''
+      })
+      setEditingScheduledExpense(id)
+    }
+  }
+
+  const handleDeleteScheduledExpense = (id: string) => {
+    if (!confirm('Apakah Anda yakin ingin menghapus pengeluaran terjadwal ini?')) return
+
+    const updatedExpenses = autoSettings.scheduledExpenses.filter(expense => expense.id !== id)
+    setAutoSettings(prev => ({
+      ...prev,
+      scheduledExpenses: updatedExpenses
+    }))
+    alert('Pengeluaran terjadwal berhasil dihapus')
+  }
+
+  const handleToggleScheduledExpense = (id: string) => {
+    const updatedExpenses = autoSettings.scheduledExpenses.map(expense =>
+      expense.id === id
+        ? { ...expense, isActive: !expense.isActive }
+        : expense
+    )
+    setAutoSettings(prev => ({
+      ...prev,
+      scheduledExpenses: updatedExpenses
+    }))
+  }
+
+  useEffect(() => {
+    loadAllData()
+  }, [filterType, filterCategory, filterStartDate, filterEndDate, searchTerm])
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setFormLoading(true)
+
+    try {
+      const payload = {
+        type: formData.type,
+        amount: parseFloat(formData.amount),
+        description: formData.description.trim(),
+        category_id: formData.category_id ? parseInt(formData.category_id) : null,
+        reference_type: formData.reference_type || null,
+        reference_id: formData.reference_id ? parseInt(formData.reference_id) : null,
+        date: formData.date,
+        attachment_url: formData.attachment_url || null,
+        notes: formData.notes || null
+      }
+
+      if (editingTransaction) {
+        await api.put(`${endpoints.accounting.transactions}/${editingTransaction.id}`, payload)
+      } else {
+        await api.post(endpoints.accounting.transactions, payload)
+      }
+
+      setShowTransactionDialog(false)
+      resetForm()
+      loadAllData()
+    } catch (error) {
+      console.error('Error saving transaction:', error)
+    } finally {
+      setFormLoading(false)
+    }
+  }
+
+  const handleEdit = (transaction: AccountingTransaction) => {
+    setEditingTransaction(transaction)
+    setFormData({
+      type: transaction.type,
+      category_id: transaction.category?.toString() || '',
+      amount: transaction.amount.toString(),
+      description: transaction.description,
+      reference_type: transaction.reference_type || '',
+      reference_id: transaction.reference_id?.toString() || '',
+      date: transaction.date,
+      attachment_url: transaction.attachment_url || '',
+      notes: transaction.notes || ''
+    })
+    setShowTransactionDialog(true)
+  }
+
+  const handleDelete = async (transaction: AccountingTransaction) => {
+    if (!confirm('Apakah Anda yakin ingin menghapus transaksi ini?')) return
+
+    try {
+      await api.delete(`${endpoints.accounting.transactions}/${transaction.id}`)
+      loadAllData()
+    } catch (error) {
+      console.error('Error deleting transaction:', error)
+    }
+  }
+
+  const resetForm = () => {
+    setEditingTransaction(null)
+    setFormData({
+      type: 'revenue',
+      category_id: '',
+      amount: '',
+      description: '',
+      reference_type: '',
+      reference_id: '',
+      date: new Date().toISOString().split('T')[0],
+      attachment_url: '',
+      notes: ''
+    })
+  }
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('id-ID', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
+    })
+  }
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('id-ID', {
+      style: 'currency',
+      currency: 'IDR'
+    }).format(amount)
+  }
+
+  const groupTransactionsByDate = (transactions: AccountingTransaction[]) => {
+    const grouped: { [date: string]: AccountingTransaction[] } = {}
+
+    transactions.forEach(transaction => {
+      const date = transaction.date
+      if (!grouped[date]) {
+        grouped[date] = []
+      }
+      grouped[date].push(transaction)
+    })
+
+    return Object.entries(grouped)
+      .sort(([dateA], [dateB]) => new Date(dateA).getTime() - new Date(dateB).getTime())
+      .map(([date, transactions]) => ({
+        date,
+        transactions: transactions.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()),
+        totalRevenue: transactions.filter(t => t.type === 'revenue').reduce((sum, t) => sum + t.amount, 0),
+        totalExpense: transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0),
+        netIncome: 0
+      })).map(day => ({
+        ...day,
+        netIncome: day.totalRevenue - day.totalExpense
+      }))
+  }
+
+  const [allTransactionsForPDF, setAllTransactionsForPDF] = useState<AccountingTransaction[]>([])
+  const [reportType, setReportType] = useState<'summary' | 'detailed'>('summary')
+
+  const exportToPDF = async () => {
+    if (typeof window === 'undefined' || !window.html2pdf) {
+      alert('Library PDF belum dimuat. Silakan coba lagi dalam beberapa detik.')
+      return
+    }
+
+    try {
+      // Tampilkan loading state
+      const exportButton = document.querySelector('[data-pdf-export]')
+      if (exportButton) {
+        exportButton.setAttribute('disabled', 'true')
+        exportButton.innerHTML = '<RefreshCw className="h-4 w-4 mr-2 animate-spin" />Mengambil data...'
+      }
+
+      // Ambil semua data transaksi untuk PDF tanpa pagination
+      const params = new URLSearchParams()
+      if (filterType !== 'all') params.append('type', filterType)
+      if (filterCategory) params.append('category_id', filterCategory)
+      if (filterStartDate) params.append('start_date', filterStartDate)
+      if (filterEndDate) params.append('end_date', filterEndDate)
+
+      // Ambil semua data dengan limit besar
+      params.append('limit', '1000')
+
+      const response = await api.get(`${endpoints.accounting.transactions}?${params}`)
+      if (response.data.success) {
+        setAllTransactionsForPDF(response.data.data.transactions)
+
+        // Tunggu sebentar agar state terupdate
+        setTimeout(async () => {
+          const element = document.getElementById('accounting-report-content')
+          if (!element) {
+            alert('Konten laporan tidak ditemukan')
+            return
+          }
+
+          if (exportButton) {
+            exportButton.innerHTML = '<RefreshCw className="h-4 w-4 mr-2 animate-spin" />Membuat PDF...'
+          }
+
+          const opt = {
+            margin: reportType === 'detailed' ? 0.2 : 0.3,
+            filename: `laporan-${reportType === 'detailed' ? 'rinci-harian' : 'keuangan'}-${new Date().toISOString().split('T')[0]}.pdf`,
+            image: { type: 'jpeg', quality: 0.95 },
+            html2canvas: { scale: 2 },
+            jsPDF: {
+              unit: 'cm',
+              format: reportType === 'detailed' ? 'a4' : 'a4',
+              orientation: reportType === 'detailed' ? 'landscape' : 'portrait'
+            }
+          }
+
+          await window.html2pdf().set(opt).from(element).save()
+
+          // Restore button state
+          if (exportButton) {
+            exportButton.removeAttribute('disabled')
+            exportButton.innerHTML = '<Download className="h-4 w-4 mr-2" />Export PDF'
+          }
+        }, 500)
+      }
+    } catch (error) {
+      console.error('Error generating PDF:', error)
+      alert('Gagal membuat PDF. Silakan coba lagi.')
+
+      // Restore button state
+      const exportButton = document.querySelector('[data-pdf-export]')
+      if (exportButton) {
+        exportButton.removeAttribute('disabled')
+        exportButton.innerHTML = '<Download className="h-4 w-4 mr-2" />Export PDF'
+      }
+    }
+  }
+
+  const filteredTransactions = transactions.filter(transaction => {
+    const matchesType = filterType === 'all' || transaction.type === filterType
+    const matchesCategory = !filterCategory || transaction.category?.toString() === filterCategory
+    const matchesSearch = !searchTerm ||
+      transaction.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      transaction.category?.name.toLowerCase().includes(searchTerm.toLowerCase())
+    return matchesType && matchesCategory && matchesSearch
+  })
+
+  const transactionColumns: DataTableColumn<AccountingTransaction>[] = [
+    {
+      key: 'date',
+      title: 'Tanggal',
+      sortable: true,
+      render: (value) => formatDate(value as string),
+      width: '120px'
+    },
+    {
+      key: 'description',
+      title: 'Deskripsi',
+      sortable: true,
+      render: (value, record) => (
+        <div>
+          <div className="font-medium">{value}</div>
+          {record.category && (
+            <div className="text-sm text-gray-500 flex items-center gap-1">
+              <span
+                className="w-2 h-2 rounded-full"
+                style={{ backgroundColor: record.category.color }}
+              />
+              {record.category.name}
+            </div>
+          )}
+        </div>
+      )
+    },
+    {
+      key: 'type',
+      title: 'Tipe',
+      sortable: true,
+      render: (value) => (
+        <Badge
+          variant={value === 'revenue' ? 'default' : 'destructive'}
+          className={value === 'revenue' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}
+        >
+          {value === 'revenue' ? 'Pemasukan' : 'Pengeluaran'}
+        </Badge>
+      ),
+      width: '120px'
+    },
+    {
+      key: 'amount',
+      title: 'Jumlah',
+      sortable: true,
+      render: (value, record) => (
+        <span className={`font-semibold ${record.type === 'revenue' ? 'text-green-600' : 'text-red-600'}`}>
+          {record.type === 'revenue' ? '+' : '-'}{formatCurrency(value as number)}
+        </span>
+      ),
+      width: '150px'
+    },
+    {
+      key: 'notes',
+      title: 'Catatan',
+      render: (value) => value ? (
+        <span className="text-sm text-gray-600 line-clamp-2">{value}</span>
+      ) : '-',
+      width: '200px'
+    },
+    {
+      key: 'actions' as any,
+      title: 'Aksi',
+      render: (_, record) => (
+        <div className="flex space-x-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => handleEdit(record)}
+          >
+            <Edit2 className="h-4 w-4" />
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => handleDelete(record)}
+            className="text-red-600 hover:text-red-700"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      ),
+      width: '120px'
+    }
+  ]
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-3xl font-bold">Akunting</h1>
+          <p className="text-gray-600">Kelola pemasukan dan pengeluaran bisnis Anda</p>
+        </div>
+        <div className="flex space-x-3">
+          <Button
+            variant="outline"
+            onClick={() => setShowCategoryDialog(true)}
+          >
+            <Tag className="h-4 w-4 mr-2" />
+            Kelola Kategori
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => setShowSettingsDialog(true)}
+          >
+            <Settings className="h-4 w-4 mr-2" />
+            Pengaturan Otomatis
+          </Button>
+          <Button
+            onClick={() => {
+              resetForm()
+              setShowTransactionDialog(true)
+            }}
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Transaksi Baru
+          </Button>
+        </div>
+      </div>
+
+      {/* Summary Cards */}
+      {summary && (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Pemasukan</CardTitle>
+              <TrendingUp className="h-4 w-4 text-green-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-green-600">
+                {formatCurrency(summary.revenue)}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {summary.revenue_count} transaksi
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Pengeluaran</CardTitle>
+              <TrendingDown className="h-4 w-4 text-red-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-red-600">
+                {formatCurrency(summary.expense)}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {summary.expense_count} transaksi
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Laba Bersih</CardTitle>
+              <DollarSign className="h-4 w-4" />
+            </CardHeader>
+            <CardContent>
+              <div className={`text-2xl font-bold ${summary.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {formatCurrency(summary.profit)}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {summary.total_transactions} total transaksi
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Margin Laba</CardTitle>
+              <TrendingUp className="h-4 w-4" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {summary.revenue > 0
+                  ? ((summary.profit / summary.revenue) * 100).toFixed(1)
+                  : '0'
+                }%
+              </div>
+              <p className="text-xs text-muted-foreground">
+                dari total pemasukan
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="transactions">Transaksi</TabsTrigger>
+          <TabsTrigger value="reports">Laporan</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="transactions" className="space-y-4">
+          {/* Filters */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Filter</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                <div>
+                  <Label>Search</Label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                    <Input
+                      placeholder="Cari transaksi..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-9"
+                      tabIndex={0}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <Label>Tipe</Label>
+                  <select
+                    value={filterType}
+                    onChange={(e) => setFilterType(e.target.value as 'all' | 'revenue' | 'expense')}
+                    className="rounded-md border border-input bg-background px-3 py-2 text-sm w-full"
+                  >
+                    <option value="all">Semua</option>
+                    <option value="revenue">Pemasukan</option>
+                    <option value="expense">Pengeluaran</option>
+                  </select>
+                </div>
+
+                <div>
+                  <Label>Kategori</Label>
+                  <select
+                    value={filterCategory}
+                    onChange={(e) => setFilterCategory(e.target.value)}
+                    className="rounded-md border border-input bg-background px-3 py-2 text-sm w-full"
+                  >
+                    <option value="">Semua</option>
+                    {categories?.map((category) => (
+                      <option key={category.id} value={category.id.toString()}>
+                        {category.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <Label>Tanggal Mulai</Label>
+                  <Input
+                    type="date"
+                    value={filterStartDate}
+                    onChange={(e) => setFilterStartDate(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <Label>Tanggal Selesai</Label>
+                  <Input
+                    type="date"
+                    value={filterEndDate}
+                    onChange={(e) => setFilterEndDate(e.target.value)}
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Transactions Table */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Daftar Transaksi</CardTitle>
+                <CardDescription>
+                  Total {filteredTransactions.length} transaksi
+                </CardDescription>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={loadAllData}>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Refresh
+                </Button>
+                <Button variant="outline" onClick={generateSampleData} className="text-green-600 hover:text-green-700 border-green-600">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Generate Sample Data
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <DataTable
+                columns={transactionColumns}
+                data={filteredTransactions}
+                loading={loading}
+                emptyMessage="Tidak ada transaksi ditemukan"
+              />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="reports" className="space-y-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div className="flex-1">
+                <CardTitle>Laporan Laba Rugi</CardTitle>
+                <div className="flex items-center gap-4 mt-2">
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="reportType" className="text-sm text-gray-600">Jenis Laporan:</Label>
+                    <select
+                      id="reportType"
+                      value={reportType}
+                      onChange={(e) => setReportType(e.target.value as 'summary' | 'detailed')}
+                      className="rounded-md border border-input bg-background px-3 py-2 text-sm w-48"
+                    >
+                      <option value="summary">Ringkasan</option>
+                      <option value="detailed">Rincian Harian</option>
+                    </select>
+                  </div>
+                  <div className="text-sm text-gray-500">
+                    {reportType === 'detailed'
+                      ? 'Laporan transaksi detail per hari (landscape)'
+                      : 'Laporan ringkasan (portrait)'
+                    }
+                  </div>
+                </div>
+              </div>
+              <Button variant="outline" onClick={exportToPDF} data-pdf-export>
+                <Download className="h-4 w-4 mr-2" />
+                Export PDF
+              </Button>
+            </CardHeader>
+            <CardContent>
+              <div id="accounting-report-content" className="print-content">
+                {profitLossData.length > 0 || allTransactionsForPDF.length > 0 ? (
+                  <div className="space-y-4">
+                    {/* PDF Header - Hidden from normal view, only for print */}
+                    <div className="hidden print:block text-center mb-6">
+                      <h1 className="text-xl font-bold mb-2">LAPORAN KEUANGAN</h1>
+                      <p className="text-gray-600">
+                        Periode: {filterStartDate && filterEndDate
+                          ? `${formatDate(filterStartDate)} - ${formatDate(filterEndDate)}`
+                          : 'Semua Periode'
+                        }
+                      </p>
+                      <p className="text-sm text-gray-500">
+                        Dicetak: {new Date().toLocaleDateString('id-ID', {
+                          day: 'numeric',
+                          month: 'long',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </p>
+                    </div>
+
+                    {/* Summary Section - PDF Only */}
+                    <div className="hidden print:block mb-6">
+                      <table className="w-full border-collapse">
+                        <thead>
+                          <tr className="border-b-2 border-gray-300">
+                            <th className="text-left py-2 px-2">RINGKASAN</th>
+                            <th className="text-right py-2 px-2">JUMLAH</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {summary && (
+                            <>
+                              <tr className="border-b">
+                                <td className="py-2 px-2 text-gray-700">Total Pemasukan</td>
+                                <td className="py-2 px-2 text-right font-semibold text-green-600">
+                                  {formatCurrency(summary.revenue)}
+                                </td>
+                              </tr>
+                              <tr className="border-b">
+                                <td className="py-2 px-2 text-gray-700">Total Pengeluaran</td>
+                                <td className="py-2 px-2 text-right font-semibold text-red-600">
+                                  {formatCurrency(summary.expense)}
+                                </td>
+                              </tr>
+                              <tr className="border-b-2 border-gray-300">
+                                <td className="py-2 px-2 font-bold">LABA BERSIH</td>
+                                <td className={`py-2 px-2 text-right font-bold ${summary.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                  {formatCurrency(summary.profit)}
+                                </td>
+                              </tr>
+                            </>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Normal Web View */}
+                    <div className="block print:hidden">
+                      {profitLossData.map((data, index) => (
+                        <div key={index} className="border rounded-lg p-4">
+                          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                            <div>
+                              <Label className="text-sm text-gray-600">Periode</Label>
+                              <div className="font-medium">
+                                {formatDate(data.period)}
+                              </div>
+                            </div>
+                            <div>
+                              <Label className="text-sm text-gray-600">Pemasukan</Label>
+                              <div className="font-medium text-green-600">
+                                {formatCurrency(data.revenue)}
+                              </div>
+                            </div>
+                            <div>
+                              <Label className="text-sm text-gray-600">Pengeluaran</Label>
+                              <div className="font-medium text-red-600">
+                                {formatCurrency(data.expense)}
+                              </div>
+                            </div>
+                            <div>
+                              <Label className="text-sm text-gray-600">Laba</Label>
+                              <div className={`font-medium ${data.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                {formatCurrency(data.profit)}
+                              </div>
+                            </div>
+                            <div>
+                              <Label className="text-sm text-gray-600">Margin</Label>
+                              <div className="font-medium">
+                                {data.profit_margin}%
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {reportType === 'detailed' ? (
+                      /* Detailed Daily Report - PDF Only */
+                      <div className="hidden print:block">
+                        {(() => {
+                          const groupedData = groupTransactionsByDate(allTransactionsForPDF)
+                          let grandTotalRevenue = 0
+                          let grandTotalExpense = 0
+                          let grandTotalNet = 0
+
+                          groupedData.forEach(day => {
+                            grandTotalRevenue += day.totalRevenue
+                            grandTotalExpense += day.totalExpense
+                            grandTotalNet += day.netIncome
+                          })
+
+                          return (
+                            <div className="space-y-6">
+                              {/* Summary Table */}
+                              <table className="w-full border-collapse text-sm mb-6">
+                                <thead>
+                                  <tr className="border-b-2 border-gray-300">
+                                    <th className="text-left py-2 px-3">RINGKASAN LAPORAN</th>
+                                    <th className="text-right py-2 px-3">JUMLAH</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  <tr className="border-b">
+                                    <td className="py-2 px-3 text-gray-700">Total Pemasukan</td>
+                                    <td className="py-2 px-3 text-right font-semibold text-green-600">
+                                      {formatCurrency(grandTotalRevenue)}
+                                    </td>
+                                  </tr>
+                                  <tr className="border-b">
+                                    <td className="py-2 px-3 text-gray-700">Total Pengeluaran</td>
+                                    <td className="py-2 px-3 text-right font-semibold text-red-600">
+                                      {formatCurrency(grandTotalExpense)}
+                                    </td>
+                                  </tr>
+                                  <tr className="border-b-2 border-gray-300">
+                                    <td className="py-2 px-3 font-bold">LABA BERSIH</td>
+                                    <td className={`py-2 px-3 text-right font-bold ${grandTotalNet >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                      {formatCurrency(grandTotalNet)}
+                                    </td>
+                                  </tr>
+                                </tbody>
+                              </table>
+
+                              {/* Daily Breakdown */}
+                              {groupedData.map((dayData, dayIndex) => (
+                                <div key={dayData.date} className="print:break-inside-avoid">
+                                  <table className="w-full border-collapse text-xs">
+                                    <thead>
+                                      <tr className="bg-gray-100">
+                                        <th colSpan={7} className="text-left py-2 px-3 font-bold border border-gray-300">
+                                          {formatDate(dayData.date)}
+                                        </th>
+                                      </tr>
+                                      <tr className="border-b border-l border-r border-gray-300">
+                                        <th className="text-center py-1 px-1 w-8">No</th>
+                                        <th className="text-left py-1 px-2">Waktu</th>
+                                        <th className="text-left py-1 px-2">Deskripsi</th>
+                                        <th className="text-left py-1 px-2">Kategori</th>
+                                        <th className="text-right py-1 px-2 w-24">Debet</th>
+                                        <th className="text-right py-1 px-2 w-24">Kredit</th>
+                                        <th className="text-right py-1 px-2 w-24">Saldo</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {dayData.transactions.map((transaction, index) => {
+                                        const isRevenue = transaction.type === 'revenue'
+                                        const amount = transaction.amount
+                                        let dailyBalance = 0
+
+                                        // Calculate daily balance up to this transaction
+                                        dayData.transactions.slice(0, index + 1).forEach(t => {
+                                          if (t.type === 'revenue') {
+                                            dailyBalance += t.amount
+                                          } else {
+                                            dailyBalance -= t.amount
+                                          }
+                                        })
+
+                                        return (
+                                          <tr key={transaction.id} className="border-l border-r border-b border-gray-300 hover:bg-gray-50">
+                                            <td className="py-1 px-1 text-center">{index + 1}</td>
+                                            <td className="py-1 px-2 text-xs">
+                                              {new Date(transaction.created_at).toLocaleTimeString('id-ID', {
+                                                hour: '2-digit',
+                                                minute: '2-digit'
+                                              })}
+                                            </td>
+                                            <td className="py-1 px-2">{transaction.description}</td>
+                                            <td className="py-1 px-2 text-xs">
+                                              <div className="flex items-center gap-1">
+                                                {transaction.category && (
+                                                  <span
+                                                    className="w-2 h-2 rounded-full"
+                                                    style={{ backgroundColor: transaction.category.color }}
+                                                  />
+                                                )}
+                                                {transaction.category?.name || '-'}
+                                              </div>
+                                            </td>
+                                            <td className="py-1 px-2 text-right">
+                                              {isRevenue ? '' : formatCurrency(amount)}
+                                            </td>
+                                            <td className="py-1 px-2 text-right">
+                                              {isRevenue ? formatCurrency(amount) : ''}
+                                            </td>
+                                            <td className={`py-1 px-2 text-right font-medium ${dailyBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                              {formatCurrency(dailyBalance)}
+                                            </td>
+                                          </tr>
+                                        )
+                                      })}
+                                    </tbody>
+                                    <tfoot>
+                                      <tr className="border-l border-r border-t-2 border-gray-300 bg-gray-50">
+                                        <td colSpan={4} className="py-2 px-2 font-bold text-right">
+                                          Total {formatDate(dayData.date)}
+                                        </td>
+                                        <td className="py-2 px-2 text-right font-bold text-red-600">
+                                          {formatCurrency(dayData.totalExpense)}
+                                        </td>
+                                        <td className="py-2 px-2 text-right font-bold text-green-600">
+                                          {formatCurrency(dayData.totalRevenue)}
+                                        </td>
+                                        <td className={`py-2 px-2 text-right font-bold ${dayData.netIncome >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                          {formatCurrency(dayData.netIncome)}
+                                        </td>
+                                      </tr>
+                                    </tfoot>
+                                  </table>
+                                </div>
+                              ))}
+                            </div>
+                          )
+                        })()}
+                      </div>
+                    ) : (
+                      /* Summary Report - PDF Only */
+                      <div className="hidden print:block mt-6">
+                        {(() => {
+                          // Sort transactions by date
+                          const sortedTransactions = [...allTransactionsForPDF].sort((a, b) =>
+                            new Date(a.date).getTime() - new Date(b.date).getTime()
+                          )
+
+                          let runningBalance = 0
+                          let grandTotalRevenue = 0
+                          let grandTotalExpense = 0
+                          const transactionRows = sortedTransactions.map((transaction, index) => {
+                            const isRevenue = transaction.type === 'revenue'
+                            const amount = transaction.amount
+
+                            if (isRevenue) {
+                              runningBalance += amount
+                              grandTotalRevenue += amount
+                            } else {
+                              runningBalance -= amount
+                              grandTotalExpense += amount
+                            }
+
+                            return (
+                              <tr key={transaction.id} className="border-b print:break-inside-avoid">
+                                <td className="py-1 px-1 text-center">{index + 1}</td>
+                                <td className="py-1 px-2">{formatDate(transaction.date)}</td>
+                                <td className="py-1 px-2">{transaction.description}</td>
+                                <td className="py-1 px-2 text-xs">
+                                  <div className="flex items-center gap-1">
+                                    {transaction.category && (
+                                      <span
+                                        className="w-2 h-2 rounded-full"
+                                        style={{ backgroundColor: transaction.category.color }}
+                                      />
+                                    )}
+                                    {transaction.category?.name || '-'}
+                                  </div>
+                                </td>
+                                <td className="py-1 px-2 text-right">
+                                  {isRevenue ? '' : formatCurrency(amount)}
+                                </td>
+                                <td className="py-1 px-2 text-right">
+                                  {isRevenue ? formatCurrency(amount) : ''}
+                                </td>
+                                <td className={`py-1 px-2 text-right font-medium ${
+                                  runningBalance >= 0 ? 'text-green-600' : 'text-red-600'
+                                }`}>
+                                  {formatCurrency(runningBalance)}
+                                </td>
+                              </tr>
+                            )
+                          })
+
+                          return (
+                            <table className="w-full border-collapse text-sm">
+                              <thead>
+                                <tr className="border-b-2 border-gray-300">
+                                  <th className="text-left py-2 px-1 w-12">No</th>
+                                  <th className="text-left py-2 px-2">Tanggal</th>
+                                  <th className="text-left py-2 px-2">Deskripsi</th>
+                                  <th className="text-left py-2 px-2">Kategori</th>
+                                  <th className="text-right py-2 px-2 w-24">Debet</th>
+                                  <th className="text-right py-2 px-2 w-24">Kredit</th>
+                                  <th className="text-right py-2 px-2 w-28">Saldo</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {transactionRows}
+                              </tbody>
+                              <tfoot>
+                                <tr className="border-t-2 border-gray-300">
+                                  <td colSpan={4} className="py-2 px-2 font-bold">TOTAL</td>
+                                  <td className="py-2 px-2 text-right font-bold text-red-600">
+                                    {formatCurrency(grandTotalExpense)}
+                                  </td>
+                                  <td className="py-2 px-2 text-right font-bold text-green-600">
+                                    {formatCurrency(grandTotalRevenue)}
+                                  </td>
+                                  <td className={`py-2 px-2 text-right font-bold ${
+                                    (grandTotalRevenue - grandTotalExpense) >= 0 ? 'text-green-600' : 'text-red-600'
+                                  }`}>
+                                    {formatCurrency(grandTotalRevenue - grandTotalExpense)}
+                                  </td>
+                                </tr>
+                              </tfoot>
+                            </table>
+                          )
+                        })()}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">
+                    Tidak ada data laporan tersedia
+                  </div>
+                )}
+              </div>
+
+              {/* PDF Styles */}
+              <style jsx>{`
+                @media print {
+                  .print-content {
+                    font-family: 'Courier New', monospace;
+                    font-size: ${reportType === 'detailed' ? '8px' : '10px'};
+                    line-height: 1.1;
+                  }
+
+                  .print-content table {
+                    page-break-inside: auto;
+                  }
+
+                  .print-content tr {
+                    page-break-inside: avoid;
+                    page-break-after: auto;
+                  }
+
+                  .print-content thead {
+                    display: table-header-group;
+                  }
+
+                  .print-content tfoot {
+                    display: table-footer-group;
+                  }
+
+                  .print-content .print\\:break-inside-avoid {
+                    page-break-inside: avoid;
+                  }
+
+                  /* For detailed report */
+                  .print-content .space-y-6 > * + * {
+                    margin-top: 1.5rem;
+                  }
+                }
+              `}</style>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      {/* Transaction Dialog */}
+      <Dialog open={showTransactionDialog} onOpenChange={setShowTransactionDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {editingTransaction ? 'Edit Transaksi' : 'Transaksi Baru'}
+            </DialogTitle>
+            <DialogDescription>
+              Tambahkan atau edit transaksi akunting
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <Label htmlFor="type">Tipe Transaksi</Label>
+              <select
+                id="type"
+                value={formData.type}
+                onChange={(e) => {
+                  setFormData({...formData, type: e.target.value as 'revenue' | 'expense', category_id: ''})
+                }}
+                className="rounded-md border border-input bg-background px-3 py-2 text-sm w-full"
+              >
+                <option value="">Pilih tipe transaksi</option>
+                <option value="revenue">Pemasukan</option>
+                <option value="expense">Pengeluaran</option>
+              </select>
+            </div>
+
+            <div>
+              <Label htmlFor="category_id">Kategori</Label>
+              <select
+                id="category_id"
+                value={formData.category_id || ''}
+                onChange={(e) => {
+                  setFormData({...formData, category_id: e.target.value})
+                }}
+                disabled={!formData.type}
+                className="rounded-md border border-input bg-background px-3 py-2 text-sm w-full disabled:opacity-50"
+              >
+                <option value="">
+                  {formData.type ? "Pilih kategori" : "Pilih tipe transaksi dulu"}
+                </option>
+                {categories
+                  ?.filter(cat => cat.type === formData.type)
+                  .map((category) => (
+                  <option key={category.id} value={category.id.toString()}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <Label htmlFor="amount">Jumlah</Label>
+              <Input
+                id="amount"
+                type="number"
+                step="0.01"
+                placeholder="0.00"
+                value={formData.amount}
+                onChange={(e) => setFormData({...formData, amount: e.target.value})}
+                required
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="description">Deskripsi</Label>
+              <Input
+                id="description"
+                placeholder="Deskripsi transaksi"
+                value={formData.description}
+                onChange={(e) => setFormData({...formData, description: e.target.value})}
+                required
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="date">Tanggal</Label>
+              <Input
+                id="date"
+                type="date"
+                value={formData.date}
+                onChange={(e) => setFormData({...formData, date: e.target.value})}
+                required
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="notes">Catatan</Label>
+              <Textarea
+                id="notes"
+                placeholder="Catatan tambahan (opsional)"
+                value={formData.notes}
+                onChange={(e) => setFormData({...formData, notes: e.target.value})}
+                rows={3}
+              />
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setShowTransactionDialog(false)}
+              >
+                Batal
+              </Button>
+              <Button type="submit" disabled={formLoading}>
+                {formLoading ? (
+                  <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+                ) : null}
+                {editingTransaction ? 'Update' : 'Simpan'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Settings Dialog */}
+      <Dialog open={showSettingsDialog} onOpenChange={setShowSettingsDialog}>
+        <DialogContent className="max-w-2xl max-h-[85vh]">
+          <DialogHeader>
+            <DialogTitle>Pengaturan Transaksi Otomatis</DialogTitle>
+            <DialogDescription>
+              Atur biaya otomatis yang akan dibuat saat instalasi pelanggan baru
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6 max-h-[65vh] overflow-y-auto pr-2">
+            {/* Installation Fees Section */}
+            <div className="border border-gray-200 rounded-lg p-4">
+              <h3 className="text-lg font-semibold mb-4 text-gray-900">Fee Instalasi Otomatis</h3>
+
+              {/* Auto Create Expenses Toggle */}
+              <div className="flex items-center justify-between mb-6">
+              <div>
+                <Label className="text-base font-medium">Aktifkan Transaksi Otomatis</Label>
+                <p className="text-sm text-gray-600">Buat otomatis transaksi pengeluaran saat instalasi pelanggan baru</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAutoSettings(prev => ({...prev, autoCreateExpenses: !prev.autoCreateExpenses}))}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  autoSettings.autoCreateExpenses ? 'bg-blue-600' : 'bg-gray-200'
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    autoSettings.autoCreateExpenses ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* Fee Fields - Side by Side */}
+            <div className="grid grid-cols-2 gap-4">
+              {/* Technician Fee */}
+              <div>
+                <Label htmlFor="technicianFee" className="text-base font-medium">Fee Teknisi</Label>
+                <Input
+                  id="technicianFee"
+                  type="number"
+                  value={autoSettings.technicianFee}
+                  onChange={(e) => setAutoSettings(prev => ({...prev, technicianFee: parseInt(e.target.value) || 0}))}
+                  disabled={!autoSettings.autoCreateExpenses}
+                  placeholder="100000"
+                />
+              </div>
+
+              {/* Marketing Fee */}
+              <div>
+                <Label htmlFor="marketingFee" className="text-base font-medium">Fee Marketing</Label>
+                <Input
+                  id="marketingFee"
+                  type="number"
+                  value={autoSettings.marketingFee}
+                  onChange={(e) => setAutoSettings(prev => ({...prev, marketingFee: parseInt(e.target.value) || 0}))}
+                  disabled={!autoSettings.autoCreateExpenses}
+                  placeholder="50000"
+                />
+              </div>
+            </div>
+
+            {/* Scheduled Expenses Section */}
+            <div className="border border-gray-200 rounded-lg p-4 mt-6">
+              <h3 className="text-lg font-semibold mb-2 text-gray-900">Pengeluaran Terjadwal</h3>
+              <p className="text-sm text-gray-600 mb-4">Atur pengeluaran berulang yang akan dibuat otomatis berdasarkan jadwal</p>
+
+              {/* Add Scheduled Expense Form */}
+              <div className="bg-gray-50 p-4 rounded-lg mb-4">
+                <h4 className="font-medium mb-3">
+                  {editingScheduledExpense ? 'Edit Pengeluaran Terjadwal' : 'Tambah Pengeluaran Terjadwal Baru'}
+                </h4>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="scheduledName">Nama Pengeluaran</Label>
+                    <Input
+                      id="scheduledName"
+                      value={scheduledExpenseForm.name}
+                      onChange={(e) => setScheduledExpenseForm(prev => ({...prev, name: e.target.value}))}
+                      placeholder="Contoh: Sewa Kantor"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="scheduledAmount">Jumlah</Label>
+                    <Input
+                      id="scheduledAmount"
+                      type="number"
+                      value={scheduledExpenseForm.amount}
+                      onChange={(e) => setScheduledExpenseForm(prev => ({...prev, amount: e.target.value}))}
+                      placeholder="500000"
+                    />
+                  </div>
+                  <div className="relative">
+                    <Label htmlFor="scheduledCategory">Kategori</Label>
+                    <select
+                      value={scheduledExpenseForm.categoryId}
+                      onChange={(e) => setScheduledExpenseForm(prev => ({...prev, categoryId: e.target.value}))}
+                      className="rounded-md border border-input bg-background px-3 py-2 text-sm w-full"
+                    >
+                      <option value="">Pilih kategori</option>
+                      {categories
+                        ?.filter(cat => cat.type === 'expense')
+                        .map((category) => (
+                          <option key={category.id} value={category.id.toString()}>
+                            {category.name}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                  <div className="relative">
+                    <Label htmlFor="scheduledType">Jadwal</Label>
+                    <select
+                      value={scheduledExpenseForm.scheduleType}
+                      onChange={(e) =>
+                        setScheduledExpenseForm(prev => ({...prev, scheduleType: e.target.value as 'monthly' | 'yearly' | 'weekly'}))
+                      }
+                      className="rounded-md border border-input bg-background px-3 py-2 text-sm w-full"
+                    >
+                      <option value="weekly">Mingguan</option>
+                      <option value="monthly">Bulanan</option>
+                      <option value="yearly">Tahunan</option>
+                    </select>
+                  </div>
+                  <div>
+                    <Label htmlFor="scheduledDate">Tanggal Mulai</Label>
+                    <Input
+                      id="scheduledDate"
+                      type="date"
+                      value={scheduledExpenseForm.startDate}
+                      onChange={(e) => setScheduledExpenseForm(prev => ({...prev, startDate: e.target.value}))}
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <Label htmlFor="scheduledDescription">Deskripsi (Opsional)</Label>
+                    <Textarea
+                      id="scheduledDescription"
+                      value={scheduledExpenseForm.description}
+                      onChange={(e) => setScheduledExpenseForm(prev => ({...prev, description: e.target.value}))}
+                      placeholder="Deskripsi pengeluaran terjadwal"
+                      rows={2}
+                    />
+                  </div>
+                </div>
+                <div className="flex justify-end space-x-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setEditingScheduledExpense(null)
+                      setScheduledExpenseForm({
+                        name: '',
+                        amount: '',
+                        categoryId: '',
+                        scheduleType: 'monthly',
+                        startDate: new Date().toISOString().split('T')[0],
+                        description: ''
+                      })
+                    }}
+                  >
+                    Reset
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={handleSaveScheduledExpense}
+                    disabled={!scheduledExpenseForm.name || !scheduledExpenseForm.amount || !scheduledExpenseForm.categoryId || !scheduledExpenseForm.scheduleType || !scheduledExpenseForm.startDate}
+                  >
+                    {editingScheduledExpense ? 'Update' : 'Tambah'} Pengeluaran
+                  </Button>
+                </div>
+              </div>
+
+              {/* Scheduled Expenses List */}
+              <div>
+                <h4 className="font-medium mb-3">Daftar Pengeluaran Terjadwal</h4>
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {autoSettings.scheduledExpenses.length === 0 ? (
+                    <p className="text-sm text-gray-500 italic">Belum ada pengeluaran terjadwal</p>
+                  ) : (
+                    autoSettings.scheduledExpenses.map((expense) => (
+                      <div
+                        key={expense.id}
+                        className="flex items-center justify-between p-3 bg-white border rounded-lg hover:shadow-sm transition-shadow"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div>
+                            <div className="font-medium">{expense.name}</div>
+                            <div className="text-sm text-gray-500">
+                              {formatCurrency(expense.amount)} •
+                              {expense.scheduleType === 'monthly' ? 'Bulanan' :
+                               expense.scheduleType === 'yearly' ? 'Tahunan' : 'Mingguan'} •
+                              Mulai: {expense.startDate}
+                              {expense.description && ` • ${expense.description}`}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex space-x-2">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleScheduledExpense(expense.id)}
+                            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                              expense.isActive ? 'bg-green-600' : 'bg-gray-300'
+                            }`}
+                          >
+                            <span
+                              className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
+                                expense.isActive ? 'translate-x-5' : 'translate-x-1'
+                              }`}
+                            />
+                          </button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleEditScheduledExpense(expense.id)}
+                          >
+                            <Edit2 className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleDeleteScheduledExpense(expense.id)}
+                            className="text-red-600 hover:text-red-700"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+              </div>
+            </div>
+
+            {/* Info */}
+            <div className="bg-blue-50 p-4 rounded-lg">
+              <h4 className="font-medium text-blue-900 mb-2">Informasi</h4>
+              <ul className="text-sm text-blue-800 space-y-1">
+                <li><strong>Fee Instalasi:</strong> Dibuat otomatis saat pelanggan baru diinstalasi</li>
+                <li>• Kategori: "Fee Teknisi" dan "Fee Marketing"</li>
+                <li>• Dibuat saat status pelanggan berubah menjadi "Aktif"</li>
+                <li><strong>Pengeluaran Terjadwal:</strong> Dibuat berulang berdasarkan jadwal</li>
+                <li>• Opsi jadwal: Mingguan, Bulanan, atau Tahunan</li>
+                <li>• Dapat diaktifkan/nonaktifkan kapan saja</li>
+                <li>• Semua biaya dapat disesuaikan kapan saja</li>
+              </ul>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowSettingsDialog(false)}
+            >
+              Batal
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                // TODO: Save settings to backend
+                console.log('Saving settings:', autoSettings)
+                setShowSettingsDialog(false)
+              }}
+            >
+              Simpan Pengaturan
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Category Management Dialog */}
+      <Dialog open={showCategoryDialog} onOpenChange={setShowCategoryDialog}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Kelola Kategori Akunting</DialogTitle>
+            <DialogDescription>
+              Tambah, edit, atau hapus kategori untuk transaksi pemasukan dan pengeluaran
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6">
+            {/* Add/Edit Category Form */}
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <h3 className="font-medium mb-4">
+                {editingCategory ? 'Edit Kategori' : 'Tambah Kategori Baru'}
+              </h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="categoryName">Nama Kategori</Label>
+                  <Input
+                    id="categoryName"
+                    value={categoryForm.name}
+                    onChange={(e) => setCategoryForm(prev => ({...prev, name: e.target.value}))}
+                    placeholder="Contoh: Tagihan Internet"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="categoryType">Tipe Kategori</Label>
+                  <select
+                    value={categoryForm.type}
+                    onChange={(e) =>
+                      setCategoryForm(prev => ({...prev, type: e.target.value as 'revenue' | 'expense'}))
+                    }
+                    className="rounded-md border border-input bg-background px-3 py-2 text-sm w-full"
+                  >
+                    <option value="revenue">Pemasukan</SelectItem>
+                    <option value="expense">Pengeluaran</SelectItem>
+                  </select>
+                </div>
+                <div>
+                  <Label htmlFor="categoryColor">Warna</Label>
+                  <Input
+                    id="categoryColor"
+                    type="color"
+                    value={categoryForm.color}
+                    onChange={(e) => setCategoryForm(prev => ({...prev, color: e.target.value}))}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="categoryIcon">Icon</Label>
+                  <select
+                    value={categoryForm.icon}
+                    onChange={(e) => setCategoryForm(prev => ({...prev, icon: e.target.value}))}
+                    className="rounded-md border border-input bg-background px-3 py-2 text-sm w-full"
+                  >
+                    <option value="credit-card">💳 Credit Card</option>
+                    <option value="tools">🔧 Tools</option>
+                    <option value="trending-up">📈 Trending Up</option>
+                    <option value="users">👥 Users</option>
+                    <option value="home">🏠 Home</option>
+                    <option value="car">🚗 Car</option>
+                    <option value="shopping-cart">🛒 Cart</option>
+                    <option value="heart">❤️ Health</option>
+                    <option value="book">📚 Education</option>
+                    <option value="more-horizontal">⋯ Lainnya</option>
+                  </select>
+                </div>
+                <div className="col-span-2">
+                  <Label htmlFor="categoryDescription">Deskripsi</Label>
+                  <Textarea
+                    id="categoryDescription"
+                    value={categoryForm.description}
+                    onChange={(e) => setCategoryForm(prev => ({...prev, description: e.target.value}))}
+                    placeholder="Deskripsi kategori (opsional)"
+                    rows={2}
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end mt-4 space-x-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setEditingCategory(null)
+                    setCategoryForm({
+                      name: '',
+                      type: 'expense',
+                      description: '',
+                      color: '#ef4444',
+                      icon: 'credit-card'
+                    })
+                  }}
+                >
+                  Reset
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleSaveCategory}
+                  disabled={!categoryForm.name || !categoryForm.type}
+                >
+                  {editingCategory ? 'Update' : 'Tambah'} Kategori
+                </Button>
+              </div>
+            </div>
+
+            {/* Categories List */}
+            <div>
+              <h3 className="font-medium mb-4">Daftar Kategori</h3>
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {categories
+                  ?.sort((a, b) => {
+                    if (a.type !== b.type) return a.type === 'revenue' ? -1 : 1
+                    return a.name.localeCompare(b.name)
+                  })
+                  .map((category) => (
+                    <div
+                      key={category.id}
+                      className="flex items-center justify-between p-3 bg-white border rounded-lg hover:shadow-sm transition-shadow"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="w-4 h-4 rounded-full"
+                          style={{ backgroundColor: category.color }}
+                        />
+                        <div>
+                          <div className="font-medium">{category.name}</div>
+                          <div className="text-sm text-gray-500">
+                            {category.type === 'revenue' ? 'Pemasukan' : 'Pengeluaran'}
+                            {category.description && ` • ${category.description}`}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex space-x-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleEditCategory(category)}
+                        >
+                          <Edit2 className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleDeleteCategory(category.id)}
+                          className="text-red-600 hover:text-red-700"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setShowCategoryDialog(false)
+                setEditingCategory(null)
+                setCategoryForm({
+                  name: '',
+                  type: 'expense',
+                  description: '',
+                  color: '#ef4444',
+                  icon: 'credit-card'
+                })
+              }}
+            >
+              Tutup
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* html2pdf.js Library for PDF Export */}
+      <Script
+        src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"
+        strategy="afterInteractive"
+        onLoad={() => {
+          console.log('html2pdf.js loaded successfully')
+        }}
+        onError={(e) => {
+          console.error('Failed to load html2pdf.js:', e)
+        }}
+      />
+    </div>
+  )
+}

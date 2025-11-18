@@ -1,6 +1,7 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
+import { flushSync } from 'react-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui'
 import {
   Users,
@@ -21,6 +22,8 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Settings,
+  Wifi,
 } from 'lucide-react'
 import { Button } from '@/components/ui'
 import { Input } from '@/components/ui'
@@ -34,6 +37,8 @@ import { API_BASE_URL } from '@/lib/api'
 import CustomerMap from '@/components/CustomerMap'
 import CoordinateMap from '@/components/CoordinateMap'
 import RegionModal from '@/components/RegionModal'
+import CustomerDefaultSettingsModal from '@/components/CustomerDefaultSettingsModal'
+import { useCustomerDefaults } from '@/hooks/useCustomerDefaults'
 
 interface Customer {
   id: string
@@ -88,6 +93,8 @@ interface Package {
   price: number
   speed: string
   description?: string
+  installation_fee?: number
+  installation_description?: string
   isActive: boolean
 }
 
@@ -104,6 +111,7 @@ interface Router {
 }
 
 interface FormData {
+  customer_id: string
   name: string
   phone: string
   nik: string
@@ -154,6 +162,7 @@ export default function CustomersPage() {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null)
+  const editingCustomerData = useRef<Customer | null>(null)
   const [showRegionModal, setShowRegionModal] = useState(false)
   const [regions, setRegions] = useState<any[]>([])
   const [odps, setODPs] = useState<any[]>([])
@@ -168,6 +177,7 @@ export default function CustomersPage() {
   const [bulkAction, setBulkAction] = useState<'delete' | 'changeRouter' | 'changeStatus' | 'changeRegion' | 'changeCycle' | null>(null)
   const [submittingBulk, setSubmittingBulk] = useState(false)
   const [formData, setFormData] = useState<FormData>({
+    customer_id: '',
     name: '',
     phone: '',
     nik: '',
@@ -192,6 +202,10 @@ export default function CustomersPage() {
   const [fetchingStatus, setFetchingStatus] = useState<string | null>(null)
   const [lastStatusRefresh, setLastStatusRefresh] = useState<Date | null>(null)
 
+  // Customer defaults hook
+  const { defaults, getDefaultValue } = useCustomerDefaults()
+  const [showSettingsModal, setShowSettingsModal] = useState(false)
+
   useEffect(() => {
     fetchDashboardStats()
     fetchCustomers()
@@ -199,7 +213,99 @@ export default function CustomersPage() {
     fetchRegions()
     fetchRouters()
     fetchODPs()
+    // Preload installation fees for both billing types
+    fetchInstallationFee('prepaid')
+    fetchInstallationFee('postpaid')
   }, [currentPage, pageSize, searchQuery, filterStatus, filterPackage, filterRouter, filterRegion, sortField, sortDirection])
+
+  // Auto-generate PPPoE username when customer_id changes or when suffix changes in settings
+  useEffect(() => {
+    if (formData.customer_id && defaults.pppoe_suffix && !isEditing) {
+      // Only auto-generate if username is empty or customer_id has changed (only in create mode)
+      if (!formData.pppoe_username || (formData.customer_id && !formData.pppoe_username.includes(formData.customer_id))) {
+        const suffix = getDefaultValue('pppoe_suffix', 'isp')
+        const generatedUsername = `${formData.customer_id}@${suffix}`
+        setFormData(prev => ({
+          ...prev,
+          pppoe_username: generatedUsername
+        }))
+      }
+    }
+  }, [formData.customer_id, defaults.pppoe_suffix, getDefaultValue, isEditing])
+
+  
+  // FIXED COORDINATE PROTECTION - prevent incorrect restore during edit mode
+  useEffect(() => {
+    if (isEditing && editingCustomerData.current && showCreateModal) {
+      const customer = editingCustomerData.current
+
+      // Only restore if customer has ORIGINAL coordinates that are different from current form data
+      // AND current form data is NOT user input (higher precision)
+      const originalCoords = {
+        lat: parseFloat(String(customer.latitude || 0)),
+        lng: parseFloat(String(customer.longitude || 0))
+      }
+      const currentCoords = {
+        lat: parseFloat(String(formData.latitude || 0)),
+        lng: parseFloat(String(formData.longitude || 0))
+      }
+
+      const hasOriginalCoords = !isNaN(originalCoords.lat) && !isNaN(originalCoords.lng)
+      const hasUserInput = formData.latitude && formData.longitude
+
+      if (hasOriginalCoords && hasUserInput) {
+        // Check if current coordinates are significantly different from database (precision loss)
+        const coordDifference = {
+          lat: Math.abs(currentCoords.lat - originalCoords.lat),
+          lng: Math.abs(currentCoords.lng - originalCoords.lng)
+        }
+
+        // Only restore if the difference is too large (indicates unwanted reset)
+        const needsRestore = coordDifference.lat > 0.0001 || coordDifference.lng > 0.0001
+
+        if (needsRestore) {
+          console.log('🚨 UNWANTED COORDINATE CHANGE DETECTED! Restoring to database values...')
+          console.log('Database coords:', originalCoords)
+          console.log('Current coords:', currentCoords)
+          console.log('Difference:', coordDifference)
+
+          // Restore to database values with correct type (string to preserve precision)
+          setFormData(prev => ({
+            ...prev,
+            latitude: customer.latitude,
+            longitude: customer.longitude
+          }))
+          console.log('✅ Coordinates restored to database values')
+        }
+      }
+    }
+  }, [isEditing, showCreateModal, formData.latitude, formData.longitude]) // Monitor coordinates constantly
+
+  // Monitor ALL form data changes to catch unexpected resets
+  useEffect(() => {
+    console.log('📊 FORM DATA CHANGED:', {
+      isEditing,
+      showCreateModal,
+      package_id: formData.package_id,
+      latitude: formData.latitude,
+      longitude: formData.longitude,
+      odp_id: formData.odp_id,
+      odp_port: formData.odp_port,
+      customer_id: formData.customer_id,
+      pppoe_username: formData.pppoe_username
+    })
+  }, [formData, isEditing, showCreateModal]) // Monitor all form changes
+
+  // Auto-generate customer ID when create modal opens
+  useEffect(() => {
+    const generateID = async () => {
+      if (showCreateModal && !formData.customer_id && !isEditing) {
+        await generateCustomerID()
+      }
+    }
+
+    generateID()
+  }, [showCreateModal, isEditing, formData.customer_id])
 
   // Auto refresh connection status every 30 seconds
   useEffect(() => {
@@ -271,6 +377,16 @@ export default function CustomersPage() {
       if (response.data.success) {
         const customerList = response.data.data.customers || []
 
+        // Debug coordinates for all customers
+        console.log('🔍 API Response - Customer Coordinates Check:')
+        customerList.forEach((customer: any, index: number) => {
+          console.log(`Customer ${index + 1} (${customer.customer_id}):`)
+          console.log(`  - Name: ${customer.name}`)
+          console.log(`  - Latitude: ${customer.latitude} (${typeof customer.latitude})`)
+          console.log(`  - Longitude: ${customer.longitude} (${typeof customer.longitude})`)
+          console.log(`  - Has Default Coords: ${customer.latitude === -6.563234 && customer.longitude === 107.741418}`)
+        })
+
         // Add default connection status (offline) to all customers
         const customersWithDefaultStatus = customerList.map((customer: Customer) => ({
           ...customer,
@@ -313,8 +429,8 @@ export default function CustomersPage() {
               customerId: customer.id,
               connectionStatus: connectionStatus
             }
-          } catch (error) {
-            console.warn(`Failed to fetch status for ${customer.pppoe_username}:`, error.message)
+          } catch (error: any) {
+            console.warn(`Failed to fetch status for ${customer.pppoe_username}:`, error?.message || error)
             return {
               customerId: customer.id,
               connectionStatus: { online: false, status: 'offline' }
@@ -439,20 +555,16 @@ export default function CustomersPage() {
   const fetchODPs = async () => {
     try {
       setFetchingODPs(true)
-      console.log('🔄 Fetching ODPs...')
       const response = await api.get(endpoints.odp.list)
-      console.log('✅ ODPs response:', response.data)
 
       if (response.data.success) {
         const odpList = response.data.data || []
-        console.log(`📋 Found ${odpList.length} ODPs`)
         setODPs(Array.isArray(odpList) ? odpList : [])
       } else {
-        console.error('❌ API Error:', response.data.message)
         setODPs([])
       }
     } catch (err: any) {
-      console.error('❌ Error fetching ODPs:', err)
+      console.error('Error fetching ODPs:', err)
       setODPs([])
     } finally {
       setFetchingODPs(false)
@@ -469,7 +581,25 @@ export default function CustomersPage() {
     setError(null)
 
     try {
+      console.log('🚀 SUBMIT DEBUG - Form data before API call:', {
+        isEditing,
+        editingCustomerId,
+        customer_id: formData.customer_id,
+        name: formData.name,
+        latitude: formData.latitude,
+        longitude: formData.longitude,
+        latitude_type: typeof formData.latitude,
+        longitude_type: typeof formData.longitude,
+        package_id: formData.package_id,
+        package_id_type: typeof formData.package_id,
+        odp_id: formData.odp_id,
+        odp_id_type: typeof formData.odp_id,
+        odp_port: formData.odp_port,
+        odp_port_type: typeof formData.odp_port
+      })
+
       const customerData = {
+        customer_id: formData.customer_id || null,
         name: formData.name,
         phone: formData.phone,
         nik: formData.nik || null,
@@ -489,6 +619,8 @@ export default function CustomersPage() {
         odp_address: formData.odp_address || null,
         odp_port: formData.odp_port || null
       }
+
+      console.log('📤 SUBMIT DEBUG - customerData sent to API:', customerData)
 
       let response
       if (isEditing && editingCustomerId) {
@@ -519,36 +651,114 @@ export default function CustomersPage() {
     }
   }
 
+  const generatePPPoEUsername = () => {
+    if (formData.customer_id) {
+      const suffix = getDefaultValue('pppoe_suffix', 'isp')
+      const generatedUsername = `${formData.customer_id}@${suffix}`
+      setFormData(prev => ({
+        ...prev,
+        pppoe_username: generatedUsername
+      }))
+    }
+  }
+
+  const generateCustomerID = async () => {
+    try {
+      // Get next sequence from API
+      const response = await api.get(endpoints.customers.nextSequence)
+
+      if (response.data.success) {
+        const generatedCustomerID = response.data.data.customer_id
+
+        setFormData(prev => ({
+          ...prev,
+          customer_id: generatedCustomerID,
+          pppoe_username: `${generatedCustomerID}@${getDefaultValue('pppoe_suffix', 'isp')}`
+        }))
+      }
+    } catch (error) {
+      console.error('Error generating customer ID:', error)
+      // Fallback to local generation
+      const today = new Date()
+      const dateStr = today.getFullYear().toString().slice(-2) +  // YY
+                     (today.getMonth() + 1).toString().padStart(2, '0') +  // MM
+                     today.getDate().toString().padStart(2, '0')  // DD
+      const fallbackSequence = Math.floor(Math.random() * 100000) // Random fallback
+      const generatedCustomerID = dateStr + fallbackSequence.toString().padStart(5, '0')
+
+      setFormData(prev => ({
+        ...prev,
+        customer_id: generatedCustomerID,
+        pppoe_username: `${generatedCustomerID}@${getDefaultValue('pppoe_suffix', 'isp')}`
+      }))
+    }
+  }
+
   const handleEditCustomer = (customer: Customer) => {
-    // Set form data with selected customer data
-    setFormData({
+    console.log('🔧 handleEditCustomer called with customer data:', {
+      customer_id: customer.customer_id,
       name: customer.name,
-      phone: customer.phone,
-      nik: customer.nik || '',
-      address: customer.address || '',
+      package_id: customer.package_id,
       latitude: customer.latitude,
       longitude: customer.longitude,
-      package_id: customer.package_id || '',
-      pppoe_username: customer.pppoe_username || '',
-      pppoe_password: customer.pppoe_password || '',
-      billing_type: customer.billing_type || 'postpaid',
-      siklus: customer.siklus || 'profile',
-      router: customer.router || 'all',
-      region: customer.region_id || '',
-      // status field removed - customer status will be determined automatically by billing cycle
-      odp_id: customer.odp_id || '',
-      odp_name: customer.odp_name || '',
-      odp_address: customer.odp_address || '',
-      odp_port: customer.odp_port || ''
+      latitude_type: typeof customer.latitude,
+      longitude_type: typeof customer.longitude,
+      odp_id: customer.odp_id,
+      odp_name: customer.odp_name,
+      odp_address: customer.odp_address,
+      odp_port: customer.odp_port
     })
 
-    // Set editing state
+    // Log if coordinates seem wrong (match default values)
+    if (customer.latitude === -6.563234 && customer.longitude === 107.741418) {
+      console.log('⚠️ WARNING: Using default coordinate values! API returned default coordinates instead of saved ones!')
+      console.log('This suggests either:')
+      console.log('1. API query not returning the correct coordinates')
+      console.log('2. Database not saving coordinates properly')
+      console.log('3. Coordinates were reset somewhere in the backend')
+    }
+
+    // Store customer data in ref for persistence
+    editingCustomerData.current = customer
+
+    // Fetch ODPs to ensure they're loaded for the dropdown
+    fetchODPs()
+    fetchRegions() // Also fetch regions for region dropdown
+
+    // Set editing state FIRST
     setIsEditing(true)
     setEditingCustomerId(customer.id)
 
     // Close detail modal and open create modal for editing
     setShowDetailModal(false)
     setShowCreateModal(true)
+
+    // Set form data immediately after state changes - handle undefined properly
+    const formDataToSet = {
+      customer_id: customer.customer_id || '',
+      name: customer.name,
+      phone: customer.phone,
+      nik: customer.nik || '',
+      address: customer.address || '',
+      latitude: customer.latitude,
+      longitude: customer.longitude,
+      package_id: customer.package_id ? customer.package_id.toString() : '',
+      pppoe_username: customer.pppoe_username || '',
+      pppoe_password: customer.pppoe_password || '',
+      billing_type: customer.billing_type || 'postpaid',
+      siklus: customer.siklus || 'profile',
+      router: customer.router || 'all',
+      region: customer.region_id || '',
+      status: customer.status || 'inactive',
+      odp_id: customer.odp_id ? customer.odp_id.toString() : '',
+      odp_name: customer.odp_name || '',
+      odp_address: customer.odp_address || '',
+      odp_port: customer.odp_port ? customer.odp_port.toString() : ''
+    }
+
+    console.log('📝 Setting form data to:', formDataToSet)
+    setFormData(formDataToSet)
+    console.log('✅ handleEditCustomer completed')
   }
 
   const handleDeleteCustomer = async (customerId: string) => {
@@ -856,6 +1066,81 @@ export default function CustomersPage() {
     return router || '-'
   }
 
+  // State for installation fee cache
+  const [installationFeeCache, setInstallationFeeCache] = useState<{[key: string]: number}>({})
+
+  // Function to fetch installation fee by billing type and package
+  const fetchInstallationFee = async (billingType: string, packageId?: string): Promise<number> => {
+    const cacheKey = `${billingType}-${packageId || 'default'}`
+
+    // Return cached value if available
+    if (installationFeeCache[cacheKey] !== undefined) {
+      return installationFeeCache[cacheKey]
+    }
+
+    try {
+      const params = packageId ? `?package_id=${packageId}` : ''
+      const response = await api.get(endpoints.installationFees.calculate(billingType) + params)
+      if (response.data.success) {
+        const fee = response.data.data.installation_fee
+        // Cache the result
+        setInstallationFeeCache(prev => ({ ...prev, [cacheKey]: fee }))
+        console.log(`Installation fee for ${billingType}${packageId ? ' package ' + packageId : ''}: Rp ${fee}`)
+        return fee
+      }
+    } catch (error) {
+      console.error('Error fetching installation fee:', error)
+    }
+
+    // Return default fee if API fails
+    return billingType === 'prepaid' ? 0 : 50000
+  }
+
+  // Function to calculate total billing
+  const calculateTotalBilling = async (packagePrice?: number, packageId?: string, billingType?: string): Promise<number> => {
+    if (!billingType) return packagePrice || 0
+
+    // Get installation fee based on billing type and package
+    const installationFee = await fetchInstallationFee(billingType, packageId)
+
+    if (!packagePrice) return installationFee
+
+    switch (billingType) {
+      case 'prepaid':
+        return packagePrice + installationFee // Prabayar: bayar paket + instalasi
+      case 'postpaid':
+        return installationFee // Pascabayar: hanya bayar instalasi awal
+      default:
+        return installationFee
+    }
+  }
+
+  // Sync version of calculateTotalBilling for immediate display (uses cached values)
+  const calculateTotalBillingSync = (packagePrice?: number, packageId?: string, billingType?: string): number => {
+    if (!billingType) return packagePrice || 0
+
+    // Get cached installation fee or default
+    const cacheKey = `${billingType}-${packageId || 'default'}`
+    const installationFee = installationFeeCache[cacheKey] ?? (billingType === 'prepaid' ? 0 : 50000)
+
+    if (!packagePrice) return installationFee
+
+    switch (billingType) {
+      case 'prepaid':
+        return packagePrice + installationFee // Prabayar: bayar paket + instalasi
+      case 'postpaid':
+        return installationFee // Pascabayar: hanya bayar instalasi awal
+      default:
+        return installationFee
+    }
+  }
+
+  // Function to get selected package info
+  const getSelectedPackage = () => {
+    if (!formData.package_id) return null
+    return packages.find(p => p.id.toString() === formData.package_id) || null
+  }
+
   const getConnectionStatus = (customer: Customer) => {
     // Priority 1: Check if customer is suspended (from billing or status)
     if (customer.status === 'suspended' || customer.status === 'inactive' || customer.billing_status === 'overdue') {
@@ -913,27 +1198,34 @@ export default function CustomersPage() {
   }
 
   const resetForm = () => {
+    // Use default values from settings
     setFormData({
+      customer_id: '',
       name: '',
       phone: '',
       nik: '',
       address: '',
       latitude: undefined,
       longitude: undefined,
-      package_id: '',
+      package_id: getDefaultValue('package_id', ''),
       pppoe_username: '',
-      pppoe_password: '',
-      billing_type: 'postpaid',
-      siklus: 'profile',
-            router: 'all',
+      pppoe_password: getDefaultValue('pppoe_password', '1234567'),
+      billing_type: getDefaultValue('billing_type', 'postpaid'),
+      siklus: getDefaultValue('billing_cycle', 'profile'),
+      router: 'all',
       region: '',
-      // status field removed - customer status will be determined automatically by billing cycle
+      status: 'inactive',
+      odp_id: '',
+      odp_name: '',
+      odp_address: '',
+      odp_port: ''
     })
     setSelectedCustomer(null)
 
     // Reset editing state
     setIsEditing(false)
     setEditingCustomerId(null)
+    editingCustomerData.current = null
   }
 
   if (loading) {
@@ -1028,8 +1320,8 @@ export default function CustomersPage() {
     const current = currentPage
     const delta = 2 // Number of pages to show before and after current page
     const range = []
-    const rangeWithDots = []
-    let l
+    const rangeWithDots: (number | string)[] = []
+    let l: number
 
     for (let i = 1; i <= totalPages; i++) {
       if (i === 1 || i === totalPages || (i >= current - delta && i <= current + delta)) {
@@ -1075,6 +1367,15 @@ export default function CustomersPage() {
             <MapPin className="h-4 w-4" />
             <span className="hidden sm:inline">Kelola Wilayah ({regions.length})</span>
             <span className="sm:hidden">Wilayah ({regions.length})</span>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex items-center space-x-2"
+            onClick={() => setShowSettingsModal(true)}
+          >
+            <Settings className="h-4 w-4" />
+            <span className="hidden sm:inline">Default Settings</span>
           </Button>
           <Button
             className="flex items-center space-x-2"
@@ -1255,9 +1556,9 @@ export default function CustomersPage() {
                 <label className="block text-sm font-medium mb-2">Filter Aktif</label>
                 <div className="text-sm text-muted-foreground">
                   {filterStatus !== 'all' && <div>• Status: {filterStatus}</div>}
-                  {filterPackage !== 'all' && <div>• Paket: {packages.find(p => p.id === filterPackage)?.name}</div>}
-                  {filterRouter !== 'all' && <div>• Router: {routers.find(r => r.id === filterRouter)?.name}</div>}
-                  {filterRegion !== 'all' && <div>• Wilayah: {regions.find(r => r.id === filterRegion)?.name}</div>}
+                  {filterPackage !== 'all' && <div>• Paket: {packages.find(p => p.id.toString() === filterPackage)?.name}</div>}
+                  {filterRouter !== 'all' && <div>• Router: {routers.find(r => r.id.toString() === filterRouter)?.name}</div>}
+                  {filterRegion !== 'all' && <div>• Wilayah: {regions.find(r => r.id.toString() === filterRegion)?.name}</div>}
                   {searchQuery && <div>• Pencarian: "{searchQuery}"</div>}
                   {filterStatus === 'all' && filterPackage === 'all' && filterRouter === 'all' &&
                    filterRegion === 'all' && !searchQuery && <div>Tidak ada filter aktif</div>}
@@ -1710,8 +2011,8 @@ export default function CustomersPage() {
                         </div>
                       </td>
                       <td className="p-3">
-                        <div className="text-sm text-foreground" title={customer.region_name || customer.area || '-'}>
-                          {customer.region_name || customer.area || '-'}
+                        <div className="text-sm text-foreground" title={customer.region_name || '-'}>
+                          {customer.region_name || '-'}
                         </div>
                       </td>
                       <td className="p-3">
@@ -1784,7 +2085,7 @@ export default function CustomersPage() {
                       key={page}
                       variant={page === currentPage ? "default" : "outline"}
                       size="sm"
-                      onClick={() => setCurrentPage(page)}
+                      onClick={() => typeof page === 'number' && setCurrentPage(page)}
                       disabled={page === '...'}
                     >
                       {page}
@@ -1864,7 +2165,7 @@ export default function CustomersPage() {
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Wilayah</p>
-                    <p className="font-medium text-foreground">{selectedCustomer.region_name || selectedCustomer.area || '-'}</p>
+                    <p className="font-medium text-foreground">{selectedCustomer.region_name || '-'}</p>
                   </div>
                 </div>
               </div>
@@ -2028,7 +2329,18 @@ export default function CustomersPage() {
               </div>
             )}
 
-            <div className="space-y-4">
+            <div className="space-y-6">
+              {/* Customer ID Section - Full Width */}
+              <div className="space-y-3">
+                <div className="text-center">
+                  <div className="text-sm font-medium text-muted-foreground mb-2">ID Pelanggan</div>
+                  <div className="text-2xl font-bold text-blue-600 dark:text-blue-400 font-mono">
+                    {formData.customer_id || 'Auto-generating...'}
+                  </div>
+                                  </div>
+              </div>
+
+              {/* Name and Phone - Side by Side */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="create-name">Nama Lengkap *</Label>
@@ -2157,7 +2469,10 @@ export default function CustomersPage() {
                   latitude={formData.latitude}
                   longitude={formData.longitude}
                   address={formData.address}
-                  onCoordinatesChange={(lat, lng) => setFormData({ ...formData, latitude: lat, longitude: lng })}
+                  onCoordinatesChange={(lat, lng) => {
+  console.log('🗺️ CoordinateMap onChange:', { lat, lng, latType: typeof lat, lngType: typeof lng })
+  setFormData(prev => ({ ...prev, latitude: lat, longitude: lng }))
+}}
                 />
               </div>
 
@@ -2198,22 +2513,23 @@ export default function CustomersPage() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="create-pppoe-user">PPPoE Username</Label>
+                  <Label htmlFor="create-pppoe-user">PPoE Username</Label>
                   <Input
                     id="create-pppoe-user"
                     value={formData.pppoe_username}
-                    onChange={(e) => setFormData({ ...formData, pppoe_username: e.target.value })}
-                    placeholder="username123"
+                    onChange={(e) => setFormData(prev => ({ ...prev, pppoe_username: e.target.value }))}
+                    placeholder={formData.customer_id ? `${formData.customer_id}@${getDefaultValue('pppoe_suffix', 'isp')}` : 'Auto-generate dari ID Pelanggan'}
+                    className="bg-muted text-foreground font-mono text-sm"
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="create-pppoe-pass">PPPoE Password</Label>
+                  <Label htmlFor="create-pppoe-pass">PPoE Password</Label>
                   <Input
                     id="create-pppoe-pass"
                     type="password"
                     value={formData.pppoe_password}
                     onChange={(e) => setFormData({ ...formData, pppoe_password: e.target.value })}
-                    placeholder="1234567"
+                    placeholder={getDefaultValue('pppoe_password', '1234567')}
                   />
                 </div>
               </div>
@@ -2270,6 +2586,18 @@ export default function CustomersPage() {
                             <p className="text-gray-600 dark:text-gray-300">
                               <span className="font-medium">Perpanjangan:</span> Sesuai paket yang dipilih
                             </p>
+                            {getSelectedPackage() && (
+                              <div className="mt-3 pt-3 border-t-2 border-gray-300 dark:border-gray-600">
+                                <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg border border-blue-200 dark:border-blue-800">
+                                  <p className="text-lg font-bold text-blue-800 dark:text-blue-200 text-center">
+                                    💵 Total Tagihan: Rp {calculateTotalBillingSync(getSelectedPackage()?.price, getSelectedPackage()?.id?.toString(), formData.billing_type).toLocaleString('id-ID')}
+                                  </p>
+                                  <p className="text-sm text-blue-600 dark:text-blue-300 mt-2 text-center">
+                                    (Rp {getSelectedPackage()?.price?.toLocaleString('id-ID')} paket + Rp {getSelectedPackage()?.installation_fee?.toLocaleString('id-ID') || '50.000'} instalasi)
+                                  </p>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </div>
                       ) : formData.billing_type === 'postpaid' ? (
@@ -2285,11 +2613,33 @@ export default function CustomersPage() {
                             <p className="text-gray-600 dark:text-gray-300">
                               <span className="font-medium">Tagihan:</span> Sesuai siklus yang dipilih
                             </p>
+                            {getSelectedPackage() && (
+                              <div className="mt-3 pt-3 border-t-2 border-gray-300 dark:border-gray-600">
+                                <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-lg border border-green-200 dark:border-green-800">
+                                  <p className="text-lg font-bold text-green-800 dark:text-green-200 text-center">
+                                    💵 Total Tagihan: Rp {calculateTotalBillingSync(getSelectedPackage()?.price, getSelectedPackage()?.id?.toString(), formData.billing_type).toLocaleString('id-ID')}
+                                  </p>
+                                  <p className="text-sm text-green-600 dark:text-green-300 mt-2 text-center">
+                                    (Rp {getSelectedPackage()?.installation_fee?.toLocaleString('id-ID') || '50.000'} biaya instalasi awal)
+                                  </p>
+                                  <p className="text-sm text-green-600 dark:text-green-300 text-center">
+                                    (Paket bulanan: Rp {getSelectedPackage()?.price?.toLocaleString('id-ID')})
+                                  </p>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </div>
                       ) : (
                         <div className="text-sm text-gray-500 dark:text-gray-400 p-2 text-center">
                           <p>💡 Pilih jenis tagihan untuk melihat informasi lengkap</p>
+                          {getSelectedPackage() && (
+                            <div className="mt-2 p-2 bg-gray-100 dark:bg-gray-800 rounded border border-gray-300 dark:border-gray-600">
+                              <p className="text-base font-semibold text-gray-700 dark:text-gray-300">
+                                💰 Harga Paket: Rp {getSelectedPackage()?.price?.toLocaleString('id-ID')}
+                              </p>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -2326,6 +2676,12 @@ export default function CustomersPage() {
       <RegionModal
         isOpen={showRegionModal}
         onClose={() => setShowRegionModal(false)}
+      />
+
+      {/* Customer Default Settings Modal */}
+      <CustomerDefaultSettingsModal
+        open={showSettingsModal}
+        onClose={() => setShowSettingsModal(false)}
       />
     </div>
   )

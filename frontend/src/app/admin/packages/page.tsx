@@ -10,8 +10,9 @@ import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, Edit2, Trash2, Search, Users, DollarSign, Package, Loader2 } from 'lucide-react'
+import { Plus, Edit2, Trash2, Search, Users, DollarSign, Package, Loader2, Settings, Wifi, Zap, Clock, TrendingUp } from 'lucide-react'
 import { api, endpoints } from '@/lib/api'
+import InstallationFeesDialog from '@/components/InstallationFeesDialog'
 
 interface ServicePackage {
   id: string
@@ -39,6 +40,7 @@ export default function PackagesPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [showEditDialog, setShowEditDialog] = useState(false)
+  const [showInstallationFeesDialog, setShowInstallationFeesDialog] = useState(false)
   const [editingPackage, setEditingPackage] = useState<ServicePackage | null>(null)
   const [formLoading, setFormLoading] = useState(false)
   const [formData, setFormData] = useState({
@@ -259,10 +261,16 @@ export default function PackagesPage() {
           <h1 className="text-3xl font-bold">Manajemen Paket</h1>
           <p className="text-muted-foreground">Kelola paket layanan internet</p>
         </div>
-        <Button onClick={() => setShowCreateDialog(true)}>
-          <Plus className="h-4 w-4 mr-2" />
-          Tambah Paket
-        </Button>
+        <div className="flex space-x-2">
+          <Button variant="outline" onClick={() => setShowInstallationFeesDialog(true)}>
+            <Settings className="h-4 w-4 mr-2" />
+            Biaya Instalasi
+          </Button>
+          <Button onClick={() => setShowCreateDialog(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            Tambah Paket
+          </Button>
+        </div>
       </div>
 
       <Card>
@@ -288,58 +296,110 @@ export default function PackagesPage() {
               <Loader2 className="h-8 w-8 animate-spin" />
             </div>
           ) : (
-            <div className="grid gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {filteredPackages.map((pkg) => (
-                <div key={pkg.id} className="border rounded-lg p-4">
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1">
-                      <div className="flex items-center space-x-2 mb-2">
-                        <h3 className="font-semibold">{pkg.name}</h3>
-                        <Badge variant={pkg.isActive ? 'default' : 'secondary'}>
-                          {pkg.isActive ? 'Aktif' : 'Tidak Aktif'}
-                        </Badge>
+                <Card key={pkg.id} className="hover:shadow-lg transition-shadow">
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white ${
+                          pkg.isActive ? 'bg-blue-500' : 'bg-gray-400'
+                        }`}>
+                          <Wifi className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h3 className="font-semibold text-lg">{pkg.name}</h3>
+                          <p className="text-sm text-muted-foreground">{pkg.speed}</p>
+                        </div>
                       </div>
-                      <p className="text-sm text-muted-foreground mb-2">
+                      <Badge variant={pkg.isActive ? 'default' : 'secondary'}>
+                        {pkg.isActive ? 'Aktif' : 'Tidak Aktif'}
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      <p className="text-sm text-muted-foreground">
                         {pkg.description || 'Tidak ada deskripsi'}
                       </p>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                        <div>
-                          <span className="font-medium">Kecepatan:</span>
-                          <p>{pkg.speed}</p>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="flex items-center space-x-2">
+                          <DollarSign className="h-4 w-4 text-green-600" />
+                          <div>
+                            <p className="text-xs text-muted-foreground">Harga</p>
+                            <p className="font-semibold">Rp {pkg.price.toLocaleString()}</p>
+                          </div>
                         </div>
-                        <div>
-                          <span className="font-medium">Harga:</span>
-                          <p>Rp {pkg.price.toLocaleString()}</p>
-                        </div>
-                        <div>
-                          <span className="font-medium">Pelanggan:</span>
-                          <p>{pkg.customerCount}</p>
-                        </div>
-                        <div>
-                          <span className="font-medium">Pendapatan:</span>
-                          <p>Rp {pkg.totalRevenue.toLocaleString()}</p>
+                        <div className="flex items-center space-x-2">
+                          <Users className="h-4 w-4 text-blue-600" />
+                          <div>
+                            <p className="text-xs text-muted-foreground">Pelanggan</p>
+                            <p className="font-semibold">{pkg.customerCount}</p>
+                          </div>
                         </div>
                       </div>
+
+                      {pkg.duration && (
+                        <div className="flex items-center space-x-2">
+                          <Clock className="h-4 w-4 text-orange-600" />
+                          <div>
+                            <p className="text-xs text-muted-foreground">Durasi</p>
+                            <p className="font-semibold">{pkg.duration}</p>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex items-center space-x-2">
+                        <TrendingUp className="h-4 w-4 text-purple-600" />
+                        <div>
+                          <p className="text-xs text-muted-foreground">Total Pendapatan</p>
+                          <p className="font-semibold">Rp {pkg.totalRevenue.toLocaleString()}</p>
+                        </div>
+                      </div>
+
+                      {pkg.features && pkg.features.length > 0 && (
+                        <div>
+                          <p className="text-xs text-muted-foreground mb-2">Fitur:</p>
+                          <div className="flex flex-wrap gap-1">
+                            {pkg.features.slice(0, 3).map((feature, index) => (
+                              <Badge key={index} variant="outline" className="text-xs">
+                                {feature}
+                              </Badge>
+                            ))}
+                            {pkg.features.length > 3 && (
+                              <Badge variant="outline" className="text-xs">
+                                +{pkg.features.length - 3}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex space-x-2 pt-4 border-t">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => openEditDialog(pkg)}
+                          className="flex-1"
+                        >
+                          <Edit2 className="h-4 w-4 mr-1" />
+                          Edit
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDeletePackage(pkg)}
+                          disabled={pkg.customerCount > 0}
+                          className="text-destructive hover:text-destructive flex-1"
+                        >
+                          <Trash2 className="h-4 w-4 mr-1" />
+                          Hapus
+                        </Button>
+                      </div>
                     </div>
-                    <div className="flex space-x-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => openEditDialog(pkg)}
-                      >
-                        <Edit2 className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleDeletePackage(pkg)}
-                        disabled={pkg.customerCount > 0}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </div>
+                  </CardContent>
+                </Card>
               ))}
             </div>
           )}
@@ -599,6 +659,12 @@ export default function PackagesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Installation Fees Dialog */}
+      <InstallationFeesDialog
+        open={showInstallationFeesDialog}
+        onOpenChange={setShowInstallationFeesDialog}
+      />
     </div>
   )
 }
