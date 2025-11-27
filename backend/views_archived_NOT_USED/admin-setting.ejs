@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Settings - Admin</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="/css/responsive-admin.css">
+    <link href="/css/dark-theme.css" rel="stylesheet">
+    <style>
+        body { 
+            background: #1a1d29 !important;
+            color: #e0e0e0;
+        }
+        
+        .main-content {
+            background: #1a1d29;
+        }
+        
+        @media (max-width: 767.98px) {
+            .main-content {
+                margin-top: 70px !important;
+                padding-top: 10px !important;
+                z-index: 1;
+            }
+        }
+        
+        .card {
+            background: #252a3d !important;
+            border: 1px solid #3a4052;
+            color: #e0e0e0;
+        }
+        
+        .card-header {
+            background: #2d3348 !important;
+            border-bottom: 1px solid #3a4052;
+            color: #e0e0e0;
+        }
+        
+        h2, h3, h4, h5, h6 {
+            color: #ffffff !important;
+        }
+        
+        p, span, label, .text-muted {
+            color: #b8b8b8 !important;
+        }
+        
+        .form-control, .form-select, textarea {
+            background-color: #1a1d29;
+            border-color: #3a4052;
+            color: #e0e0e0;
+        }
+        
+        .form-control:focus, .form-select:focus, textarea:focus {
+            background-color: #1a1d29;
+            border-color: #4a5fc1;
+            color: #e0e0e0;
+        }
+        
+        .form-check-input {
+            background-color: #1a1d29;
+            border-color: #3a4052;
+        }
+        
+        .form-check-input:checked {
+            background-color: #4a5fc1;
+            border-color: #4a5fc1;
+        }
+        
+        .nav-tabs {
+            border-bottom: 1px solid #3a4052;
+        }
+        
+        .nav-tabs .nav-link {
+            color: #b8b8b8;
+            border: none;
+            border-bottom: 2px solid transparent;
+            background: transparent;
+        }
+        
+        .nav-tabs .nav-link:hover {
+            color: #e0e0e0;
+            border-bottom-color: #4a5fc1;
+        }
+        
+        .nav-tabs .nav-link.active {
+            color: #ffffff;
+            background: transparent;
+            border-bottom-color: #4a5fc1;
+        }
+        
+        .tab-content {
+            padding: 20px 0;
+        }
+        
+        .quick-links-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            color: white;
+        }
+        
+        .quick-links-card .card-body {
+            color: white !important;
+        }
+        
+        .quick-links-card .btn {
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.3);
+            color: white;
+        }
+        
+        .quick-links-card .btn:hover {
+            background: rgba(255,255,255,0.3);
+            border-color: rgba(255,255,255,0.5);
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <%- include('partials/admin-responsive-sidebar', { page: 'setting', settings: settings }) %>
+            
+            <main class="col-md-10 main-content ms-sm-auto">
+                <div class="container-fluid p-4">
+                    <div class="row mb-4">
+                        <div class="col-12">
+                            <h2><i class="bi bi-gear"></i> Pengaturan Sistem</h2>
+                            <p class="text-muted">Konfigurasi aplikasi, integrasi layanan, dan pengaturan sistem</p>
+                        </div>
+                    </div>
+
+                    <% if (typeof success !== 'undefined' && success) { %>
+                        <div class="alert alert-success alert-dismissible fade show" role="alert">
+                            <i class="bi bi-check-circle"></i> <%= success %>
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    <% } %>
+                    <% if (typeof error !== 'undefined' && error) { %>
+                        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                            <i class="bi bi-exclamation-triangle"></i> <%= error %>
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    <% } %>
+
+                    <!-- Quick Links Card -->
+                    <div class="row mb-4">
+                        <div class="col-12">
+                            <div class="card quick-links-card">
+                                <div class="card-body">
+                                    <h5 class="mb-3"><i class="bi bi-lightning-charge"></i> Akses Cepat</h5>
+                                    <div class="row g-2">
+                                        <div class="col-md-3 col-6">
+                                            <a href="/admin/whatsapp-settings" class="btn btn-sm w-100">
+                                                <i class="bi bi-whatsapp"></i> WhatsApp Settings
+                                            </a>
+                                        </div>
+                                        <div class="col-md-3 col-6">
+                                            <a href="/admin/tools" class="btn btn-sm w-100">
+                                                <i class="bi bi-tools"></i> Network Tools
+                                            </a>
+                                        </div>
+                                        <div class="col-md-3 col-6">
+                                            <a href="/admin/mikrotik-scripts" class="btn btn-sm w-100">
+                                                <i class="bi bi-code-slash"></i> MikroTik Scripts
+                                            </a>
+                                        </div>
+                                        <div class="col-md-3 col-6">
+                                            <a href="/admin/radius" class="btn btn-sm w-100">
+                                                <i class="bi bi-shield-lock"></i> RADIUS Settings
+                                            </a>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Navigation Tabs -->
+                    <ul class="nav nav-tabs mb-4" id="settingsTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="general-tab" data-bs-toggle="tab" data-bs-target="#general" type="button">
+                                <i class="bi bi-info-circle"></i> Umum
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="network-tab" data-bs-toggle="tab" data-bs-target="#network" type="button">
+                                <i class="bi bi-router"></i> Network
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="billing-tab" data-bs-toggle="tab" data-bs-target="#billing" type="button">
+                                <i class="bi bi-credit-card"></i> Billing
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="monitoring-tab" data-bs-toggle="tab" data-bs-target="#monitoring" type="button">
+                                <i class="bi bi-graph-up"></i> Monitoring
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="appearance-tab" data-bs-toggle="tab" data-bs-target="#appearance" type="button">
+                                <i class="bi bi-palette"></i> Tampilan
+                            </button>
+                        </li>
+                    </ul>
+
+                    <!-- Tab Content -->
+                    <div class="tab-content" id="settingsTabContent">
+                        
+                        <!-- GENERAL SETTINGS TAB -->
+                        <div class="tab-pane fade show active" id="general" role="tabpanel">
+                            <form action="/admin/setting/general" method="POST">
+                                <div class="row">
+                                    <!-- App Mode -->
+                                    <div class="col-12">
+                                        <div class="card mb-4">
+                                            <div class="card-header bg-primary">
+                                                <h5 class="mb-0 text-white"><i class="bi bi-toggle-on"></i> Mode Aplikasi</h5>
+                                            </div>
+                                            <div class="card-body">
+                                                <div class="mb-3">
+                                                    <label class="form-label fw-bold">Pilih Mode Operasi Aplikasi</label>
+                                                    <select class="form-select form-select-lg" name="app_mode" id="appModeSelect">
+                                                        <option value="api" <%= settings.app_mode === 'api' ? 'selected' : '' %>>
+                                                            🔧 Mode API - Menggunakan MikroTik RouterOS API
+                                                        </option>
+                                                        <option value="radius" <%= settings.app_mode === 'radius' ? 'selected' : '' %>>
+                                                            🔐 Mode RADIUS - Menggunakan RADIUS Server untuk PPPoE
+                                                        </option>
+                                                    </select>
+                                                </div>
+                                                <div class="alert alert-info mb-0">
+                                                    <div id="modeDescription">
+                                                        <% if (settings.app_mode === 'radius') { %>
+                                                            <strong>Mode RADIUS:</strong> Aplikasi akan menggunakan RADIUS server untuk autentikasi PPPoE. 
+                                                            Menu sidebar akan menampilkan RADIUS PPPoE User dan menyembunyikan menu MikroTik API.
+                                                            Cocok untuk multi-NAS atau banyak router.
+                                                        <% } else { %>
+                                                            <strong>Mode API:</strong> Aplikasi akan berkomunikasi langsung dengan MikroTik RouterOS API. 
+                                                            Menu sidebar akan menampilkan menu MikroTik lengkap.
+                                                            Cocok untuk single router atau kontrol penuh MikroTik.
+                                                        <% } %>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Company Information -->
+                                    <div class="col-md-6">
+                                        <div class="card mb-4">
+                                            <div class="card-header">
+                                                <h5 class="mb-0"><i class="bi bi-building"></i> Informasi Perusahaan</h5>
+                                            </div>
+                                            <div class="card-body">
+                                                <div class="mb-3">
+                                                    <label class="form-label">Nama Perusahaan</label>
+                                                    <input type="text" class="form-control" name="company_header" value="<%= settings.company_header || '' %>" placeholder="ISP Monitor">
+                                                    <small class="text-muted">Ditampilkan di header aplikasi</small>
+                                                </div>
+                                                <div class="mb-3">
+                                                    <label class="form-label">Footer Info</label>
+                                                    <input type="text" class="form-control" name="footer_info" value="<%= settings.footer_info || '' %>" placeholder="Powered by Gembok">
+                                                    <small class="text-muted">Informasi di footer aplikasi</small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Server Configuration -->
+                                    <div class="col-md-6">
+                                        <div class="card mb-4">
+                                            <div class="card-header">
+                                                <h5 class="mb-0"><i class="bi bi-server"></i> Konfigurasi Server</h5>
+                                            </div>
+                                            <div class="card-body">
+                                                <div class="mb-3">
+                                                    <label class="form-label">Server Host</label>
+                                                    <input type="text" class="form-control" name="server_host" value="<%= settings.server_host || 'localhost' %>" placeholder="localhost">
+                                                    <small class="text-muted">Alamat host server aplikasi</small>
+                                                </div>
+                                                <div class="mb-3">
+                                                    <label class="form-label">Server Port</label>
+                                                    <input type="number" class="form-control" name="server_port" value="<%= settings.server_port || '3000' %>" placeholder="3000">
+                                                    <small class="text-muted">Port aplikasi (default: 3000)</small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Admin Credentials -->
+                                    <div class="col-12">
+                                        <div class="card mb-4">
+                                            <div class="card-header">
+                                                <h5 class="mb-0"><i class="bi bi-shield-lock"></i> Kredensial Admin</h5>
+                                            </div>
+                                            <div class="card-body">
+                                                <div class="row">
+                                                    <div class="col-md-6">
+                                                        <div class="mb-3">
+                                                            <label class="form-label">Username Admin</label>
+                                                            <input type="text" class="form-control" name="admin_username" value="<%= settings.admin_username || 'admin' %>" placeholder="admin">
+                                                        </div>
+                                                    </div>
+                                                    <div class="col-md-6">
+                                                        <div class="mb-3">
+                                                            <label class="form-label">Password Admin</label>
+                                                            <input type="password" class="form-control" name="admin_password" value="<%= settings.admin_password || '' %>" placeholder="Masukkan password baru">
+                                                            <small class="text-muted">Kosongkan jika tidak ingin mengubah password</small>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Submit Button -->
+                                    <div class="col-12">
+                                        <div class="card">
+                                            <div class="card-body">
+                                                <button type="submit" class="btn btn-primary">
+                                                    <i class="bi bi-save"></i> Simpan Pengaturan Umum
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+
+                        <!-- NETWORK SETTINGS TAB -->
+                        <div class="tab-pane fade" id="network" role="tabpanel">
+                            <form action="/admin/setting/network" method="POST">
+                                <div class="row">
+                                    <!-- MikroTik Configuration -->
+                                    <div class="col-md-6">
+                                        <div class="card mb-4">
+                                            <div class="card-header">
+                                                <h5 class="mb-0"><i class="bi bi-router"></i> MikroTik</h5>
+                                            </div>
+                                            <div class="card-body">
+                                                <div class="mb-3">
+                                                    <label class="form-label">IP Address</label>
+                                                    <input type="text" class="form-control" name="mikrotik_host" value="<%= settings.mikrotik_host || '' %>" placeholder="192.168.88.1">
+                                                </div>
+                                                <div class="mb-3">
+                                                    <label class="form-label">Username</label>
+                                                    <input type="text" class="form-control" name="mikrotik_user" value="<%= settings.mikrotik_user || '' %>" placeholder="admin">
+                                                </div>
+                                                <div class="mb-3">
+                                                    <label class="form-label">Password</label>
+                                                    <input type="password" class="form-control" name="mikrotik_password" value="<%= settings.mikrotik_password || '' %>" placeholder="••••••••">
+                                                </div>
+                                                <div class="mb-3">
+                                                    <label class="form-label">Port</label>
+                                                    <input type="number" class="form-control" name="mikrotik_port" value="<%= settings.mikrotik_port || '8728' %>" placeholder="8728">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- GenieACS Configuration -->
+                                    <div class="col-md-6">
+                                        <div class="card mb-4">
+                                            <div class="card-header">
+                                                <h5 class="mb-0"><i class="bi bi-hdd-network"></i> GenieACS</h5>
+                                            </div>
+                                            <div class="card-body">
+                                                <div class="mb-3">
+                                                    <label class="form-label">Server URL</label>
+                                                    <input type="text" class="form-control" name="genieacs_url" value="<%= settings.genieacs_url || '' %>" placeholder="http://localhost:7557">
+                                                </div>
+                                                <div class="mb-3">
+                                                    <label class="form-label">Username (opsional)</label>
+                                                    <input type="text" class="form-control" name="genieacs_username" value="<%= settings.genieacs_username || '' %>" placeholder="admin">
+                                                </div>
+                                                <div class="mb-3">
+                                                    <label class="form-label">Password (opsional)</label>
+                                                    <input type="password" class="form-control" name="genieacs_password" value="<%= settings.genieacs_password || '' %>" placeholder="••••••••">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Submit Button -->
+                                    <div class="col-12">
+                                        <div class="card">
+                                            <div class="card-body">
+                                                <button type="submit" class="btn btn-primary">
+                                                    <i class="bi bi-save"></i> Simpan Pengaturan Network
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+
+                        <!-- BILLING SETTINGS TAB -->
+                        <div class="tab-pane fade" id="billing" role="tabpanel">
+                            <form action="/admin/setting/billing" method="POST">
+                                <div class="row">
+                                    <!-- Payment Gateway -->
+                                    <div class="col-md-6">
+                                        <div class="card mb-4">
+                                            <div class="card-header">
+                                                <h5 class="mb-0"><i class="bi bi-credit-card"></i> Payment Gateway</h5>
+                                            </div>
+                                            <div class="card-body">
+                                                <div class="mb-3">
+                                                    <label class="form-label">Provider</label>
+                                                    <select class="form-select" name="payment_gateway_provider">
+                                                        <option value="">Pilih Provider</option>
+                                                        <option value="midtrans" <%= settings.payment_gateway_provider === 'midtrans' ? 'selected' : '' %>>Midtrans</option>
+                                                        <option value="xendit" <%= settings.payment_gateway_provider === 'xendit' ? 'selected' : '' %>>Xendit</option>
+                                                        <option value="doku" <%= settings.payment_gateway_provider === 'doku' ? 'selected' : '' %>>DOKU</option>
+                                                    </select>
+                                                </div>
+                                                <div class="mb-3">
+                                                    <label class="form-label">API Key</label>
+                                                    <input type="text" class="form-control" name="payment_gateway_api_key" value="<%= settings.payment_gateway_api_key || '' %>" placeholder="Your API Key">
+                                                </div>
+                                                <div class="mb-3">
+                                                    <label class="form-label">Merchant ID</label>
+                                                    <input type="text" class="form-control" name="payment_gateway_merchant_id" value="<%= settings.payment_gateway_merchant_id || '' %>" placeholder="Your Merchant ID">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Billing Settings -->
+                                    <div class="col-md-6">
+                                        <div class="card mb-4">
+                                            <div class="card-header">
+                                                <h5 class="mb-0"><i class="bi bi-calendar-check"></i> Pengaturan Billing</h5>
+                                            </div>
+                                            <div class="card-body">
+                                                <div class="mb-3">
+                                                    <label class="form-label">Tanggal Jatuh Tempo</label>
+                                                    <input type="number" class="form-control" name="billing_due_date" value="<%= settings.billing_due_date || '1' %>" min="1" max="31" placeholder="1">
+                                                    <small class="text-muted">Tanggal tagihan tiap bulan (1-31)</small>
+                                                </div>
+                                                <div class="mb-3">
+                                                    <label class="form-label">Grace Period (Hari)</label>
+                                                    <input type="number" class="form-control" name="billing_grace_period" value="<%= settings.billing_grace_period || '3' %>" placeholder="3">
+                                                    <small class="text-muted">Masa tenggang sebelum isolir</small>
+                                                </div>
+                                                <div class="mb-3">
+                                                    <div class="form-check form-switch">
+                                                        <input class="form-check-input" type="checkbox" id="auto_isolir" name="auto_isolir" <%= settings.auto_isolir ? 'checked' : '' %>>
+                                                        <label class="form-check-label" for="auto_isolir">
+                                                            Aktifkan Auto-Isolir
+                                                        </label>
+                                                    </div>
+                                                    <small class="text-muted">Isolir otomatis untuk tagihan terlambat</small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Submit Button -->
+                                    <div class="col-12">
+                                        <div class="card">
+                                            <div class="card-body">
+                                                <button type="submit" class="btn btn-primary">
+                                                    <i class="bi bi-save"></i> Simpan Pengaturan Billing
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+
+                        <!-- MONITORING SETTINGS TAB -->
+                        <div class="tab-pane fade" id="monitoring" role="tabpanel">
+                            <form action="/admin/setting/monitoring" method="POST">
+                                <div class="row">
+                                    <!-- PPPoE Monitoring -->
+                                    <div class="col-md-6">
+                                        <div class="card mb-4">
+                                            <div class="card-header">
+                                                <h5 class="mb-0"><i class="bi bi-diagram-3"></i> PPPoE Monitoring</h5>
+                                            </div>
+                                            <div class="card-body">
+                                                <div class="mb-3">
+                                                    <div class="form-check form-switch">
+                                                        <input class="form-check-input" type="checkbox" id="pppoe_monitor_enable" name="pppoe_monitor_enable" <%= settings.pppoe_monitor_enable ? 'checked' : '' %>>
+                                                        <label class="form-check-label" for="pppoe_monitor_enable">
+                                                            Aktifkan PPPoE Monitoring
+                                                        </label>
+                                                    </div>
+                                                    <small class="text-muted">Monitor koneksi PPPoE pelanggan</small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- SNMP Monitoring -->
+                                    <div class="col-md-6">
+                                        <div class="card mb-4">
+                                            <div class="card-header">
+                                                <h5 class="mb-0"><i class="bi bi-activity"></i> SNMP Monitoring</h5>
+                                            </div>
+                                            <div class="card-body">
+                                                <div class="mb-3">
+                                                    <div class="form-check form-switch">
+                                                        <input class="form-check-input" type="checkbox" id="snmp_monitoring_enabled" name="snmp_monitoring_enabled" <%= settings.snmp_monitoring_enabled ? 'checked' : '' %>>
+                                                        <label class="form-check-label" for="snmp_monitoring_enabled">
+                                                            Aktifkan SNMP Monitoring
+                                                        </label>
+                                                    </div>
+                                                    <small class="text-muted">Monitor perangkat via SNMP</small>
+                                                </div>
+                                                <div class="mb-3">
+                                                    <label class="form-label">SNMP Community</label>
+                                                    <input type="text" class="form-control" name="snmp_community" value="<%= settings.snmp_community || 'public' %>" placeholder="public">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Submit Button -->
+                                    <div class="col-12">
+                                        <div class="card">
+                                            <div class="card-body">
+                                                <button type="submit" class="btn btn-primary">
+                                                    <i class="bi bi-save"></i> Simpan Pengaturan Monitoring
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+
+                        <!-- APPEARANCE SETTINGS TAB -->
+                        <div class="tab-pane fade" id="appearance" role="tabpanel">
+                            <form action="/admin/setting/appearance" method="POST">
+                                <div class="row">
+                                    <!-- Theme Settings -->
+                                    <div class="col-md-6">
+                                        <div class="card mb-4">
+                                            <div class="card-header">
+                                                <h5 class="mb-0"><i class="bi bi-palette"></i> Tema Aplikasi</h5>
+                                            </div>
+                                            <div class="card-body">
+                                                <div class="mb-3">
+                                                    <label class="form-label">Mode Tema</label>
+                                                    <select class="form-select" name="theme_mode">
+                                                        <option value="dark" <%= settings.theme_mode === 'dark' ? 'selected' : '' %>>Dark Mode</option>
+                                                        <option value="light" <%= settings.theme_mode === 'light' ? 'selected' : '' %>>Light Mode</option>
+                                                    </select>
+                                                </div>
+                                                <div class="mb-3">
+                                                    <label class="form-label">Warna Primary</label>
+                                                    <input type="color" class="form-control form-control-color" name="theme_primary_color" value="<%= settings.theme_primary_color || '#4a5fc1' %>">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Logo Settings -->
+                                    <div class="col-md-6">
+                                        <div class="card mb-4">
+                                            <div class="card-header">
+                                                <h5 class="mb-0"><i class="bi bi-image"></i> Logo</h5>
+                                            </div>
+                                            <div class="card-body">
+                                                <div class="mb-3">
+                                                    <label class="form-label">Logo URL</label>
+                                                    <input type="text" class="form-control" name="logo_url" value="<%= settings.logo_url || '' %>" placeholder="/img/logo.png">
+                                                    <small class="text-muted">Path atau URL logo perusahaan</small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Submit Button -->
+                                    <div class="col-12">
+                                        <div class="card">
+                                            <div class="card-body">
+                                                <button type="submit" class="btn btn-primary">
+                                                    <i class="bi bi-save"></i> Simpan Pengaturan Tampilan
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Handle mobile sidebar
+        const sidebarToggle = document.getElementById('sidebarToggle');
+        const sidebar = document.getElementById('sidebar');
+        
+        if (sidebarToggle && sidebar) {
+            sidebarToggle.addEventListener('click', function() {
+                sidebar.classList.toggle('show');
+            });
+            
+            // Close sidebar when clicking outside on mobile
+            document.addEventListener('click', function(event) {
+                const isClickInside = sidebar.contains(event.target) || sidebarToggle.contains(event.target);
+                if (!isClickInside && sidebar.classList.contains('show')) {
+                    sidebar.classList.remove('show');
+                }
+            });
+        }
+
+        // App Mode selector handler
+        const appModeSelect = document.getElementById('appModeSelect');
+        if (appModeSelect) {
+            appModeSelect.addEventListener('change', function() {
+                const mode = this.value;
+                const descDiv = document.getElementById('modeDescription');
+                if (mode === 'radius') {
+                    descDiv.innerHTML = `
+                        <strong>Mode RADIUS:</strong> Aplikasi akan menggunakan RADIUS server untuk autentikasi PPPoE. 
+                        Menu sidebar akan menampilkan RADIUS PPPoE User dan menyembunyikan menu MikroTik API.
+                        Cocok untuk multi-NAS atau banyak router.
+                    `;
+                } else {
+                    descDiv.innerHTML = `
+                        <strong>Mode API:</strong> Aplikasi akan berkomunikasi langsung dengan MikroTik RouterOS API. 
+                        Menu sidebar akan menampilkan menu MikroTik lengkap.
+                        Cocok untuk single router atau kontrol penuh MikroTik.
+                    `;
+                }
+            });
+        }
+    </script>
+</body>
+</html>

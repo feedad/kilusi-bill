@@ -1,0 +1,1335 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard Admin</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="/css/responsive-admin.css" rel="stylesheet">
+    <link href="/css/dark-theme.css" rel="stylesheet">
+    <link href="/css/widgets.css" rel="stylesheet">
+    <style>
+        /* Mobile responsive fixes */
+        @media (max-width: 767.98px) {
+            .main-content {
+                margin-top: 70px !important; /* Extra space for mobile navbar */
+                padding-top: 10px !important;
+                z-index: 1;
+            }
+            .card {
+                z-index: 1;
+            }
+            /* Pastikan cards tidak overlap dengan mobile navbar */
+            .row.mb-4:first-of-type {
+                margin-top: 10px;
+            }
+            /* Responsive notification positioning */
+            #restartNotif {
+                top: 80px !important; /* Below mobile navbar */
+                right: 10px !important;
+                left: 10px !important;
+                width: auto !important;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="container-fluid">
+    <div class="row">
+        <!-- Include Responsive Admin Sidebar -->
+        <%- include('partials/admin-responsive-sidebar', { page: 'dashboard', settings: settings }) %>
+        
+        <main class="col-md-10 ms-sm-auto main-content">
+            <!-- GENIEACS CARDS -->
+            <div class="row widget-row">
+              <div class="col-md-4 mb-3">
+                <div class="widget-card genieacs-total">
+                  <div>
+                    <i class="bi bi-hdd-network widget-icon"></i>
+                    <div class="widget-label">Total Device GenieACS</div>
+                  </div>
+                  <div>
+                    <div class="widget-value" id="genieacs-total"><%= typeof genieacsTotal !== 'undefined' ? genieacsTotal : '-' %></div>
+                  </div>
+                </div>
+              </div>
+              <div class="col-md-4 mb-3">
+                <div class="widget-card genieacs-online">
+                  <div>
+                    <i class="bi bi-wifi widget-icon"></i>
+                    <div class="widget-label">Device Online</div>
+                  </div>
+                  <div>
+                    <div class="widget-value" id="genieacs-online"><%= typeof genieacsOnline !== 'undefined' ? genieacsOnline : '-' %></div>
+                  </div>
+                </div>
+              </div>
+              <div class="col-md-4 mb-3">
+                <div class="widget-card genieacs-offline">
+                  <div>
+                    <i class="bi bi-wifi-off widget-icon"></i>
+                    <div class="widget-label">Device Offline</div>
+                  </div>
+                  <div>
+                    <div class="widget-value" id="genieacs-offline"><%= typeof genieacsOffline !== 'undefined' ? genieacsOffline : '-' %></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- MIKROTIK CARDS -->
+            <div class="row widget-row">
+              <div class="col-md-4 mb-3">
+                <div class="widget-card pppoe-total">
+                  <div>
+                    <i class="bi bi-person-badge widget-icon"></i>
+                    <div class="widget-label">Total User PPPoE</div>
+                  </div>
+                  <div>
+                    <div class="widget-value" id="mikrotik-total"><%= typeof mikrotikTotal !== 'undefined' ? mikrotikTotal : '-' %></div>
+                  </div>
+                </div>
+              </div>
+              <div class="col-md-4 mb-3">
+                <div class="widget-card pppoe-active">
+                  <div>
+                    <i class="bi bi-person-check widget-icon"></i>
+                    <div class="widget-label">PPPoE Aktif</div>
+                  </div>
+                  <div>
+                    <div class="widget-value" id="mikrotik-aktif"><%= typeof mikrotikAktif !== 'undefined' ? mikrotikAktif : '-' %></div>
+                  </div>
+                </div>
+              </div>
+              <div class="col-md-4 mb-3">
+                <div class="widget-card pppoe-offline">
+                  <div>
+                    <i class="bi bi-person-x widget-icon"></i>
+                    <div class="widget-label">PPPoE Offline</div>
+                  </div>
+                  <div>
+                    <div class="widget-value" id="mikrotik-offline"><%= typeof mikrotikOffline !== 'undefined' ? mikrotikOffline : '-' %></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- BILLING OVERVIEW -->
+            <div class="row widget-row">
+              <div class="col-md-3 mb-3">
+                <div class="widget-card billing-customers">
+                  <div>
+                    <i class="bi bi-people-fill widget-icon"></i>
+                    <div class="widget-label">Total Customers</div>
+                  </div>
+                  <div>
+                    <div class="widget-value" id="total-customers">-</div>
+                    <div class="widget-sub" aria-hidden="true" style="opacity:0">placeholder</div>
+                  </div>
+                </div>
+              </div>
+              <div class="col-md-3 mb-3">
+                <div class="widget-card billing-paid">
+                  <div>
+                    <i class="bi bi-cash-coin widget-icon"></i>
+                    <div class="widget-label">Paid This Month</div>
+                  </div>
+                  <div>
+                    <div class="widget-value" id="paid-this-month">Rp 0</div>
+                    <div class="widget-sub" id="paid-count">0 invoices</div>
+                  </div>
+                </div>
+              </div>
+              <div class="col-md-3 mb-3">
+                <div class="widget-card billing-unpaid">
+                  <div>
+                    <i class="bi bi-clock-history widget-icon"></i>
+                    <div class="widget-label">Unpaid Invoices</div>
+                  </div>
+                  <div>
+                    <div class="widget-value" id="unpaid-amount">Rp 0</div>
+                    <div class="widget-sub" id="unpaid-count">0 invoices</div>
+                  </div>
+                </div>
+              </div>
+              <div class="col-md-3 mb-3">
+                <div class="widget-card billing-revenue">
+                  <div>
+                    <i class="bi bi-graph-up widget-icon"></i>
+                    <div class="widget-label">Monthly Revenue</div>
+                  </div>
+                  <div>
+                    <div class="widget-value" id="monthly-revenue">Rp 0</div>
+                    <div class="widget-sub" id="revenue-period">-</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- RECENT PAID INVOICES -->
+            <div class="row mb-4">
+              <div class="col-md-12">
+                <div class="card">
+                  <div class="card-header bg-success text-white">
+                    <div class="d-flex justify-content-between align-items-center">
+                      <h5 class="mb-0"><i class="bi bi-check-circle"></i> Recent Paid Invoices</h5>
+                      <a href="/admin/billing" class="btn btn-sm btn-light">View All</a>
+                    </div>
+                  </div>
+                  <div class="card-body p-0">
+                    <div class="table-responsive">
+                      <table class="table table-dark table-striped table-hover align-middle mb-0" id="paidInvoicesTable">
+                        <thead>
+                          <tr>
+                            <th style="width: 15%;">Invoice #</th>
+                            <th style="width: 25%;">Customer</th>
+                            <th style="width: 15%;">Package</th>
+                            <th style="width: 15%;" class="text-end">Amount</th>
+                            <th style="width: 15%;">Paid Date</th>
+                            <th style="width: 15%;">Method</th>
+                          </tr>
+                        </thead>
+                        <tbody id="paidInvoicesBody">
+                          <tr>
+                            <td colspan="6" class="text-center py-4">
+                              <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                              </div>
+                              <div class="mt-2 text-muted">Loading paid invoices...</div>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- GRAFIK INTERNET -->
+            <div class="row mb-4">
+              <div class="col-md-12">
+                <div class="card text-bg-info">
+                  <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                      <div class="fw-bold" style="font-size: 1.1rem;"><i class="bi bi-graph-up-arrow"></i> Grafik Traffic Internet - <span id="currentInterface">Ether1</span></div>
+                      <div class="d-flex align-items-center">
+                        <label for="interfaceSelect" class="form-label me-2 mb-0" style="font-size: 0.9rem;">Interface:</label>
+                        <select id="interfaceSelect" class="form-select form-select-sm" style="width: auto; font-size: 0.9rem;">
+                          <option value="ether1-ISP">Ether1-ISP (ISP)</option>
+                          <!-- Interface akan di-load secara dinamis -->
+                        </select>
+                      </div>
+                    </div>
+                    
+                    <!-- Real-time bandwidth info dengan color scheme yang sesuai chart -->
+                    <div class="row mb-2">
+                      <div class="col-md-3 mb-3">
+                        <div class="traffic-card traffic-card-rx">
+                          <h6><i class="bi bi-download me-1"></i> Download (RX)</h6>
+                          <h3 id="currentRx">0 Mbps</h3>
+                          <small>Real-time bandwidth</small>
+                        </div>
+                      </div>
+                      <div class="col-md-3 mb-3">
+                        <div class="traffic-card traffic-card-tx">
+                          <h6><i class="bi bi-upload me-1"></i> Upload (TX)</h6>
+                          <h3 id="currentTx">0 Mbps</h3>
+                          <small>Real-time bandwidth</small>
+                        </div>
+                      </div>
+                      <div class="col-md-3 mb-3">
+                        <div class="traffic-card traffic-card-total">
+                          <h6><i class="bi bi-speedometer2 me-1"></i> Total Traffic</h6>
+                          <h3 id="currentTotal">0 Mbps</h3>
+                          <small>Combined RX + TX</small>
+                        </div>
+                      </div>
+                      <div class="col-md-3 mb-3">
+                        <div class="traffic-card traffic-card-status">
+                          <h6><i class="bi bi-activity me-1"></i> Network Status</h6>
+                          <h3 id="currentStatus">Idle</h3>
+                          <small>Connection state</small>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div style="height: 300px;">
+                      <canvas id="internetChart"></canvas>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- GRAFIK PENDAPATAN HARIAN -->
+            <div class="row mb-4">
+              <div class="col-md-8">
+                <div class="card">
+                  <div class="card-header bg-primary text-white">
+                    <div class="d-flex justify-content-between align-items-center">
+                      <h5 class="mb-0"><i class="bi bi-graph-up-arrow"></i> Grafik Pendapatan Harian</h5>
+                      <select id="revenueFilter" class="form-select form-select-sm" style="width: auto;">
+                        <option value="7">7 Hari Terakhir</option>
+                        <option value="14">14 Hari Terakhir</option>
+                        <option value="30" selected>30 Hari Terakhir</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="card-body">
+                    <canvas id="revenueChart" style="max-height: 300px;"></canvas>
+                    <div class="row mt-3 text-center">
+                      <div class="col-md-4">
+                        <div class="card bg-success text-white mb-0">
+                          <div class="card-body py-2">
+                            <small class="d-block">Total Pendapatan</small>
+                            <strong id="totalRevenue">Rp 0</strong>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="col-md-4">
+                        <div class="card bg-info text-white mb-0">
+                          <div class="card-body py-2">
+                            <small class="d-block">Rata-rata/Hari</small>
+                            <strong id="avgRevenue">Rp 0</strong>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="col-md-4">
+                        <div class="card bg-warning text-white mb-0">
+                          <div class="card-body py-2">
+                            <small class="d-block">Pendapatan Tertinggi</small>
+                            <strong id="maxRevenue">Rp 0</strong>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- LOG KEGIATAN APLIKASI -->
+              <div class="col-md-4">
+                <div class="card">
+                  <div class="card-header bg-dark text-white">
+                    <div class="d-flex justify-content-between align-items-center">
+                      <h5 class="mb-0"><i class="bi bi-activity"></i> Activity Log</h5>
+                      <button class="btn btn-sm btn-light" onclick="refreshActivityLog()">
+                        <i class="bi bi-arrow-clockwise"></i>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="card-body" style="max-height: 400px; overflow-y: auto;">
+                    <div id="activityLog">
+                      <div class="text-center text-muted">
+                        <div class="spinner-border spinner-border-sm" role="status">
+                          <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <small class="d-block mt-2">Loading activity log...</small>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+            <script>
+            // Grafik bandwidth real-time dengan dukungan Gbps
+const ctx = document.getElementById('internetChart').getContext('2d');
+const maxPoints = 30; // tampilkan 30 data terakhir
+let currentInterface = localStorage.getItem('selectedInterface') || "<%= (settings && String(settings.monitor_mode||'mikrotik').toLowerCase()==='snmp' ? (settings.snmp_interface || settings.main_interface || 'ether1') : (settings.main_interface || 'ether1')) %>";
+// Ambil dari localStorage atau default sesuai settings.json dan mode monitor
+let currentUnit = 'Mbps'; // Unit aktif: bps, Kbps, Mbps, Gbps
+
+// Fungsi untuk konversi unit bandwidth
+function formatBandwidth(bytesPerSecond, isTotal = false) {
+  const bps = bytesPerSecond;
+  const kbps = bps / 1000;
+  const mbps = bps / 1000000;
+  const gbps = bps / 1000000000;
+  
+  if (isTotal) {
+    // Untuk TOTAL TRAFFIC - format yang lebih ringkas
+    if (gbps >= 10) {
+      return { value: gbps.toFixed(0), unit: 'Gbps' }; // Tanpa desimal untuk > 10 Gbps
+    } else if (gbps >= 1) {
+      return { value: gbps.toFixed(1), unit: 'Gbps' }; // 1 desimal untuk 1-10 Gbps
+    } else if (mbps >= 100) {
+      return { value: mbps.toFixed(0), unit: 'Mbps' }; // Tanpa desimal untuk > 100 Mbps
+    } else if (mbps >= 1) {
+      return { value: mbps.toFixed(1), unit: 'Mbps' }; // 1 desimal untuk 1-100 Mbps
+    } else if (kbps >= 1) {
+      return { value: kbps.toFixed(0), unit: 'Kbps' }; // Tanpa desimal untuk Kbps
+    } else {
+      return { value: bps.toFixed(0), unit: 'bps' };
+    }
+  } else {
+    // Untuk RX/TX individual - format asli yang sudah benar
+    if (gbps >= 1) {
+      return { value: gbps.toFixed(3), unit: 'Gbps' };
+    } else if (mbps >= 1) {
+      return { value: mbps.toFixed(2), unit: 'Mbps' };
+    } else if (kbps >= 1) {
+      return { value: kbps.toFixed(1), unit: 'Kbps' };
+    } else {
+      return { value: bps.toFixed(0), unit: 'bps' };
+    }
+  }
+}
+
+// Fungsi untuk mendapatkan nilai dalam unit yang konsisten untuk chart
+function getValueInUnit(bytesPerSecond, targetUnit) {
+  switch (targetUnit) {
+    case 'Gbps': return bytesPerSecond / 1000000000;
+    case 'Mbps': return bytesPerSecond / 1000000;
+    case 'Kbps': return bytesPerSecond / 1000;
+    default: return bytesPerSecond;
+  }
+}
+
+// Fungsi untuk menentukan unit optimal berdasarkan nilai maksimum
+function determineOptimalUnit(maxValue) {
+  if (maxValue >= 1000000000) return 'Gbps';
+  if (maxValue >= 1000000) return 'Mbps';
+  if (maxValue >= 1000) return 'Kbps';
+  return 'bps';
+}
+
+let chart = new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [
+      {
+        label: 'RX (Download)',
+        data: [],
+        fill: true,
+        backgroundColor: 'rgba(54, 162, 235, 0.15)', // Blue dengan transparansi lebih rendah
+        borderColor: 'rgba(54, 162, 235, 1)', // Blue solid
+        borderWidth: 3,
+        tension: 0.4,
+        pointBackgroundColor: 'rgba(54, 162, 235, 1)',
+        pointBorderColor: '#ffffff',
+        pointBorderWidth: 2,
+        pointRadius: 3,
+        pointHoverRadius: 6
+      },
+      {
+        label: 'TX (Upload)',
+        data: [],
+        fill: true,
+        backgroundColor: 'rgba(255, 99, 132, 0.15)', // Red dengan transparansi lebih rendah
+        borderColor: 'rgba(255, 99, 132, 1)', // Red solid
+        borderWidth: 3,
+        tension: 0.4,
+        pointBackgroundColor: 'rgba(255, 99, 132, 1)',
+        pointBorderColor: '#ffffff',
+        pointBorderWidth: 2,
+        pointRadius: 3,
+        pointHoverRadius: 6
+      }
+    ]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { 
+      legend: { 
+        display: true,
+        position: 'top',
+        labels: {
+          padding: 15,
+          usePointStyle: true,
+          pointStyle: 'line',
+          font: {
+            size: 12,
+            weight: 'bold'
+          }
+        }
+      },
+      tooltip: {
+        mode: 'index',
+        intersect: false,
+        backgroundColor: 'rgba(0,0,0,0.9)',
+        titleColor: 'white',
+        bodyColor: 'white',
+        borderColor: 'rgba(255,255,255,0.3)',
+        borderWidth: 1,
+        cornerRadius: 8,
+        titleFont: {
+          size: 13,
+          weight: 'bold'
+        },
+        bodyFont: {
+          size: 12
+        },
+        callbacks: {
+          label: function(context) {
+            const value = context.parsed.y;
+            const multiplier = currentUnit === 'Gbps' ? 1000000000 : currentUnit === 'Mbps' ? 1000000 : currentUnit === 'Kbps' ? 1000 : 1;
+            const bytesPerSecond = value * multiplier;
+            const formatted = formatBandwidth(bytesPerSecond); // Format asli untuk tooltip
+            return context.dataset.label + ': ' + formatted.value + ' ' + formatted.unit;
+          }
+        }
+      }
+    },
+    scales: { 
+      y: { 
+        beginAtZero: true,
+        title: {
+          display: true,
+          text: 'Bandwidth (' + currentUnit + ')',
+          font: {
+            size: 13,
+            weight: 'bold'
+          },
+          color: 'rgba(0,0,0,0.8)'
+        },
+        ticks: {
+          callback: function(value) {
+            if (currentUnit === 'Gbps') {
+              return value.toFixed(3) + ' Gbps';
+            } else if (currentUnit === 'Mbps') {
+              return value.toFixed(1) + ' Mbps';
+            } else if (currentUnit === 'Kbps') {
+              return value.toFixed(0) + ' Kbps';
+            } else {
+              return value.toFixed(0) + ' bps';
+            }
+          },
+          font: {
+            size: 10
+          },
+          maxTicksLimit: 8
+        },
+        grid: {
+          color: 'rgba(0,0,0,0.1)',
+          drawBorder: false
+        }
+      },
+      x: {
+        title: {
+          display: true,
+          text: 'Time (Real-time)',
+          font: {
+            size: 13,
+            weight: 'bold'
+          },
+          color: 'rgba(0,0,0,0.8)'
+        },
+        ticks: {
+          font: {
+            size: 10
+          },
+          maxTicksLimit: 8
+        },
+        grid: {
+          color: 'rgba(0,0,0,0.1)',
+          drawBorder: false
+        }
+      }
+    },
+    interaction: {
+      mode: 'nearest',
+      axis: 'x',
+      intersect: false
+    },
+    elements: {
+      point: {
+        radius: 3,
+        hoverRadius: 6,
+        borderWidth: 2
+      },
+      line: {
+        borderWidth: 3
+      }
+    },
+    animation: {
+      duration: 750,
+      easing: 'easeInOutQuart'
+    }
+  }
+});
+
+function addTrafficData(rx, tx, interface) {
+  const now = new Date();
+  const label = now.toLocaleTimeString('id-ID', { hour12: false });
+  
+  // Tentukan unit optimal berdasarkan nilai maksimum RX/TX (bukan total)
+  const maxCurrentValue = Math.max(rx, tx);
+  const optimalUnit = determineOptimalUnit(maxCurrentValue);
+  
+  // Update unit chart jika berubah
+  if (optimalUnit !== currentUnit) {
+    currentUnit = optimalUnit;
+    chart.options.scales.y.title.text = 'Bandwidth (' + currentUnit + ')';
+    
+    // Convert existing data ke unit baru
+    const multiplier = currentUnit === 'Gbps' ? 1000000000 : currentUnit === 'Mbps' ? 1000000 : currentUnit === 'Kbps' ? 1000 : 1;
+    chart.data.datasets[0].data = chart.data.datasets[0].data.map(value => {
+      const bytesPerSecond = value * multiplier;
+      return getValueInUnit(bytesPerSecond, currentUnit);
+    });
+    chart.data.datasets[1].data = chart.data.datasets[1].data.map(value => {
+      const bytesPerSecond = value * multiplier;
+      return getValueInUnit(bytesPerSecond, currentUnit);
+    });
+  }
+  
+  // Format nilai untuk tampilan real-time
+  const rxFormatted = formatBandwidth(rx); // RX dengan format asli yang sudah benar
+  const txFormatted = formatBandwidth(tx); // TX dengan format asli yang sudah benar
+  
+  // Hitung TOTAL dengan logic yang benar - konversi RX dan TX ke unit yang sama dulu
+  const rxMbps = rx / 1000000; // Konversi RX ke Mbps
+  const txMbps = tx / 1000000; // Konversi TX ke Mbps
+  const totalMbps = rxMbps + txMbps; // Jumlahkan dalam Mbps
+  
+  // Format total dengan logic sederhana
+  let totalFormatted;
+  if (totalMbps >= 1000) {
+    // Jika > 1000 Mbps, tampilkan sebagai Gbps
+    totalFormatted = { value: (totalMbps / 1000).toFixed(1), unit: 'Gbps' };
+  } else if (totalMbps >= 100) {
+    // Jika 100-1000 Mbps, tampilkan tanpa desimal
+    totalFormatted = { value: totalMbps.toFixed(0), unit: 'Mbps' };
+  } else if (totalMbps >= 1) {
+    // Jika 1-100 Mbps, tampilkan dengan 1 desimal
+    totalFormatted = { value: totalMbps.toFixed(1), unit: 'Mbps' };
+  } else {
+    // Jika < 1 Mbps, tampilkan sebagai Kbps
+    const totalKbps = totalMbps * 1000;
+    totalFormatted = { value: totalKbps.toFixed(0), unit: 'Kbps' };
+  }
+  
+  // Update real-time info dengan unit yang sesuai
+  document.getElementById('currentRx').innerHTML = `<span style="color: #36a2eb; font-weight: bold;">${rxFormatted.value}</span> <small>${rxFormatted.unit}</small>`;
+  document.getElementById('currentTx').innerHTML = `<span style="color: #ff6384; font-weight: bold;">${txFormatted.value}</span> <small>${txFormatted.unit}</small>`;
+  document.getElementById('currentTotal').innerHTML = `<span style="font-weight: bold;">${totalFormatted.value}</span> <small>${totalFormatted.unit}</small>`;
+  
+  // Update status berdasarkan traffic total (dalam Mbps untuk konsistensi)
+  const statusElement = document.getElementById('currentStatus');
+  
+  if (totalMbps > 100) { // > 100 Mbps
+    statusElement.textContent = 'Very High';
+    statusElement.parentElement.parentElement.style.background = 'linear-gradient(135deg, #dc3545 0%, #c82333 100%)';
+  } else if (totalMbps > 50) { // > 50 Mbps
+    statusElement.textContent = 'High';
+    statusElement.parentElement.parentElement.style.background = 'linear-gradient(135deg, #fd7e14 0%, #e55a00 100%)';
+  } else if (totalMbps > 10) { // > 10 Mbps
+    statusElement.textContent = 'Medium';
+    statusElement.parentElement.parentElement.style.background = 'linear-gradient(135deg, #17a2b8 0%, #138496 100%)';
+  } else if (totalMbps > 1) { // > 1 Mbps
+    statusElement.textContent = 'Low';
+    statusElement.parentElement.parentElement.style.background = 'linear-gradient(135deg, #28a745 0%, #1e7e34 100%)';
+  } else {
+    statusElement.textContent = 'Idle';
+    statusElement.parentElement.parentElement.style.background = 'linear-gradient(135deg, #6c757d 0%, #495057 100%)';
+  }
+  
+  // Konversi nilai ke unit chart yang aktif
+  const rxChartValue = getValueInUnit(rx, currentUnit);
+  const txChartValue = getValueInUnit(tx, currentUnit);
+  
+  // Update chart
+  if (chart.data.labels.length >= maxPoints) {
+    chart.data.labels.shift();
+    chart.data.datasets[0].data.shift();
+    chart.data.datasets[1].data.shift();
+  }
+  
+  chart.data.labels.push(label);
+  chart.data.datasets[0].data.push(rxChartValue);
+  chart.data.datasets[1].data.push(txChartValue);
+  
+  // Update chart dengan animasi smooth
+  chart.update('none'); // 'none' untuk update tanpa animasi untuk performa yang lebih baik
+}
+
+function resetChart() {
+  // Reset chart data ketika interface berubah
+  chart.data.labels = [];
+  chart.data.datasets[0].data = [];
+  chart.data.datasets[1].data = [];
+  
+  // Reset unit ke Mbps default
+  currentUnit = 'Mbps';
+  chart.options.scales.y.title.text = 'Bandwidth (Mbps)';
+  
+  // Reset real-time info dengan format yang konsisten
+  document.getElementById('currentRx').innerHTML = '<span style="color: #36a2eb; font-weight: bold;">0.00</span> <small>Mbps</small>';
+  document.getElementById('currentTx').innerHTML = '<span style="color: #ff6384; font-weight: bold;">0.00</span> <small>Mbps</small>';
+  document.getElementById('currentTotal').innerHTML = '<span style="font-weight: bold;">0.0</span> <small>Mbps</small>';
+  
+  // Reset status
+  const statusElement = document.getElementById('currentStatus');
+  statusElement.textContent = 'Idle';
+  statusElement.parentElement.parentElement.style.background = 'linear-gradient(135deg, #6c757d 0%, #495057 100%)';
+  
+  chart.update();
+}
+
+async function fetchTraffic() {
+  try {
+    const res = await fetch(`/api/dashboard/traffic?interface=${currentInterface}`);
+    const data = await res.json();
+    console.log('Traffic data received:', data); // Debug log
+    if (data.success) {
+      addTrafficData(data.rx, data.tx, data.interface);
+    } else {
+      console.error('Traffic fetch failed:', data.message);
+    }
+  } catch (e) { 
+    console.error('Error fetching traffic data:', e);
+  }
+}
+
+// Load interface secara dinamis dari Mikrotik
+async function loadInterfaces() {
+  try {
+    console.log('🔄 Loading interfaces from Mikrotik...');
+    const response = await fetch('/api/dashboard/interfaces');
+    const data = await response.json();
+    
+    console.log('📋 API Response:', data);
+    
+    if (data.success && data.interfaces && data.interfaces.length > 0) {
+      const select = document.getElementById('interfaceSelect');
+      
+      // Hapus semua option kecuali yang pertama (default)
+      while (select.children.length > 1) {
+        select.removeChild(select.lastChild);
+      }
+      
+      // Tambahkan interface yang terdeteksi
+      data.interfaces.forEach(iface => {
+        const option = document.createElement('option');
+        option.value = iface.name;
+        
+        // Buat label yang informatif
+        let label = iface.name;
+        
+        // Tambahkan label khusus untuk interface tertentu
+        if (iface.name === 'ether1-ISP') {
+          label = 'ether1-ISP (ISP)';
+        } else if (iface.name === 'ether2-CADANGAN ISP') {
+          label = 'ether2-CADANGAN ISP (Backup)';
+        } else if (iface.name === 'ether3-LOKAL') {
+          label = 'ether3-LOKAL (Local)';
+        } else if (iface.name === 'ether4-LOKAL-LEPTOP') {
+          label = 'ether4-LOKAL-LEPTOP (Laptop)';
+        } else if (iface.name === 'ether5-LOKAL-REMOT OLT') {
+          label = 'ether5-LOKAL-REMOT OLT (Remote)';
+        } else if (iface.name === 'ether6-OLT-SFP1-TANJUNGPURA') {
+          label = 'ether6-OLT-SFP1-TANJUNGPURA (OLT1)';
+        } else if (iface.name === 'ether7-OLT-SFP2-TANJUNGPURA2') {
+          label = 'ether7-OLT-SFP2-TANJUNGPURA2 (OLT2)';
+        } else if (iface.name === 'ether8-HOTSPOT-RADIO') {
+          label = 'ether8-HOTSPOT-RADIO (Hotspot)';
+        } else if (iface.name === 'ether9-HOTSPOT-SWICTHHUB') {
+          label = 'ether9-HOTSPOT-SWICTHHUB (Switch)';
+        } else if (iface.name === 'ether10-POP PEGAGAN/JANGGAR') {
+          label = 'ether10-POP PEGAGAN/JANGGAR (POP)';
+        } else if (iface.name === 'bridge1-HOTSPOT') {
+          label = 'bridge1-HOTSPOT (Bridge)';
+        } else if (iface.name === 'bridge2_OLT') {
+          label = 'bridge2_OLT (Bridge OLT)';
+        } else if (iface.name === 'vlan6-1100') {
+          label = 'vlan6-1100 (VLAN)';
+        }
+        
+        // Tambahkan status
+        if (iface.disabled) {
+          label += ' [Disabled]';
+        } else if (!iface.running) {
+          label += ' [Down]';
+        } else {
+          label += ' [Active]';
+        }
+        
+        option.textContent = label;
+        select.appendChild(option);
+      });
+      
+      console.log(`✅ Loaded ${data.interfaces.length} interfaces from Mikrotik`);
+      
+      // Update current interface jika tidak ada di list
+      const currentOption = select.querySelector(`option[value="${currentInterface}"]`);
+      if (!currentOption && data.interfaces.length > 0) {
+        currentInterface = data.interfaces[0].name;
+        localStorage.setItem('selectedInterface', currentInterface);
+        document.getElementById('currentInterface').textContent = currentInterface;
+        select.value = currentInterface;
+      }
+      
+    } else {
+      console.warn('⚠️ Failed to load interfaces, using default options');
+      console.warn('Response:', data);
+    }
+  } catch (error) {
+    console.error('❌ Error loading interfaces:', error);
+    console.error('Error details:', error.message);
+  }
+}
+
+// Set interface yang tersimpan ke dropdown
+document.getElementById('interfaceSelect').value = currentInterface;
+document.getElementById('currentInterface').textContent = currentInterface;
+
+// Event listener untuk perubahan interface
+document.getElementById('interfaceSelect').addEventListener('change', function() {
+  currentInterface = this.value;
+  localStorage.setItem('selectedInterface', currentInterface); // Simpan ke localStorage
+  document.getElementById('currentInterface').textContent = currentInterface; // Update tampilan
+  console.log('Interface changed to:', currentInterface);
+  resetChart();
+  fetchTraffic(); // Fetch data baru segera
+});
+
+// Load interfaces saat halaman dimuat
+loadInterfaces();
+
+// Variabel untuk tracking warming up state (SNMP memerlukan 2 sample untuk kalkulasi rate)
+let warmupSamplesNeeded = 2;
+let warmupSamplesCollected = 0;
+const isSnmpMode = <%- JSON.stringify(typeof settings !== 'undefined' && String(settings.monitor_mode).toLowerCase() === 'snmp') %>;
+
+// Fungsi untuk warming up SNMP cache
+async function warmupSNMPCache() {
+  if (!isSnmpMode) return; // Skip warmup if not SNMP mode
+  
+  console.log('🔄 Warming up SNMP cache (need 2 samples for rate calculation)...');
+  
+  // Update status card untuk menunjukkan warming up
+  const statusElement = document.getElementById('currentStatus');
+  const oldStatus = statusElement.textContent;
+  statusElement.textContent = 'Initializing...';
+  
+  // Tampilkan notifikasi warming up
+  document.getElementById('currentRx').innerHTML = '<small style="color: #ffc107;">Initializing...</small>';
+  document.getElementById('currentTx').innerHTML = '<small style="color: #ffc107;">Initializing...</small>';
+  document.getElementById('currentTotal').innerHTML = '<small style="color: #ffc107;">Please wait...</small>';
+  
+  // Lakukan 2 sample dengan jeda 3 detik
+  for (let i = 0; i < warmupSamplesNeeded; i++) {
+    try {
+      const res = await fetch(`/api/dashboard/traffic?interface=${currentInterface}`);
+      const data = await res.json();
+      warmupSamplesCollected++;
+      console.log(`✅ Warmup sample ${warmupSamplesCollected}/${warmupSamplesNeeded} collected`);
+      
+      if (i < warmupSamplesNeeded - 1) {
+        // Tunggu 3 detik sebelum sample berikutnya
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+    } catch (e) {
+      console.error('❌ Error during warmup:', e);
+    }
+  }
+  
+  console.log('✅ SNMP cache warmed up, starting normal polling...');
+  
+  // Reset status display
+  statusElement.textContent = 'Idle';
+}
+
+// Set interval untuk update data
+const trafficInterval = setInterval(fetchTraffic, 2000);
+
+// Mulai dengan warming up cache untuk SNMP, lalu fetch normal
+(async function() {
+  await warmupSNMPCache();
+  fetchTraffic();
+})();
+</script>
+
+<script>
+// Load Billing Dashboard Data
+async function loadBillingData() {
+  try {
+    const response = await fetch('/api/dashboard/billing-stats');
+    const data = await response.json();
+    
+    if (data.success) {
+      // Update cards
+      document.getElementById('total-customers').textContent = data.totalCustomers || 0;
+      document.getElementById('paid-this-month').textContent = formatCurrency(data.paidThisMonth || 0);
+      document.getElementById('paid-count').textContent = `${data.paidCount || 0} invoices`;
+      document.getElementById('unpaid-amount').textContent = formatCurrency(data.unpaidAmount || 0);
+      document.getElementById('unpaid-count').textContent = `${data.unpaidCount || 0} invoices`;
+      document.getElementById('monthly-revenue').textContent = formatCurrency(data.monthlyRevenue || 0);
+      document.getElementById('revenue-period').textContent = data.currentMonth || '-';
+      
+      // Load paid invoices table
+      loadPaidInvoices(data.recentPaidInvoices || []);
+    }
+  } catch (error) {
+    console.error('Error loading billing data:', error);
+  }
+}
+
+function loadPaidInvoices(invoices) {
+  const tbody = document.getElementById('paidInvoicesBody');
+  
+  if (!invoices || invoices.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No paid invoices this month</td></tr>';
+    return;
+  }
+  
+  tbody.innerHTML = invoices.map(invoice => `
+    <tr>
+      <td><span class="badge bg-secondary">${invoice.invoice_number || '-'}</span></td>
+      <td>
+        <div class="fw-semibold">${invoice.customer_name || '-'}</div>
+        <small class="text-muted"><i class="bi bi-phone"></i> ${invoice.phone || invoice.customer_phone || '-'}</small>
+      </td>
+      <td><span class="badge bg-primary">${invoice.package_name || '-'}</span></td>
+      <td class="text-end"><strong class="text-success">${formatCurrency(invoice.amount)}</strong></td>
+      <td><small class="text-muted">${formatDate(invoice.paid_at || invoice.paid_date)}</small></td>
+      <td>
+        <span class="badge bg-info">${getPaymentMethodLabel(invoice.payment_method)}</span>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function getPaymentMethodLabel(method) {
+  const labels = {
+    'cash': '💵 Tunai',
+    'bank_transfer': '🏦 Transfer',
+    'ewallet': '💳 E-Wallet',
+    'qris': '📱 QRIS',
+    'tripay': '🌐 Gateway',
+    'other': '📝 Lainnya'
+  };
+  return labels[method] || method || 'Manual';
+}
+
+function formatCurrency(amount) {
+  return new Intl.NumberFormat('id-ID', {
+    style: 'currency',
+    currency: 'IDR',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0
+  }).format(amount || 0);
+}
+
+function formatDate(dateString) {
+  if (!dateString) return '-';
+  const date = new Date(dateString);
+  const options = { 
+    year: 'numeric', 
+    month: 'short', 
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  };
+  return date.toLocaleDateString('id-ID', options);
+}
+
+// Load billing data on page load
+document.addEventListener('DOMContentLoaded', function() {
+  loadBillingData();
+  // Refresh billing data every 30 seconds
+  setInterval(loadBillingData, 30000);
+});
+</script>
+
+<script>
+// ============================
+// GRAFIK PENDAPATAN HARIAN
+// ============================
+let revenueChart;
+
+async function loadRevenueChart(days = 30) {
+  console.log(`[Frontend] Loading revenue chart for ${days} days...`);
+  try {
+    const response = await fetch(`/api/dashboard/revenue-chart?days=${days}`, {
+      credentials: 'same-origin',
+      headers: {
+        'Accept': 'application/json'
+      }
+    });
+    console.log('[Frontend] Revenue chart response status:', response.status);
+    
+    if (response.status === 401 || response.status === 302) {
+      console.error('[Frontend] Not authenticated, redirecting to login');
+      window.location.href = '/admin/login';
+      return;
+    }
+    
+    const contentType = response.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      const text = await response.text();
+      console.error('[Frontend] Revenue chart - Response is not JSON:', text.substring(0, 200));
+      throw new Error('Server returned non-JSON response');
+    }
+    
+    const data = await response.json();
+    console.log('[Frontend] Revenue chart data:', data);
+    
+    if (data.success) {
+      const labels = data.dates || [];
+      const revenues = data.revenues || [];
+      
+      // Update statistik
+      const total = revenues.reduce((a, b) => a + b, 0);
+      const avg = total / revenues.length || 0;
+      const max = Math.max(...revenues, 0);
+      
+      document.getElementById('totalRevenue').textContent = formatCurrency(total);
+      document.getElementById('avgRevenue').textContent = formatCurrency(avg);
+      document.getElementById('maxRevenue').textContent = formatCurrency(max);
+      
+      // Destroy chart lama jika ada
+      if (revenueChart) {
+        revenueChart.destroy();
+      }
+      
+      // Buat chart baru
+      const ctx = document.getElementById('revenueChart').getContext('2d');
+      revenueChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Pendapatan Harian',
+            data: revenues,
+            backgroundColor: 'rgba(102, 126, 234, 0.7)',
+            borderColor: 'rgba(102, 126, 234, 1)',
+            borderWidth: 0,
+            borderRadius: 6,
+            barPercentage: 0.6,
+            categoryPercentage: 0.7
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: true,
+          plugins: {
+            legend: {
+              display: false
+            },
+            tooltip: {
+              backgroundColor: 'rgba(0,0,0,0.8)',
+              padding: 12,
+              titleFont: {
+                size: 14,
+                weight: 'bold'
+              },
+              bodyFont: {
+                size: 13
+              },
+              callbacks: {
+                label: function(context) {
+                  return 'Pendapatan: ' + formatCurrency(context.parsed.y || 0);
+                }
+              }
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              ticks: {
+                callback: function(value) {
+                  try {
+                    return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(value);
+                  } catch (_) {
+                    return 'Rp ' + (value || 0).toLocaleString('id-ID');
+                  }
+                }
+              },
+              grid: {
+                color: 'rgba(255, 255, 255, 0.05)'
+              }
+            },
+            x: {
+              grid: {
+                display: false
+              }
+            }
+          }
+        }
+      });
+    } else {
+      console.error('[Frontend] Revenue chart - API returned error:', data);
+      document.getElementById('totalRevenue').textContent = 'Error';
+      document.getElementById('avgRevenue').textContent = 'Error';
+      document.getElementById('maxRevenue').textContent = 'Error';
+    }
+  } catch (error) {
+    console.error('Error loading revenue chart:', error);
+    document.getElementById('totalRevenue').textContent = 'Error';
+    document.getElementById('avgRevenue').textContent = error.message || 'Error';
+    document.getElementById('maxRevenue').textContent = 'Error';
+  }
+}
+
+// Event listener untuk filter periode
+document.getElementById('revenueFilter')?.addEventListener('change', function() {
+  loadRevenueChart(parseInt(this.value));
+});
+
+// ============================
+// ACTIVITY LOG
+// ============================
+async function loadActivityLog() {
+  console.log('[Frontend] Loading activity log...');
+  try {
+    const response = await fetch('/api/dashboard/activity-log?limit=50');
+    console.log('[Frontend] Activity log response status:', response.status);
+    
+    // Cek apakah response adalah JSON
+    const contentType = response.headers.get('content-type');
+    console.log('[Frontend] Content-Type:', contentType);
+    
+    if (!contentType || !contentType.includes('application/json')) {
+      const text = await response.text();
+      console.error('[Frontend] Response is not JSON:', text.substring(0, 200));
+      throw new Error('Server returned non-JSON response');
+    }
+    
+    const data = await response.json();
+    console.log('[Frontend] Activity log data:', data);
+    
+    if (data.success && data.activities) {
+      const logContainer = document.getElementById('activityLog');
+      
+      if (data.activities.length === 0) {
+        logContainer.innerHTML = '<div class="text-center text-muted"><small>Tidak ada activity log</small></div>';
+        return;
+      }
+      
+      logContainer.innerHTML = data.activities.map(activity => {
+        const icon = getActivityIcon(activity.type);
+        const color = getActivityColor(activity.type);
+        const timeAgo = formatTimeAgo(activity.timestamp);
+        
+        return `
+          <div class="activity-item mb-3 pb-3 border-bottom">
+            <div class="d-flex">
+              <div class="flex-shrink-0">
+                <div class="activity-icon bg-${color} text-white rounded-circle" style="width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;">
+                  <i class="bi bi-${icon}"></i>
+                </div>
+              </div>
+              <div class="flex-grow-1 ms-3">
+                <div class="d-flex justify-content-between">
+                  <strong class="activity-title">${activity.title}</strong>
+                  <small class="text-muted">${timeAgo}</small>
+                </div>
+                <small class="text-muted d-block">${activity.description}</small>
+                ${activity.user ? `<small class="text-primary"><i class="bi bi-person-circle"></i> ${activity.user}</small>` : ''}
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+  } catch (error) {
+    console.error('Error loading activity log:', error);
+    document.getElementById('activityLog').innerHTML = '<div class="text-center text-danger"><small>Error loading log</small></div>';
+  }
+}
+
+function getActivityIcon(type) {
+  const icons = {
+    'login': 'box-arrow-in-right',
+    'logout': 'box-arrow-right',
+    'payment': 'cash-coin',
+    'invoice': 'receipt',
+    'customer': 'person-plus',
+    'device': 'router',
+    'restart': 'arrow-clockwise',
+    'config': 'gear',
+    'backup': 'cloud-download',
+    'error': 'exclamation-triangle',
+    'system': 'cpu'
+  };
+  return icons[type] || 'dot';
+}
+
+function getActivityColor(type) {
+  const colors = {
+    'login': 'success',
+    'logout': 'secondary',
+    'payment': 'success',
+    'invoice': 'info',
+    'customer': 'primary',
+    'device': 'warning',
+    'restart': 'danger',
+    'config': 'dark',
+    'backup': 'info',
+    'error': 'danger',
+    'system': 'secondary'
+  };
+  return colors[type] || 'secondary';
+}
+
+function formatTimeAgo(timestamp) {
+  const now = new Date();
+  const then = new Date(timestamp);
+  const diff = Math.floor((now - then) / 1000); // dalam detik
+  
+  if (diff < 60) return 'baru saja';
+  if (diff < 3600) return Math.floor(diff / 60) + ' menit lalu';
+  if (diff < 86400) return Math.floor(diff / 3600) + ' jam lalu';
+  if (diff < 2592000) return Math.floor(diff / 86400) + ' hari lalu';
+  return then.toLocaleDateString('id-ID');
+}
+
+function refreshActivityLog() {
+  const btn = event.target.closest('button');
+  const icon = btn.querySelector('i');
+  
+  // Animasi rotasi
+  icon.classList.add('rotating');
+  setTimeout(() => icon.classList.remove('rotating'), 1000);
+  
+  loadActivityLog();
+}
+
+// Load saat halaman dimuat
+document.addEventListener('DOMContentLoaded', function() {
+  loadRevenueChart(30);
+  loadActivityLog();
+  
+  // Refresh activity log setiap 30 detik
+  setInterval(loadActivityLog, 30000);
+});
+</script>
+
+<style>
+.activity-item:last-child {
+  border-bottom: none !important;
+  margin-bottom: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+.rotating {
+  animation: rotate 1s linear infinite;
+}
+
+@keyframes rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Recent Paid Invoices Table Styling */
+#paidInvoicesTable {
+  font-size: 0.9rem;
+}
+
+#paidInvoicesTable thead th {
+  background-color: #f8f9fa;
+  color: #495057;
+  font-weight: 600;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 2px solid #dee2e6;
+  padding: 12px;
+}
+
+#paidInvoicesTable tbody td {
+  vertical-align: middle;
+  padding: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+#paidInvoicesTable tbody tr:hover {
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+#paidInvoicesTable .badge {
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+#paidInvoicesTable .fw-semibold {
+  font-size: 0.9rem;
+  color: #e0e0e0;
+}
+</style>
+
+<script>
+// Fungsi untuk me-refresh logo dengan timestamp baru
+function refreshLogo() {
+    const logo = document.getElementById('logoImage');
+    if (logo) {
+        // Tambahkan parameter timestamp baru untuk memaksa reload gambar
+        const timestamp = new Date().getTime();
+        const src = logo.src.split('?')[0]; // Hapus parameter yang ada
+        logo.src = `${src}?v=${timestamp}`;
+    }
+}
+
+// Refresh logo setiap 5 detik
+setInterval(refreshLogo, 5000);
+
+// Refresh logo saat halaman dimuat
+document.addEventListener('DOMContentLoaded', function() {
+    refreshLogo();
+});
+</script>
+            </main>
+    </div>
+</div>
+<!-- Modal Konfirmasi Restart Mikrotik -->
+<div class="modal fade" id="restartMikrotikModal" tabindex="-1" aria-labelledby="restartMikrotikModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="restartMikrotikModalLabel"><i class="bi bi-arrow-repeat"></i> Konfirmasi Restart Mikrotik</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        Apakah Anda yakin ingin <b>restart Mikrotik</b>?<br>Router akan reboot dan koneksi internet pelanggan akan terputus sementara.
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+        <button type="button" class="btn btn-danger" id="confirmRestartMikrotik">Restart</button>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- Notifikasi -->
+<div id="restartNotif" class="alert d-none position-fixed top-0 end-0 m-4" style="z-index:1055; min-width:300px;"></div>
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+$(function() {
+  $(document).on('click', '#restartMikrotikBtn', function(e) {
+    e.preventDefault();
+    $('#restartMikrotikModal').modal('show');
+  });
+  $('#confirmRestartMikrotik').on('click', function() {
+    $('#restartMikrotikModal').modal('hide');
+    $.ajax({
+      url: '/admin/mikrotik/restart',
+      method: 'POST',
+      success: function(res) {
+        let notif = $('#restartNotif');
+        if(res.success) {
+          notif.removeClass('d-none alert-danger').addClass('alert-success').text(res.message || 'Mikrotik berhasil direstart!');
+        } else {
+          notif.removeClass('d-none alert-success').addClass('alert-danger').text(res.message || 'Gagal restart Mikrotik!');
+        }
+        setTimeout(function() { notif.addClass('d-none'); }, 4000);
+      },
+      error: function() {
+        let notif = $('#restartNotif');
+        notif.removeClass('d-none alert-success').addClass('alert-danger').text('Gagal menghubungi server!');
+        setTimeout(function() { notif.addClass('d-none'); }, 4000);
+      }
+    });
+  });
+});
+</script>
+
+</body>
+</html>

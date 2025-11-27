@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MikroTik Scripts - Admin</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="/css/responsive-admin.css">
+  <link href="/css/dark-theme.css" rel="stylesheet">
+  <style>
+    /* Dark Theme */
+    body { 
+      background: #1a1d29 !important;
+      color: #e0e0e0;
+    }
+    
+    .main-content {
+      background: #1a1d29;
+    }
+    
+    /* Mobile responsive fixes */
+    @media (max-width: 767.98px) {
+      .main-content {
+        margin-top: 70px !important;
+        padding-top: 10px !important;
+        z-index: 1;
+      }
+    }
+    
+    /* Card Dark Theme */
+    .card {
+      background: #252a3d !important;
+      border: 1px solid #3a4052;
+      color: #e0e0e0;
+    }
+    
+    .card-header {
+      background: #2d3348 !important;
+      border-bottom: 1px solid #3a4052;
+      color: #e0e0e0;
+    }
+    
+    .card-body {
+      color: #e0e0e0;
+    }
+    
+    /* Text Colors */
+    h2, h3, h4, h5, h6 {
+      color: #ffffff !important;
+    }
+    
+    p, span, label, .text-muted {
+      color: #b8b8b8 !important;
+    }
+    
+    strong {
+      color: #e0e0e0;
+    }
+    
+    /* Form controls dark theme */
+    .form-control, .form-select, textarea {
+      background-color: #1a1d29;
+      border-color: #3a4052;
+      color: #e0e0e0;
+    }
+    
+    .form-control:focus, .form-select:focus, textarea:focus {
+      background-color: #1a1d29;
+      border-color: #4a5fc1;
+      color: #e0e0e0;
+    }
+    
+    /* Code editor style */
+    textarea.code-editor {
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      tab-size: 4;
+    }
+    
+    .alert-info {
+      background-color: #2d3348;
+      border-color: #3a4052;
+      color: #e0e0e0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container-fluid">
+    <div class="row">
+      <%- include('partials/admin-responsive-sidebar', { page: 'mikrotik-scripts', settings: settings }) %>
+      
+      <main class="col-md-10 main-content ms-sm-auto">
+        <div class="container-fluid p-4">
+          <div class="row mb-4">
+            <div class="col-12">
+              <h2><i class="bi bi-code-slash text-primary"></i> Skrip MikroTik</h2>
+              <p class="text-muted">Kelola skrip custom untuk isolir, unisolir, dan operasi MikroTik lainnya</p>
+            </div>
+          </div>
+
+          <% if (success) { %>
+            <div class="alert alert-success alert-dismissible fade show" role="alert">
+              <i class="bi bi-check-circle"></i> <%= success %>
+              <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+          <% } %>
+          <% if (error) { %>
+            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+              <i class="bi bi-exclamation-triangle"></i> <%= error %>
+              <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+          <% } %>
+
+          <div class="alert alert-info">
+            <i class="bi bi-info-circle"></i> <strong>Catatan:</strong>
+            <ul class="mb-0 mt-2">
+              <li>Skrip akan dijalankan melalui MikroTik API</li>
+              <li>Variabel yang tersedia: <code>{{username}}</code>, <code>{{profile}}</code>, <code>{{customer_name}}</code>, <code>{{customer_phone}}</code></li>
+              <li>Gunakan syntax RouterOS yang valid</li>
+              <li>Test skrip terlebih dahulu sebelum menyimpan</li>
+            </ul>
+          </div>
+
+          <form method="POST" action="/admin/mikrotik-scripts/update">
+            <div class="row">
+              <!-- Isolir Script -->
+              <div class="col-12">
+                <div class="card mb-4">
+                  <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-lock text-warning"></i> Skrip Isolir</h5>
+                  </div>
+                  <div class="card-body">
+                    <div class="mb-3">
+                      <label class="form-label">RouterOS Script untuk Isolir PPPoE User</label>
+                      <textarea class="form-control code-editor" name="isolir_script" rows="10" placeholder="/ppp secret set [find name={{username}}] profile={{profile}}"><%= settings.mikrotik_isolir_script || '/ppp secret set [find name={{username}}] profile={{profile}}\n:log info "User {{username}} diisolir ke profile {{profile}}"' %></textarea>
+                      <div class="form-text">Default: Mengubah profile PPPoE user ke profile isolir</div>
+                    </div>
+                    
+                    <div class="alert alert-light">
+                      <strong>Contoh penggunaan variabel:</strong>
+                      <pre class="mb-0"><code>/ppp secret set [find name={{username}}] profile={{profile}}
+/ppp secret set [find name={{username}}] comment="Isolir - {{customer_name}} ({{customer_phone}})"
+:log info "User {{username}} ({{customer_name}}) diisolir"</code></pre>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Unisolir Script -->
+              <div class="col-12">
+                <div class="card mb-4">
+                  <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-unlock text-success"></i> Skrip Unisolir</h5>
+                  </div>
+                  <div class="card-body">
+                    <div class="mb-3">
+                      <label class="form-label">RouterOS Script untuk Unisolir PPPoE User</label>
+                      <textarea class="form-control code-editor" name="unisolir_script" rows="10" placeholder="/ppp secret set [find name={{username}}] profile={{profile}}"><%= settings.mikrotik_unisolir_script || '/ppp secret set [find name={{username}}] profile={{profile}}\n:log info "User {{username}} dikembalikan ke profile {{profile}}"' %></textarea>
+                      <div class="form-text">Default: Mengembalikan profile PPPoE user ke profile normal</div>
+                    </div>
+                    
+                    <div class="alert alert-light">
+                      <strong>Contoh penggunaan variabel:</strong>
+                      <pre class="mb-0"><code>/ppp secret set [find name={{username}}] profile={{profile}}
+/ppp secret set [find name={{username}}] comment="Aktif - {{customer_name}} ({{customer_phone}})"
+:log info "User {{username}} ({{customer_name}}) dikembalikan ke profile normal"</code></pre>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Custom Script -->
+              <div class="col-12">
+                <div class="card mb-4">
+                  <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-gear text-info"></i> Skrip Custom</h5>
+                  </div>
+                  <div class="card-body">
+                    <div class="mb-3">
+                      <label class="form-label">RouterOS Script Custom (Optional)</label>
+                      <textarea class="form-control code-editor" name="custom_script" rows="12" placeholder="# Script custom Anda di sini..."><%= settings.mikrotik_custom_script || '# Contoh: Auto-backup konfigurasi\n/system backup save name="auto-backup-$(date)"\n:log info "Backup created"' %></textarea>
+                      <div class="form-text">Skrip tambahan untuk keperluan maintenance atau monitoring</div>
+                    </div>
+                    
+                    <div class="alert alert-light">
+                      <strong>Contoh custom script:</strong>
+                      <pre class="mb-0"><code># Auto backup setiap hari
+/system backup save name="backup-$(date)"
+:log info "Daily backup completed"
+
+# Monitor CPU dan RAM
+:if ([/system resource get cpu-load] > 80) do={
+  :log warning "High CPU load detected"
+}
+
+# Clear old logs
+/log print where time<([/system clock get time] - 7d)
+/log remove [find where time<([/system clock get time] - 7d)]</code></pre>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="col-12">
+                <div class="card">
+                  <div class="card-body">
+                    <button type="submit" class="btn btn-primary">
+                      <i class="bi bi-save"></i> Simpan Skrip
+                    </button>
+                    <a href="/admin/setting" class="btn btn-secondary">
+                      <i class="bi bi-arrow-left"></i> Kembali
+                    </a>
+                    <button type="button" class="btn btn-info" onclick="testScript()">
+                      <i class="bi bi-play-circle"></i> Test Script (Coming Soon)
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </form>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    function testScript() {
+      alert('Fitur test script akan segera tersedia.\n\nUntuk testing manual, gunakan MikroTik Terminal atau Winbox.');
+    }
+  </script>
+</body>
+</html>

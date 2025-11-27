@@ -1,0 +1,591 @@
+<!-- Mobile Top Navbar (Only visible on mobile) -->
+<nav class="navbar navbar-expand-md navbar-dark d-md-none mobile-navbar">
+    <div class="container-fluid">
+        <div class="d-flex align-items-center">
+            <button class="btn btn-link text-white p-0 me-3" type="button" id="sidebarToggle">
+                <i class="bi bi-list" style="font-size: 1.5rem;"></i>
+            </button>
+            <img src="/img/<%= typeof settings !== 'undefined' && settings.logo_filename ? settings.logo_filename : 'logo.png' %>?ts=<%= Date.now() %>" alt="Logo" style="height: 60px; border-radius: 4px;">
+            <span class="navbar-brand ms-2 mb-0">Admin Panel</span>
+        </div>
+    </div>
+</nav>
+
+<!-- Overlay for mobile sidebar -->
+<div class="sidebar-overlay d-md-none" id="sidebarOverlay"></div>
+
+<!-- Admin Sidebar -->
+<nav class="col-md-2 sidebar d-flex flex-column" id="adminSidebar">
+    <!-- Close button for mobile -->
+    <div class="d-md-none text-end p-3">
+        <button class="btn btn-link text-white p-0" id="sidebarClose">
+            <i class="bi bi-x" style="font-size: 1.5rem;"></i>
+        </button>
+    </div>
+    
+    <!-- Logo Section -->
+    <div class="sidebar-header mb-4 text-center">
+        <img id="logoImage" src="/img/<%= typeof settings !== 'undefined' && settings.logo_filename ? settings.logo_filename : 'logo.png' %>?v=<%= new Date().getTime() %>" alt="Logo" style="max-width:200px;max-height:100px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+    </div>
+    
+    <!-- Navigation Links -->
+    
+        <!-- 1. Dashboard -->
+        <a href="/admin/dashboard" class="<%= typeof page !== 'undefined' && page === 'dashboard' ? 'active' : '' %> sidebar-main-link"><i class="bi bi-speedometer2 sidebar-main-icon"></i> <span class="sidebar-main-text">Dashboard</span></a>
+        <!-- 2. Analytics -->
+        <a href="/admin/analytics" class="<%= typeof page !== 'undefined' && page === 'analytics' ? 'active' : '' %> sidebar-main-link"><i class="bi bi-graph-up-arrow sidebar-main-icon"></i> <span class="sidebar-main-text">Analytics</span></a>
+        <!-- 3. Network Map -->
+        <a href="/admin/map" class="<%= typeof page !== 'undefined' && page === 'map' ? 'active' : '' %> sidebar-main-link"><i class="bi bi-map sidebar-main-icon"></i> <span class="sidebar-main-text">Network Map</span></a>
+
+        <!-- 4. Device Management -->
+            <div class="menu-section">
+                <div class="sidebar-section-title menu-toggle collapsed" onclick="toggleMenu('deviceSection', this)">
+                    <span class="sidebar-main-text"><i class="bi bi-router sidebar-main-icon"></i> Device Management</span>
+                    <i class="bi bi-chevron-right toggle-icon"></i>
+                </div>
+                <div class="submenu" id="deviceSection">
+                    <a href="/admin/genieacs" class="<%= typeof page !== 'undefined' && page === 'genieacs' ? 'active' : '' %> sidebar-sub-link"><i class="bi bi-modem sidebar-sub-icon"></i> GenieACS (ONT/ONU)</a>
+                    <a href="/admin/odp" class="<%= typeof page !== 'undefined' && page === 'odp' ? 'active' : '' %> sidebar-sub-link"><i class="bi bi-ethernet sidebar-sub-icon"></i> ODP Management</a>
+                </div>
+            </div>
+
+        <!-- 5. User Management -->
+            <div class="menu-section">
+                <div class="sidebar-section-title menu-toggle collapsed" onclick="toggleMenu('userSection', this)">
+                    <span class="sidebar-main-text"><i class="bi bi-person-lines-fill sidebar-main-icon"></i> User Management</span>
+                    <i class="bi bi-chevron-right toggle-icon"></i>
+                </div>
+                <div class="submenu" id="userSection" style="background: transparent;">
+                    <!-- PPPoE -->
+                    <div class="menu-section">
+                        <div class="menu-toggle collapsed" onclick="toggleMenu('pppoeMenu', this)">
+                            <span class="sidebar-sub-text"><i class="bi bi-people sidebar-sub-icon"></i> PPPoE</span>
+                            <i class="bi bi-chevron-right toggle-icon"></i>
+                        </div>
+                        <div class="submenu" id="pppoeMenu">
+                            <a href="/admin/packages" class="<%= typeof page !== 'undefined' && page === 'packages' ? 'active' : '' %> sidebar-sub-link">Profile Paket</a>
+                            <a href="/admin/customers" class="<%= typeof page !== 'undefined' && page === 'customers' ? 'active' : '' %> sidebar-sub-link">Data Pelanggan</a>
+                            <% if (typeof settings !== 'undefined' && settings.app_mode === 'radius') { %>
+                            <a href="/admin/pelanggan-online" class="<%= typeof page !== 'undefined' && page === 'pelanggan-online' ? 'active' : '' %> sidebar-sub-link">Pelanggan Online</a>
+                            <% } %>
+                            <a href="/admin/mikrotik" class="<%= typeof page !== 'undefined' && page === 'mikrotik' ? 'active' : '' %> sidebar-sub-link">PPPoE Online</a>
+                        </div>
+                    </div>
+                    <!-- Hotspot -->
+                    <div class="menu-section">
+                        <div class="menu-toggle collapsed" onclick="toggleMenu('hotspotMenu', this)">
+                            <span class="sidebar-sub-text"><i class="bi bi-wifi-off sidebar-sub-icon"></i> Hotspot</span>
+                            <i class="bi bi-chevron-right toggle-icon"></i>
+                        </div>
+                        <div class="submenu" id="hotspotMenu">
+                            <a href="/admin/hotspot" class="<%= typeof page !== 'undefined' && page === 'hotspot' ? 'active' : '' %> sidebar-sub-link">Hotspot Users</a>
+                            <a href="/admin/mikrotik/hotspot-profiles" class="<%= typeof page !== 'undefined' && page === 'hotspot-profiles' ? 'active' : '' %> sidebar-sub-link">Hotspot Profiles</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        <!-- 6. Billing & Finance -->
+        <div class="menu-section">
+            <div class="sidebar-section-title menu-toggle collapsed" onclick="toggleMenu('billingSection', this)">
+                <span><small class="text-muted">� BILLING & FINANCE</small></span>
+                <i class="bi bi-chevron-right toggle-icon"></i>
+            </div>
+            <div class="submenu" id="billingSection" style="background: transparent;">
+                <div class="menu-section">
+                    <div class="menu-toggle collapsed" onclick="toggleMenu('invoicesMenu', this)">
+                        <span><i class="bi bi-file-earmark-text"></i> Invoices</span>
+                        <i class="bi bi-chevron-right toggle-icon"></i>
+                    </div>
+                    <div class="submenu" id="invoicesMenu">
+                        <a href="/admin/invoices/unpaid" class="<%= typeof page !== 'undefined' && page === 'invoices-unpaid' ? 'active' : '' %>"><i class="bi bi-exclamation-circle text-warning"></i> Unpaid</a>
+                        <a href="/admin/invoices/paid" class="<%= typeof page !== 'undefined' && page === 'invoices-paid' ? 'active' : '' %>"><i class="bi bi-check-circle text-success"></i> Paid</a>
+                    </div>
+                </div>
+                <a href="/admin/payments" class="<%= typeof page !== 'undefined' && page === 'payments' ? 'active' : '' %>"><i class="bi bi-credit-card"></i> Riwayat pembayaran</a>
+            </div>
+        </div>
+
+        <!-- 7. Network Monitoring -->
+            <div class="menu-section">
+                <div class="sidebar-section-title menu-toggle collapsed" onclick="toggleMenu('monitorSection', this)">
+                    <span class="sidebar-main-text"><i class="bi bi-activity sidebar-main-icon"></i> Network Monitoring</span>
+                    <i class="bi bi-chevron-right toggle-icon"></i>
+                </div>
+                <div class="submenu" id="monitorSection" style="background: transparent;">
+                    <a href="/admin/snmp/devices" class="<%= typeof page !== 'undefined' && page === 'snmp' && (typeof subpage !== 'undefined' && subpage === 'devices') ? 'active' : '' %> sidebar-sub-link"><i class="bi bi-hdd sidebar-sub-icon"></i> Devices</a>
+                    <a href="/admin/olt" class="<%= typeof page !== 'undefined' && page === 'olt' ? 'active' : '' %> sidebar-sub-link"><i class="bi bi-server sidebar-sub-icon"></i> OLT Devices</a>
+                </div>
+            </div>
+
+        <!-- 8. Support -->
+        <div class="menu-section">
+            <div class="sidebar-section-title menu-toggle collapsed" onclick="toggleMenu('supportSection', this)">
+                <span><small class="text-muted">🛠️ SUPPORT</small></span>
+                <i class="bi bi-chevron-right toggle-icon"></i>
+            </div>
+            <div class="submenu" id="supportSection">
+                <a href="/admin/trouble" class="<%= typeof page !== 'undefined' && page === 'trouble' ? 'active' : '' %>"><i class="bi bi-bug"></i> Trouble Tickets</a>
+            </div>
+        </div>
+
+        <!-- 9. System & Settings -->
+        <div class="menu-section">
+            <div class="sidebar-section-title menu-toggle collapsed" onclick="toggleMenu('systemSection', this)">
+                <span><small class="text-muted">⚙️ SYSTEM & SETTINGS</small></span>
+                <i class="bi bi-chevron-right toggle-icon"></i>
+            </div>
+            <div class="submenu" id="systemSection" style="background: transparent;">
+                <a href="/admin/setting" class="<%= typeof page !== 'undefined' && page === 'setting' ? 'active' : '' %>"><i class="bi bi-sliders"></i> General Settings</a>
+                <a href="/admin/setting/company-profile" class="<%= typeof currentRoute !== 'undefined' && currentRoute === 'company-profile' ? 'active' : '' %>"><i class="bi bi-building"></i> Company Profile</a>
+                <a href="/admin/whatsapp-settings" class="<%= typeof page !== 'undefined' && page === 'whatsapp-settings' ? 'active' : '' %>"><i class="bi bi-whatsapp text-success"></i> WhatsApp Settings</a>
+                <a href="/admin/radius" class="<%= typeof page !== 'undefined' && page === 'radius' ? 'active' : '' %>"><i class="bi bi-shield-lock"></i> RADIUS Server</a>
+                <!-- Server Management API, sembunyikan/hapus NAS Servers, sembunyikan Mikrotik Servers di mode radius -->
+                <div class="menu-section">
+                    <div class="menu-toggle collapsed" onclick="toggleMenu('serversMenu', this)">
+                        <span><i class="bi bi-hdd-stack"></i> Server Management API</span>
+                        <i class="bi bi-chevron-right toggle-icon"></i>
+                    </div>
+                    <div class="submenu" id="serversMenu">
+                        <a href="/admin/nas" style="display:none"><i class="bi bi-router-fill text-info"></i> NAS Servers</a>
+                        <a href="/admin/mikrotik-servers" style="display:none"><i class="bi bi-router text-primary"></i> Mikrotik Servers</a>
+                    </div>
+                </div>
+                <a href="/admin/backup" class="<%= typeof page !== 'undefined' && page === 'backup' ? 'active' : '' %>"><i class="bi bi-cloud-arrow-down"></i> Backup & Restore</a>
+                <div class="menu-section">
+                    <div class="menu-toggle collapsed" onclick="toggleMenu('toolsMenu', this)">
+                        <span><i class="bi bi-wrench"></i> Tools</span>
+                        <i class="bi bi-chevron-right toggle-icon"></i>
+                    </div>
+                    <div class="submenu" id="toolsMenu">
+                        <a href="/admin/mikrotik-scripts" class="<%= typeof page !== 'undefined' && page === 'mikrotik-scripts' ? 'active' : '' %>"><i class="bi bi-terminal text-primary"></i> MikroTik Scripts</a>
+                        <a href="/admin/tools" class="<%= typeof page !== 'undefined' && page === 'tools' ? 'active' : '' %>"><i class="bi bi-diagram-3 text-warning"></i> Network Tools</a>
+                        <a href="#" id="restartMikrotikBtn"><i class="bi bi-arrow-repeat"></i> Restart Mikrotik</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 10. Developer -->
+        <div class="menu-section">
+            <div class="sidebar-section-title menu-toggle collapsed" onclick="toggleMenu('developerSection', this)">
+                <span><small class="text-muted">🔧 DEVELOPER</small></span>
+                <i class="bi bi-chevron-right toggle-icon"></i>
+            </div>
+            <div class="submenu" id="developerSection">
+                <a href="/api-docs" target="_blank"><i class="bi bi-book"></i> API Documentation</a>
+                <a href="/mobile" target="_blank"><i class="bi bi-phone-vibrate"></i> Mobile App</a>
+            </div>
+        </div>
+
+        <!-- 11. Logout -->
+        <a href="/admin/logout" class="text-danger"><i class="bi bi-power"></i> Logout</a>
+</nav>
+
+<style>
+/* Mobile Top Navbar */
+.mobile-navbar {
+    background: #222e3c;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1001;
+    padding: 0.5rem 1rem;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+}
+
+.mobile-navbar .navbar-brand {
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+/* Sidebar Overlay */
+.sidebar-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: 999;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s ease;
+}
+
+.sidebar-overlay.show {
+    opacity: 1;
+    visibility: visible;
+}
+
+/* Sidebar */
+.sidebar {
+    min-height: 100vh;
+    background: #2c3e50;
+    color: #ecf0f1;
+    padding-top: 32px;
+}
+
+.sidebar a {
+    color: #ecf0f1;
+    text-decoration: none;
+    display: block;
+    padding: 12px 20px;
+    border-radius: 4px;
+    margin-bottom: 5px;
+    transition: all 0.3s ease;
+    font-size: 16px;
+}
+
+.sidebar a.active, 
+.sidebar a:hover {
+    background: #34495e;
+    color: #fff;
+    padding-left: 24px;
+}
+
+.sidebar a.active {
+    border-left: 3px solid #3498db;
+}
+
+.sidebar a i {
+    margin-right: 12px;
+    width: 24px;
+    text-align: center;
+    font-size: 18px;
+}
+
+/* Collapsible Menu */
+.sidebar .menu-section {
+    margin-bottom: 5px;
+}
+
+.sidebar .menu-toggle {
+    cursor: pointer;
+    padding: 12px 20px;
+    color: #ecf0f1;
+    font-size: 16px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: all 0.3s ease;
+    user-select: none;
+}
+
+.sidebar .menu-toggle:hover {
+    background: #34495e;
+    color: #fff;
+    padding-left: 24px;
+}
+
+.sidebar .menu-toggle i.toggle-icon {
+    font-size: 12px;
+    transition: transform 0.3s ease;
+    margin-left: auto;
+}
+
+.sidebar .menu-toggle.collapsed i.toggle-icon {
+    transform: rotate(0deg);
+}
+
+.sidebar .menu-toggle:not(.collapsed) i.toggle-icon {
+    transform: rotate(90deg);
+}
+
+.sidebar .submenu {
+    background: #263647;
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+}
+
+.sidebar .submenu.show {
+    max-height: 500px;
+}
+
+.sidebar .submenu a {
+    padding: 10px 20px 10px 50px;
+    font-size: 15px;
+    margin-bottom: 3px;
+    color: #ecf0f1;
+}
+
+.sidebar .submenu a:hover {
+    padding-left: 54px;
+}
+
+/* Sidebar Section Title */
+.sidebar-section-title {
+    padding: 16px 24px 8px 24px;
+    margin-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.sidebar-section-title.menu-toggle {
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 20px;
+    transition: all 0.3s ease;
+    user-select: none;
+}
+
+.sidebar-section-title.menu-toggle:hover {
+    background-color: #34495e;
+}
+
+.sidebar-section-title.menu-toggle:hover small {
+    color: #fff;
+    opacity: 1;
+}
+
+.sidebar-section-title small {
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    opacity: 0.8;
+    color: #ecf0f1;
+}
+
+/* Sidebar Header */
+.sidebar .sidebar-header {
+    font-size: 1.3rem;
+    font-weight: 600;
+    letter-spacing: 1px;
+    padding: 0 24px 24px 24px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    margin-bottom: 1rem;
+}
+
+.sidebar-header img {
+    max-width: 260px !important;
+    max-height: 150px !important;
+    border-radius: 16px !important;
+    transition: transform 0.3s ease;
+}
+
+.sidebar-header img:hover {
+    transform: scale(1.05);
+}
+
+/* Main Content */
+.main-content {
+    padding: 32px 24px;
+}
+
+/* Hamburger Button (Desktop) */
+.hamburger {
+    display: none;
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    z-index: 1000;
+    background: #222e3c;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 8px 12px;
+    font-size: 1.2rem;
+}
+
+/* Cards */
+.card {
+    border: none;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+}
+
+/* Mobile responsive */
+@media (max-width: 767.98px) {
+    .main-content {
+        margin-left: 0;
+        margin-top: 60px; /* Space for mobile navbar */
+        padding: 15px;
+    }
+    
+    .sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: 1000;
+        width: 280px;
+        transform: translateX(-100%);
+        transition: transform 0.3s ease;
+        box-shadow: 2px 0 10px rgba(0,0,0,0.3);
+        padding-top: 0;
+    }
+    
+    .sidebar.show {
+        transform: translateX(0);
+    }
+    
+    .sidebar .sidebar-header {
+        margin-top: 20px;
+        padding-top: 20px;
+    }
+    
+    .hamburger {
+        display: none; /* Hidden because we use mobile navbar */
+    }
+    
+    /* Adjust content for better mobile view */
+    .card {
+        margin-bottom: 1rem;
+    }
+    
+    .table-responsive {
+        border-radius: 10px;
+    }
+}
+
+/* Extra small devices */
+@media (max-width: 575.98px) {
+    .main-content {
+        padding: 10px;
+    }
+    
+    .sidebar {
+        width: 260px;
+    }
+    
+    .mobile-navbar .navbar-brand {
+        font-size: 1rem;
+    }
+}
+
+/* Desktop specific */
+@media (min-width: 768px) {
+    .main-content {
+        margin-left: 16.666667%; /* col-md-2 width */
+    }
+}
+</style>
+
+<script>
+// Toggle submenu function
+function toggleMenu(menuId, element) {
+    const submenu = document.getElementById(menuId);
+    const toggle = element;
+    
+    // Toggle collapsed class on toggle element
+    toggle.classList.toggle('collapsed');
+    
+    // Toggle show class on submenu
+    submenu.classList.toggle('show');
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const sidebarToggle = document.getElementById('sidebarToggle');
+    const sidebarClose = document.getElementById('sidebarClose');
+    const sidebar = document.getElementById('adminSidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    const hamburger = document.getElementById('hamburgerBtn'); // Desktop hamburger if exists
+    
+    // Auto expand menu if submenu item is active
+    document.querySelectorAll('.submenu a.active').forEach(function(activeLink) {
+        const submenu = activeLink.closest('.submenu');
+        const toggle = submenu.previousElementSibling;
+        if (submenu && toggle) {
+            submenu.classList.add('show');
+            toggle.classList.remove('collapsed');
+        }
+    });
+    
+    // Toggle sidebar on mobile hamburger click
+    if (sidebarToggle) {
+        sidebarToggle.addEventListener('click', function() {
+            sidebar.classList.add('show');
+            overlay.classList.add('show');
+            document.body.style.overflow = 'hidden';
+        });
+    }
+    
+    // Desktop hamburger support (for existing functionality)
+    if (hamburger) {
+        hamburger.addEventListener('click', function() {
+            sidebar.classList.toggle('show');
+            overlay.classList.toggle('show');
+        });
+    }
+    
+    // Close sidebar functions
+    function closeSidebar() {
+        sidebar.classList.remove('show');
+        overlay.classList.remove('show');
+        document.body.style.overflow = '';
+    }
+    
+    // Close sidebar on close button click
+    if (sidebarClose) {
+        sidebarClose.addEventListener('click', closeSidebar);
+    }
+    
+    // Close sidebar on overlay click
+    if (overlay) {
+        overlay.addEventListener('click', closeSidebar);
+    }
+    
+    // Close sidebar when clicking on nav links (mobile)
+    const navLinks = sidebar.querySelectorAll('a:not(#restartMikrotikBtn)');
+    navLinks.forEach(link => {
+        link.addEventListener('click', function() {
+            if (window.innerWidth < 768) {
+                setTimeout(closeSidebar, 100);
+            }
+        });
+    });
+    
+    // Handle window resize
+    window.addEventListener('resize', function() {
+        if (window.innerWidth >= 768) {
+            closeSidebar();
+        }
+    });
+    
+    // Restart Mikrotik functionality (preserve existing functionality)
+    const restartBtn = document.getElementById('restartMikrotikBtn');
+    if (restartBtn) {
+        restartBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            if (confirm('Apakah Anda yakin ingin restart Mikrotik?')) {
+                fetch('/admin/mikrotik/restart', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('Mikrotik berhasil direstart');
+                    } else {
+                        alert('Gagal restart Mikrotik: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Terjadi kesalahan saat restart Mikrotik');
+                });
+            }
+        });
+    }
+    
+    // Auto refresh logo functionality (preserve existing functionality)
+    function refreshLogo() {
+        const logo = document.getElementById('logoImage');
+        if (logo) {
+            const timestamp = new Date().getTime();
+            const src = logo.src.split('?')[0];
+            logo.src = `${src}?v=${timestamp}`;
+        }
+    }
+    
+    // Refresh logo every 5 seconds (if needed)
+    if (document.getElementById('logoImage')) {
+        setInterval(refreshLogo, 5000);
+    }
+});
+</script>

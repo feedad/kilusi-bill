@@ -1,0 +1,1347 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>SNMP Monitor</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+  <link href="/css/responsive-admin.css" rel="stylesheet">
+  <link href="/css/dark-theme.css" rel="stylesheet">
+  <style>
+    body { background: #0d1117; }
+    .monitor-navbar { background: linear-gradient(135deg, #161b22 0%, #1c2128 100%); color:#fff; padding:16px 24px; border-radius:12px; display:flex; align-items:center; justify-content:space-between; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+    .monitor-tabs a { color:#8b949e; margin-right:24px; text-decoration:none; font-weight:600; cursor:pointer; transition: all 0.3s; }
+    .monitor-tabs a:hover { color:#58a6ff; }
+    .monitor-tabs a.active { color:#fff; border-bottom:3px solid #58a6ff; padding-bottom:8px; }
+    .reboot-btn { background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); color:#fff; border:0; padding:8px 16px; border-radius:8px; font-weight:600; transition: all 0.3s; }
+    .reboot-btn:hover:not(:disabled) { background: linear-gradient(135deg, #c82333 0%, #bd2130 100%); transform: translateY(-1px); }
+    .search-box { max-width:280px; }
+    
+    /* Dark theme table styling */
+    /* align table colors with global dark theme */
+    .table { color:#e0e0e0; background:#252a3d; margin-bottom:0; border-collapse: collapse; border-spacing: 0; }
+    .table thead th { 
+      text-transform:uppercase; 
+      font-size:.75rem; 
+      letter-spacing:.8px; 
+      color:#ffffff !important; 
+      font-weight:700; 
+      border-bottom:1px solid #3a4052 !important; 
+      background:#2d3348 !important;
+      padding:14px 12px;
+      vertical-align:middle;
+      border-top:none !important;
+    }
+    .table tbody tr { 
+      border-bottom:1px solid #3a4052; 
+      transition: background 0.2s; 
+      background:#252a3d;
+    }
+    .table tbody tr:hover { background:#161b22 !important; }
+    .table tbody tr:hover td { background:transparent !important; }
+    .table td { 
+      border-color:#3a4052 !important; 
+      padding:12px; 
+      vertical-align:middle; 
+      background:transparent !important;
+      color:#e0e0e0 !important;
+    }
+    .table th { border-color:#3a4052 !important; }
+    .table-responsive { background:#252a3d; border:1px solid #3a4052; border-radius:12px; overflow:hidden; }
+    .table-hover tbody tr:hover { background-color:#161b22 !important; }
+    
+    .badge-run { background:#1f6feb; color:#fff; border:0; padding:4px 10px; border-radius:6px; font-size:.7rem; font-weight:700; }
+    .badge-down { background:#da3633; color:#fff; border:0; padding:4px 10px; border-radius:6px; font-size:.7rem; font-weight:700; }
+    code { 
+      color:#79c0ff !important; 
+      background:#161b22; 
+      padding:2px 6px; 
+      border-radius:4px; 
+      display:inline-block;
+      max-width:100%;
+      overflow:visible;
+      word-break:break-word;
+      font-size:0.875rem;
+    }
+    td code {
+      color:#79c0ff !important;
+    }
+    .mini { width:120px; height:32px; }
+    .breadcrumb-bar { background: #161b22; padding: 14px 20px; border-radius: 10px; margin-bottom: 20px; border:1px solid #21262d; }
+    .card { background:#161b22; border:1px solid #21262d; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,0.2); }
+    .card-header { background:#1c2128; border-bottom:1px solid #21262d; padding:16px 20px; font-weight:600; border-radius:12px 12px 0 0; color:#c9d1d9; }
+    .card-body { padding:20px; background:#161b22; }
+    
+    /* Form controls dark theme */
+    .form-control, .form-select { 
+      background:#0d1117; 
+      border:1px solid #30363d; 
+      color:#c9d1d9; 
+    }
+    .form-control:focus, .form-select:focus { 
+      background:#0d1117; 
+      border-color:#58a6ff; 
+      color:#c9d1d9; 
+      box-shadow:0 0 0 0.2rem rgba(88,166,255,0.15);
+    }
+    .input-group-text { 
+      background:#161b22; 
+      border:1px solid #30363d; 
+      color:#8b949e; 
+    }
+    .btn-outline-secondary { 
+      color:#8b949e; 
+      border-color:#30363d; 
+    }
+    .btn-outline-secondary:hover { 
+      background:#30363d; 
+      border-color:#484f58; 
+      color:#c9d1d9; 
+    }
+    .btn-outline-primary { 
+      color:#58a6ff; 
+      border-color:#58a6ff; 
+    }
+    .btn-outline-primary:hover { 
+      background:#58a6ff; 
+      border-color:#58a6ff; 
+      color:#fff; 
+    }
+    .btn-outline-light {
+      color:#c9d1d9;
+      border-color:#30363d;
+    }
+    .btn-outline-light:hover {
+      background:#30363d;
+      border-color:#484f58;
+      color:#fff;
+    }
+    
+    /* Modern stat cards */
+    .stat-card { background: linear-gradient(135deg, #1c2128 0%, #21262d 100%); border-radius:12px; padding:20px; border:1px solid #30363d; transition: all 0.3s; }
+    .stat-card:hover { border-color:#58a6ff; transform: translateY(-2px); box-shadow: 0 6px 20px rgba(88,166,255,0.15); }
+    .stat-card .stat-icon { width:48px; height:48px; background:rgba(88,166,255,0.1); border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:24px; margin-bottom:12px; }
+    .stat-card .stat-label { color:#8b949e; font-size:.85rem; font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px; }
+    .stat-card .stat-value { color:#fff; font-size:1.4rem; font-weight:700; margin-bottom:4px; }
+    .stat-card .stat-detail { color:#6e7681; font-size:.8rem; }
+    
+    /* Info grid */
+    .info-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:16px; }
+    
+    /* Metric card */
+    .metric-card { background: linear-gradient(135deg, #1c2128 0%, #21262d 100%); border-radius:12px; padding:24px; border:1px solid #30363d; text-align:center; }
+    .metric-card .metric-icon { width:60px; height:60px; background:rgba(88,166,255,0.1); border-radius:50%; display:flex; align-items:center; justify-content:center; margin:0 auto 16px; font-size:28px; }
+    .metric-card .metric-label { color:#8b949e; font-size:.9rem; font-weight:600; margin-bottom:8px; }
+    .metric-card .metric-value { color:#fff; font-size:2rem; font-weight:700; margin-bottom:6px; }
+    .metric-card .metric-subtitle { color:#6e7681; font-size:.8rem; }
+    
+    /* Progress bar */
+    .progress { background:#0d1117; height:10px; border-radius:10px; overflow:hidden; }
+    .progress-bar { background: linear-gradient(90deg, #1f6feb 0%, #58a6ff 100%); transition: width 0.6s ease; }
+    
+    /* Temp badge */
+    .temp-badge { display:inline-flex; align-items:center; gap:6px; background:#1f6feb; color:#fff; padding:6px 12px; border-radius:8px; font-weight:600; font-size:.85rem; }
+    .temp-badge.warning { background:#f0883e; }
+    .temp-badge.danger { background:#da3633; }
+    
+    /* Text colors */
+    .text-muted { color:#8b949e !important; }
+    .text-danger { color:#ff7b72 !important; }
+    .text-success { color:#3fb950 !important; }
+    .text-warning { color:#f0883e !important; }
+    .text-info { color:#58a6ff !important; }
+  </style>
+</head>
+<body>
+<div class="container-fluid">
+  <div class="row">
+    <%- include('partials/admin-responsive-sidebar', { page: 'snmp', subpage: 'monitor', settings: settings }) %>
+
+    <main class="col-md-10 main-content ms-sm-auto">
+      <div class="container-fluid p-4">
+
+        <!-- Breadcrumb / Back Button -->
+        <div class="breadcrumb-bar d-flex align-items-center justify-content-between">
+          <div class="d-flex align-items-center">
+            <a href="/admin/snmp/devices" class="btn btn-sm btn-primary me-3">
+              <i class="bi bi-arrow-left"></i> Kembali ke Daftar Perangkat
+            </a>
+            <span class="text-muted">Monitoring: <code id="hostBreadcrumb"><%= host || settings.snmp_host || 'N/A' %></code></span>
+          </div>
+          
+        </div>
+
+        <div class="monitor-navbar mb-3">
+          <div class="d-flex align-items-center">
+            <div class="h4 mb-0 me-3">MikroTik</div>
+            <div class="monitor-tabs">
+              <a id="tabDashboard" class="active">DASHBOARD</a>
+              <a id="tabInterface">INTERFACE</a>
+              <a id="tabPPPoE">PPPOE</a>
+              <a id="tabHotspot">HOTSPOT</a>
+            </div>
+          </div>
+          <div class="d-flex gap-2">
+            <button id="autoRefreshToggle" class="btn btn-sm btn-success" onclick="toggleAutoRefresh()">
+              <i class="fas fa-play"></i> Start Auto-Refresh
+            </button>
+            <button class="btn btn-sm btn-outline-light" onclick="clearCacheAndRefresh()"><i class="bi bi-arrow-clockwise"></i> Clear Cache</button>
+            <button class="btn btn-sm btn-outline-light" onclick="openQuickSettings()"><i class="bi bi-gear"></i> SNMP Settings</button>
+            <button class="reboot-btn" disabled><i class="bi bi-power"></i> REBOOT</button>
+          </div>
+        </div>
+
+        <!-- DASHBOARD TAB CONTENT -->
+        <section id="dashboardTab">
+          <!-- Device Info Cards -->
+          <div class="row g-3 mb-4">
+            <div class="col-md-6 col-lg-3">
+              <div class="stat-card">
+                <div class="stat-icon text-info"><i class="bi bi-router"></i></div>
+                <div class="stat-label">Device Identity</div>
+                <div class="stat-value" id="identityValue">-</div>
+                <div class="stat-detail" id="modelValue">-</div>
+              </div>
+            </div>
+            <div class="col-md-6 col-lg-3">
+              <div class="stat-card">
+                <div class="stat-icon text-success"><i class="bi bi-clock-history"></i></div>
+                <div class="stat-label">Uptime</div>
+                <div class="stat-value" id="uptimeValue">-</div>
+                <div class="stat-detail" id="versionValue">-</div>
+              </div>
+            </div>
+            <div class="col-md-6 col-lg-3">
+              <div class="stat-card">
+                <div class="stat-icon text-warning"><i class="bi bi-cpu"></i></div>
+                <div class="stat-label">Architecture</div>
+                <div class="stat-value" id="archValue">-</div>
+                <div class="stat-detail" id="cpuCountValue">-</div>
+              </div>
+            </div>
+            <div class="col-md-6 col-lg-3">
+              <div class="stat-card">
+                <div class="stat-icon text-danger"><i class="bi bi-thermometer-half"></i></div>
+                <div class="stat-label">Temperature</div>
+                <div class="stat-value" id="tempValue">-</div>
+                <div class="stat-detail" id="licenseLevelValue">-</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- System Metrics -->
+          <div class="row g-3 mb-4">
+            <div class="col-md-4">
+              <div class="metric-card">
+                <div class="metric-icon text-warning"><i class="bi bi-cpu"></i></div>
+                <div class="metric-label">CPU Load</div>
+                <div class="metric-value" id="cpuLoadValue">-</div>
+                <div class="progress mt-2 mb-2">
+                  <div class="progress-bar" id="cpuLoadBar" role="progressbar" style="width: 0%"></div>
+                </div>
+                <div class="metric-subtitle">Average across all cores</div>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="metric-card">
+                <div class="metric-icon text-info"><i class="bi bi-memory"></i></div>
+                <div class="metric-label">Memory Usage</div>
+                <div class="metric-value" id="memLoadValue">-</div>
+                <div class="progress mt-2 mb-2">
+                  <div class="progress-bar" id="memLoadBar" role="progressbar" style="width: 0%"></div>
+                </div>
+                <div class="metric-subtitle" id="memDetailValue">-</div>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="metric-card">
+                <div class="metric-icon text-success"><i class="bi bi-device-hdd"></i></div>
+                <div class="metric-label">Disk Usage</div>
+                <div class="metric-value" id="diskLoadValue">-</div>
+                <div class="progress mt-2 mb-2">
+                  <div class="progress-bar" id="diskLoadBar" role="progressbar" style="width: 0%"></div>
+                </div>
+                <div class="metric-subtitle" id="diskDetailValue">-</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Live Traffic Card -->
+          <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+              <h5 class="mb-0"><i class="bi bi-activity"></i> Live Traffic Monitor</h5>
+              <div class="d-flex gap-2 align-items-center">
+                <label class="me-2 mb-0 text-muted">Interface</label>
+                <select id="liveIface" class="form-select form-select-sm" style="min-width:240px">
+                  <option value="">Loading interfaces...</option>
+                </select>
+              </div>
+            </div>
+            <div class="card-body">
+              <canvas id="liveChart" height="80"></canvas>
+              <div class="small text-muted mt-3 text-center">
+                <i class="bi bi-arrow-repeat"></i> Auto refresh every 2 seconds
+                <span class="mx-2">|</span>
+                <span class="text-info">■</span> RX (Download)
+                <span class="mx-2">|</span>
+                <span class="text-success">■</span> TX (Upload)
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- INTERFACE TAB CONTENT -->
+        <section id="interfaceTab" style="display:none;">
+        <div class="card">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <div>
+              <h5 class="mb-0 d-inline-block"><i class="bi bi-hdd-network"></i> MikroTik Interface</h5>
+              <span class="badge bg-info ms-2" id="ifaceCountBadge">Loading...</span>
+            </div>
+            <div class="input-group input-group-sm search-box" style="width: 300px;">
+              <span class="input-group-text"><i class="bi bi-search"></i></span>
+              <input id="searchBox" class="form-control" placeholder="Search by name or type (e.g. pppoe, ether1)">
+              <button class="btn btn-outline-secondary" type="button" id="clearSearchBtn" style="display:none;" onclick="clearSearch()">
+                <i class="bi bi-x-circle"></i>
+              </button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="table-responsive">
+              <table class="table table-hover align-middle" id="ifaceTable">
+                <thead>
+                  <tr>
+                    <th>FLAG</th>
+                    <th>NAME</th>
+                    <th>TYPE</th>
+                    <th>SPEED</th>
+                    <th>MAC ADDRESS</th>
+                    <th>Trend</th>
+                    <th>TX</th>
+                    <th>RX</th>
+                    <th>TOTAL TX</th>
+                    <th>TOTAL RX</th>
+                  </tr>
+                </thead>
+                <tbody id="ifaceBody">
+                  <tr><td colspan="10" class="text-center py-4"><div class="spinner-border spinner-border-sm"></div> Loading...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        </section>
+
+        <!-- PPPOE TAB CONTENT -->
+        <section id="pppoeTab" style="display:none;">
+        <div class="card">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <div>
+              <h5 class="mb-0 d-inline-block"><i class="bi bi-diagram-3"></i> PPPoE Interfaces</h5>
+              <span class="badge bg-success ms-2" id="pppCountBadge">-</span>
+            </div>
+            <div class="input-group input-group-sm search-box" style="width: 300px;">
+              <span class="input-group-text"><i class="bi bi-search"></i></span>
+              <input id="searchBoxPPP" class="form-control" placeholder="Search PPPoE by name or user">
+              <button class="btn btn-outline-secondary" type="button" id="clearSearchPPPBtn" style="display:none;" onclick="clearSearchPPP()">
+                <i class="bi bi-x-circle"></i>
+              </button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="table-responsive">
+              <table class="table table-hover align-middle" id="pppTable">
+                <thead>
+                  <tr>
+                    <th>FLAG</th>
+                    <th>NAME</th>
+                    <th>TYPE</th>
+                    <th>SPEED</th>
+                    <th>MAC ADDRESS</th>
+                    <th>IP ADDRESS</th>
+                    <th>UPTIME</th>
+                    <th>Trend</th>
+                    <th>TX</th>
+                    <th>RX</th>
+                    <th>TOTAL TX</th>
+                    <th>TOTAL RX</th>
+                  </tr>
+                </thead>
+                <tbody id="pppBody">
+                  <tr><td colspan="12" class="text-center py-4"><div class="spinner-border spinner-border-sm"></div> Loading...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        </section>
+
+        <!-- HOTSPOT TAB CONTENT -->
+        <section id="hotspotTab" style="display:none;">
+        <div class="card">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <div>
+              <h5 class="mb-0 d-inline-block"><i class="bi bi-wifi"></i> Hotspot Interfaces</h5>
+              <span class="badge bg-warning ms-2" id="hsCountBadge">-</span>
+            </div>
+            <div class="input-group input-group-sm search-box" style="width: 300px;">
+              <span class="input-group-text"><i class="bi bi-search"></i></span>
+              <input id="searchBoxHotspot" class="form-control" placeholder="Search hotspot/wlan by name">
+              <button class="btn btn-outline-secondary" type="button" id="clearSearchHSBtn" style="display:none;" onclick="clearSearchHS()">
+                <i class="bi bi-x-circle"></i>
+              </button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="table-responsive">
+              <table class="table table-hover align-middle" id="hotspotTable">
+                <thead>
+                  <tr>
+                    <th>FLAG</th>
+                    <th>NAME</th>
+                    <th>TYPE</th>
+                    <th>SPEED</th>
+                    <th>MAC ADDRESS</th>
+                    <th>Trend</th>
+                    <th>TX</th>
+                    <th>RX</th>
+                    <th>TOTAL TX</th>
+                    <th>TOTAL RX</th>
+                  </tr>
+                </thead>
+                <tbody id="hotspotBody">
+                  <tr><td colspan="10" class="text-center py-4"><div class="spinner-border spinner-border-sm"></div> Loading...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- Quick SNMP Settings Modal -->
+<div class="modal fade" id="quickSettingsModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-gear"></i> Quick SNMP Settings</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-info">
+          <i class="bi bi-info-circle"></i> Pengaturan ini akan menggunakan query parameter untuk sesi ini saja. 
+          Untuk pengaturan permanen, gunakan Edit di halaman Devices.
+        </div>
+        <div class="mb-3">
+          <label class="form-label">SNMP Community</label>
+          <input type="text" class="form-control" id="quickCommunity" placeholder="public">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">SNMP Version</label>
+          <select class="form-select" id="quickVersion">
+            <option value="1">v1</option>
+            <option value="2c" selected>v2c</option>
+            <option value="3">v3</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">SNMP Port</label>
+          <input type="number" class="form-control" id="quickPort" value="161">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+        <button type="button" class="btn btn-primary" onclick="applyQuickSettings()"><i class="bi bi-check2"></i> Terapkan & Reload</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+  const host = '<%= host || "" %>' || '<%= settings.snmp_host || "" %>';
+  function fmtBits(bps) {
+    if (!bps) return '0 bps';
+    const units = ['bps','Kbps','Mbps','Gbps','Tbps'];
+    let v = bps, i = 0; while (v >= 1000 && i < units.length-1) { v/=1000; i++; }
+    return v.toFixed(1) + ' ' + units[i];
+  }
+  function fmtBytes(b) {
+    if (!b) return '0 B';
+    const u=['B','KB','MB','GB','TB','PB']; let v=b, i=0; while (v>=1024&&i<u.length-1){v/=1024;i++;}
+    return v.toFixed(1)+' '+u[i];
+  }
+  function fmtSpeed(mbps) { return mbps ? (mbps + ' Mbps') : '-'; }
+  function fmtFlag(running, disabled) { 
+    if (disabled) return '<span class="badge bg-secondary">D</span>';
+    return running ? '<span class="badge bg-success">R</span>' : '<span class="badge bg-danger">X</span>'; 
+  }
+  function fmtMAC(mac) {
+    if (!mac || mac === '' || mac === '00:00:00:00:00:00') return '-';
+    return '<code>' + mac + '</code>';
+  }
+
+  // Safely escape HTML for injecting text content
+  function escapeHtml(s) {
+    if (s === null || s === undefined) return '';
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  async function loadHeader() {
+    try {
+      const res = await fetch('/admin/snmp/device-info?host=' + encodeURIComponent(host));
+      const data = await res.json();
+      if (data.success) {
+        // Update stat cards
+        document.getElementById('identityValue').textContent = data.identity || data.sysName || 'Unknown';
+        document.getElementById('modelValue').textContent = data.boardName || data.sysDescr || '-';
+        document.getElementById('uptimeValue').textContent = data.uptime || '-';
+        document.getElementById('versionValue').textContent = data.version ? `RouterOS ${data.version}` : '-';
+        document.getElementById('archValue').textContent = data.architecture || '-';
+        document.getElementById('cpuCountValue').textContent = data.cpuCount ? `${data.cpuCount} Core${data.cpuCount > 1 ? 's' : ''}` : '-';
+        
+        // Temperature with color coding
+        const tempEl = document.getElementById('tempValue');
+        const licenseEl = document.getElementById('licenseLevelValue');
+        if (data.cpuTemperature != null || data.boardTemperature != null) {
+          const temp = data.cpuTemperature || data.boardTemperature;
+          let tempClass = '';
+          if (temp > 70) tempClass = 'text-danger';
+          else if (temp > 60) tempClass = 'text-warning';
+          else tempClass = 'text-success';
+          tempEl.innerHTML = `<span class="${tempClass}">${temp}°C</span>`;
+        } else {
+          tempEl.textContent = '-';
+        }
+        
+        // License level mapping
+        const licenseLevels = { 0: 'Free', 1: 'Level 1', 3: 'Level 3', 4: 'Level 4', 5: 'Level 5', 6: 'Level 6' };
+        licenseEl.textContent = data.licenseLevel != null ? (licenseLevels[data.licenseLevel] || `Level ${data.licenseLevel}`) : '-';
+        
+        // Update metric cards
+        const cpuLoad = data.cpuLoad != null ? data.cpuLoad : 0;
+        document.getElementById('cpuLoadValue').textContent = cpuLoad + '%';
+        document.getElementById('cpuLoadBar').style.width = cpuLoad + '%';
+        
+        if (data.memory) {
+          const memPct = data.memory.usedPct || 0;
+          document.getElementById('memLoadValue').textContent = memPct + '%';
+          document.getElementById('memLoadBar').style.width = memPct + '%';
+          document.getElementById('memDetailValue').textContent = 
+            `${fmtBytes(data.memory.usedBytes)} / ${fmtBytes(data.memory.totalBytes)}`;
+        }
+        
+        if (data.disk) {
+          const diskPct = data.disk.usedPct || 0;
+          document.getElementById('diskLoadValue').textContent = diskPct + '%';
+          document.getElementById('diskLoadBar').style.width = diskPct + '%';
+          document.getElementById('diskDetailValue').textContent = 
+            `${fmtBytes(data.disk.usedBytes)} / ${fmtBytes(data.disk.totalBytes)}`;
+        }
+      }
+    } catch(e) {
+      console.error('Failed to load device info:', e);
+    }
+  }
+
+  async function loadInterfaces() {
+    const tbody = document.getElementById('ifaceBody');
+    try {
+      // Pagination params
+      const limit = 100; // Load 100 at a time
+      const offset = window.ifaceOffset || 0;
+      const filter = (document.getElementById('searchBox').value || '').trim();
+      
+      // Show/hide clear button
+      const clearBtn = document.getElementById('clearSearchBtn');
+      if (clearBtn) clearBtn.style.display = filter ? 'block' : 'none';
+      
+      const params = new URLSearchParams({
+        host: host,
+        limit: limit,
+        offset: offset,
+        category: 'physical' // Only physical interfaces (exclude PPPoE & Hotspot)
+      });
+      
+      if (filter) params.append('filter', filter);
+      
+      // Show loading state
+      if (offset === 0) {
+        const loadingMsg = filter ? 'Searching...' : 'Loading...';
+        tbody.innerHTML = '<tr><td colspan="10" class="text-center py-4"><div class="spinner-border spinner-border-sm"></div> ' + loadingMsg + '</td></tr>';
+      }
+      
+      const res = await fetch('/admin/snmp/interfaces/monitor?' + params.toString());
+      const data = await res.json();
+      if (!data.success) throw new Error(data.message||'error');
+      
+      window.allInterfaces = data.interfaces || []; // Store for other tabs
+      window.ifaceTotalCount = data.total || 0;
+      window.ifaceHasMore = data.hasMore || false;
+      
+      // Show "no results" message if searching and empty
+      if (filter && data.interfaces.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-4">' +
+          '<i class="bi bi-search"></i> No physical interfaces found for "' + filter + '"<br>' +
+          '<small>Try a different search term or <a href="#" onclick="clearSearch(); return false;">clear search</a></small>' +
+          '</td></tr>';
+        updateIfaceInfo(0, 0);
+        return;
+      }
+      
+      // Show "no data" if no filter and empty
+      if (!filter && data.interfaces.length === 0 && offset === 0) {
+        tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-4">No physical interfaces found</td></tr>';
+        updateIfaceInfo(0, 0);
+        return;
+      }
+      
+      const rows = (data.interfaces||[]).map(x => `
+        <tr data-iface-index="${x.index}">
+          <td>${fmtFlag(x.running, x.disabled)}</td>
+          <td><code>${escapeHtml(x.name || '-')}</code></td>
+          <td>${x.typeName || '-'}</td>
+          <td>${fmtSpeed(x.speed_mbps)}</td>
+          <td>${fmtMAC(x.mac)}</td>
+          <td><canvas class="mini" id="spark-${x.index}"></canvas></td>
+          <td>${fmtBits(x.tx_bps)}</td>
+          <td>${fmtBits(x.rx_bps)}</td>
+          <td>${fmtBytes(x.total_tx_bytes)}</td>
+          <td>${fmtBytes(x.total_rx_bytes)}</td>
+        </tr>
+      `);
+      
+      // Append mode for pagination, replace for search/filter
+      if (offset === 0) {
+        tbody.innerHTML = rows.join('');
+      } else {
+        // Remove loading row if exists
+        const loadingRow = tbody.querySelector('.loading-row');
+        if (loadingRow) loadingRow.remove();
+        tbody.insertAdjacentHTML('beforeend', rows.join(''));
+      }
+      
+      // Add "Load More" button if has more
+      if (data.hasMore && offset === 0) {
+        const remaining = data.total - limit;
+        tbody.insertAdjacentHTML('beforeend', 
+          '<tr class="load-more-row"><td colspan="10" class="text-center py-3">' +
+          '<button class="btn btn-sm btn-outline-primary" onclick="loadMoreInterfaces()"><i class="bi bi-arrow-down-circle"></i> Load More (' + remaining + ' remaining)</button>' +
+          '</td></tr>'
+        );
+      } else if (data.hasMore) {
+        tbody.insertAdjacentHTML('beforeend', 
+          '<tr class="load-more-row"><td colspan="10" class="text-center py-3">' +
+          '<button class="btn btn-sm btn-outline-primary" onclick="loadMoreInterfaces()"><i class="bi bi-arrow-down-circle"></i> Load More</button>' +
+          '</td></tr>'
+        );
+      }
+      
+      // Update info badge
+      updateIfaceInfo(offset + data.interfaces.length, data.total, filter);
+      
+      // Update sparklines history and draw
+      (data.interfaces||[]).forEach(updateSpark);
+    } catch (e) {
+      tbody.innerHTML = '<tr><td colspan="10" class="text-danger">'+e.message+'</td></tr>';
+    }
+  }
+
+  async function loadMoreInterfaces() {
+    const currentOffset = window.ifaceOffset || 0;
+    window.ifaceOffset = currentOffset + 100;
+    
+    // Remove load more button
+    const loadMoreRow = document.querySelector('.load-more-row');
+    if (loadMoreRow) loadMoreRow.remove();
+    
+    // Show loading
+    const tbody = document.getElementById('ifaceBody');
+    tbody.insertAdjacentHTML('beforeend', 
+      '<tr class="loading-row"><td colspan="10" class="text-center py-3"><div class="spinner-border spinner-border-sm"></div> Loading more...</td></tr>'
+    );
+    
+    await loadInterfaces();
+  }
+
+  function updateIfaceInfo(shown, total, filter) {
+    const badge = document.getElementById('ifaceCountBadge');
+    if (badge) {
+      if (filter) {
+        badge.textContent = `Found ${total} (showing ${shown})`;
+        badge.className = 'badge bg-warning ms-2';
+      } else {
+        badge.textContent = total > shown ? `Showing ${shown} of ${total}` : `${total} interfaces`;
+        badge.className = 'badge bg-info ms-2';
+      }
+    }
+  }
+  
+  function clearSearch() {
+    document.getElementById('searchBox').value = '';
+    document.getElementById('clearSearchBtn').style.display = 'none';
+    window.ifaceOffset = 0;
+    // Cancel any pending debounce
+    if (debounceTimers['default']) {
+      clearTimeout(debounceTimers['default']);
+      delete debounceTimers['default'];
+    }
+    // Load immediately without debounce
+    loadInterfaces();
+  }
+
+  async function loadPPPoEInterfaces() {
+    const tbody = document.getElementById('pppBody');
+    try {
+      const limit = 100;
+      const offset = window.pppOffset || 0;
+      const searchTerm = (document.getElementById('searchBoxPPP').value || '').trim();
+      
+      // Show/hide clear button
+      const clearBtn = document.getElementById('clearSearchPPPBtn');
+      if (clearBtn) clearBtn.style.display = searchTerm ? 'block' : 'none';
+      
+      const params = new URLSearchParams({
+        host: host,
+        limit: limit,
+        offset: offset,
+        category: 'pppoe' // Only PPPoE active connections
+      });
+      
+      if (searchTerm) params.append('filter', searchTerm);
+      
+      // Show loading state
+      if (offset === 0) {
+        const loadingMsg = searchTerm ? 'Searching PPPoE...' : 'Loading PPPoE...';
+        tbody.innerHTML = '<tr><td colspan="10" class="text-center py-4"><div class="spinner-border spinner-border-sm"></div> ' + loadingMsg + '</td></tr>';
+      }
+      
+      const res = await fetch('/admin/snmp/interfaces/monitor?' + params.toString());
+      const data = await res.json();
+      if (!data.success) throw new Error(data.message||'error');
+      
+      // Only show running (active) PPPoE connections
+      const activePPP = (data.interfaces||[]).filter(x => x.running && !x.disabled);
+      
+      // Debug: Log first interface to check data
+      if (activePPP.length > 0) {
+        console.log('PPPoE Sample Data:', activePPP[0]);
+      }
+      
+      if (searchTerm && activePPP.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-4">' +
+          '<i class="bi bi-search"></i> No active PPPoE connections found for "' + searchTerm + '"<br>' +
+          '<small><a href="#" onclick="clearSearchPPP(); return false;">Clear search</a> to see all</small>' +
+          '</td></tr>';
+        updatePPPInfo(0, 0);
+        return;
+      }
+      
+      if (!searchTerm && activePPP.length === 0 && offset === 0) {
+        tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-4">No active PPPoE connections</td></tr>';
+        updatePPPInfo(0, 0);
+        return;
+      }
+      
+      const rows = activePPP.map(x => `
+        <tr data-iface-index="${x.index}">
+          <td>${fmtFlag(x.running, x.disabled)}</td>
+          <td><code>${escapeHtml(x.name || '-')}</code></td>
+          <td>${x.typeName || 'PPP'}</td>
+          <td>${fmtSpeed(x.speed_mbps)}</td>
+          <td>${fmtMAC(x.mac)}</td>
+          <td><code>${escapeHtml(x.address || '-')}</code></td>
+          <td><code>${escapeHtml(x.uptime || '-')}</code></td>
+          <td><canvas class="mini" id="spark-ppp-${x.index}"></canvas></td>
+          <td>${fmtBits(x.tx_bps)}</td>
+          <td>${fmtBits(x.rx_bps)}</td>
+          <td>${fmtBytes(x.total_tx_bytes)}</td>
+          <td>${fmtBytes(x.total_rx_bytes)}</td>
+        </tr>
+      `);
+      
+      if (offset === 0) {
+        tbody.innerHTML = rows.join('');
+      } else {
+        const loadingRow = tbody.querySelector('.loading-row');
+        if (loadingRow) loadingRow.remove();
+        tbody.insertAdjacentHTML('beforeend', rows.join(''));
+      }
+      
+      if (data.hasMore) {
+        tbody.insertAdjacentHTML('beforeend', 
+          '<tr class="load-more-row"><td colspan="10" class="text-center py-3">' +
+          '<button class="btn btn-sm btn-outline-primary" onclick="loadMorePPPoE()"><i class="bi bi-arrow-down-circle"></i> Load More</button>' +
+          '</td></tr>'
+        );
+      }
+      
+      updatePPPInfo(activePPP.length + offset, data.total, searchTerm);
+      activePPP.forEach(x => updateSparkAlt(x, 'ppp'));
+    } catch (e) {
+      tbody.innerHTML = '<tr><td colspan="10" class="text-danger">'+e.message+'</td></tr>';
+    }
+  }
+
+  async function loadMorePPPoE() {
+    window.pppOffset = (window.pppOffset || 0) + 100;
+    const loadMoreRow = document.querySelector('#pppBody .load-more-row');
+    if (loadMoreRow) loadMoreRow.remove();
+    const tbody = document.getElementById('pppBody');
+    tbody.insertAdjacentHTML('beforeend', 
+      '<tr class="loading-row"><td colspan="10" class="text-center py-3"><div class="spinner-border spinner-border-sm"></div> Loading more...</td></tr>'
+    );
+    await loadPPPoEInterfaces();
+  }
+  
+  function updatePPPInfo(shown, total, filter) {
+    const badge = document.getElementById('pppCountBadge');
+    if (badge) {
+      if (filter && filter !== 'ppp') {
+        badge.textContent = `Found ${shown}`;
+        badge.className = 'badge bg-warning ms-2';
+      } else {
+        badge.textContent = `${shown} PPPoE`;
+        badge.className = 'badge bg-success ms-2';
+      }
+    }
+  }
+  
+  function clearSearchPPP() {
+    document.getElementById('searchBoxPPP').value = '';
+    document.getElementById('clearSearchPPPBtn').style.display = 'none';
+    window.pppOffset = 0;
+    // Cancel any pending debounce
+    if (debounceTimers['ppp']) {
+      clearTimeout(debounceTimers['ppp']);
+      delete debounceTimers['ppp'];
+    }
+    // Load immediately without debounce
+    loadPPPoEInterfaces();
+  }
+
+  async function loadHotspotInterfaces() {
+    const tbody = document.getElementById('hotspotBody');
+    try {
+      const limit = 100;
+      const offset = window.hsOffset || 0;
+      const searchTerm = (document.getElementById('searchBoxHotspot').value || '').trim();
+      
+      // Show/hide clear button
+      const clearBtn = document.getElementById('clearSearchHSBtn');
+      if (clearBtn) clearBtn.style.display = searchTerm ? 'block' : 'none';
+      
+      const params = new URLSearchParams({
+        host: host,
+        limit: limit,
+        offset: offset,
+        category: 'hotspot' // Only Hotspot interfaces
+      });
+      
+      if (searchTerm) params.append('filter', searchTerm);
+      
+      // Show loading state
+      if (offset === 0) {
+        const loadingMsg = searchTerm ? 'Searching hotspot...' : 'Loading hotspot...';
+        tbody.innerHTML = '<tr><td colspan="10" class="text-center py-4"><div class="spinner-border spinner-border-sm"></div> ' + loadingMsg + '</td></tr>';
+      }
+      
+      const res = await fetch('/admin/snmp/interfaces/monitor?' + params.toString());
+      const data = await res.json();
+      if (!data.success) throw new Error(data.message||'error');
+      
+      // Only show running (active) Hotspot connections
+      const activeHS = (data.interfaces||[]).filter(x => x.running && !x.disabled);
+      
+      if (searchTerm && activeHS.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-4">' +
+          '<i class="bi bi-search"></i> No active hotspot interfaces found for "' + searchTerm + '"<br>' +
+          '<small><a href="#" onclick="clearSearchHS(); return false;">Clear search</a> to see all</small>' +
+          '</td></tr>';
+        updateHSInfo(0, 0);
+        return;
+      }
+      
+      if (!searchTerm && activeHS.length === 0 && offset === 0) {
+        tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-4">No active hotspot interfaces</td></tr>';
+        updateHSInfo(0, 0);
+        return;
+      }
+      
+      const rows = activeHS.map(x => `
+        <tr data-iface-index="${x.index}">
+          <td>${fmtFlag(x.running, x.disabled)}</td>
+          <td><code>${escapeHtml(x.name || '-')}</code></td>
+          <td>${x.typeName || '-'}</td>
+          <td>${fmtSpeed(x.speed_mbps)}</td>
+          <td>${fmtMAC(x.mac)}</td>
+          <td><canvas class="mini" id="spark-hs-${x.index}"></canvas></td>
+          <td>${fmtBits(x.tx_bps)}</td>
+          <td>${fmtBits(x.rx_bps)}</td>
+          <td>${fmtBytes(x.total_tx_bytes)}</td>
+          <td>${fmtBytes(x.total_rx_bytes)}</td>
+        </tr>
+      `);
+      
+      if (offset === 0) {
+        tbody.innerHTML = rows.join('');
+      } else {
+        const loadingRow = tbody.querySelector('.loading-row');
+        if (loadingRow) loadingRow.remove();
+        tbody.insertAdjacentHTML('beforeend', rows.join(''));
+      }
+      
+      if (data.hasMore) {
+        tbody.insertAdjacentHTML('beforeend', 
+          '<tr class="load-more-row"><td colspan="10" class="text-center py-3">' +
+          '<button class="btn btn-sm btn-outline-primary" onclick="loadMoreHotspot()"><i class="bi bi-arrow-down-circle"></i> Load More</button>' +
+          '</td></tr>'
+        );
+      }
+      
+      updateHSInfo(activeHS.length + offset, data.total, searchTerm);
+      activeHS.forEach(x => updateSparkAlt(x, 'hs'));
+    } catch (e) {
+      tbody.innerHTML = '<tr><td colspan="10" class="text-danger">'+e.message+'</td></tr>';
+    }
+  }
+
+  async function loadMoreHotspot() {
+    window.hsOffset = (window.hsOffset || 0) + 100;
+    const loadMoreRow = document.querySelector('#hotspotBody .load-more-row');
+    if (loadMoreRow) loadMoreRow.remove();
+    const tbody = document.getElementById('hotspotBody');
+    tbody.insertAdjacentHTML('beforeend', 
+      '<tr class="loading-row"><td colspan="10" class="text-center py-3"><div class="spinner-border spinner-border-sm"></div> Loading more...</td></tr>'
+    );
+    await loadHotspotInterfaces();
+  }
+  
+  function updateHSInfo(shown, total, filter) {
+    const badge = document.getElementById('hsCountBadge');
+    if (badge) {
+      if (filter && filter !== 'hotspot') {
+        badge.textContent = `Found ${shown}`;
+        badge.className = 'badge bg-danger ms-2';
+      } else {
+        badge.textContent = `${shown} Hotspot`;
+        badge.className = 'badge bg-warning ms-2';
+      }
+    }
+  }
+  
+  function clearSearchHS() {
+    document.getElementById('searchBoxHotspot').value = '';
+    document.getElementById('clearSearchHSBtn').style.display = 'none';
+    window.hsOffset = 0;
+    // Cancel any pending debounce
+    if (debounceTimers['hs']) {
+      clearTimeout(debounceTimers['hs']);
+      delete debounceTimers['hs'];
+    }
+    // Load immediately without debounce
+    loadHotspotInterfaces();
+  }
+
+  document.getElementById('searchBox').addEventListener('input', (e) => { 
+    window.ifaceOffset = 0;
+    const searchTerm = e.target.value.trim();
+    // If search is cleared, load immediately without debounce
+    if (searchTerm === '') {
+      if (debounceTimers['default']) {
+        clearTimeout(debounceTimers['default']);
+        delete debounceTimers['default'];
+      }
+      loadInterfaces();
+    } else {
+      // Otherwise debounce
+      debounce(() => loadInterfaces(), 500);
+    }
+  });
+  
+  document.getElementById('searchBoxPPP').addEventListener('input', (e) => { 
+    window.pppOffset = 0;
+    const searchTerm = e.target.value.trim();
+    if (searchTerm === '') {
+      if (debounceTimers['ppp']) {
+        clearTimeout(debounceTimers['ppp']);
+        delete debounceTimers['ppp'];
+      }
+      loadPPPoEInterfaces();
+    } else {
+      debounce(() => loadPPPoEInterfaces(), 500, 'ppp');
+    }
+  });
+  
+  document.getElementById('searchBoxHotspot').addEventListener('input', (e) => { 
+    window.hsOffset = 0;
+    const searchTerm = e.target.value.trim();
+    if (searchTerm === '') {
+      if (debounceTimers['hs']) {
+        clearTimeout(debounceTimers['hs']);
+        delete debounceTimers['hs'];
+      }
+      loadHotspotInterfaces();
+    } else {
+      debounce(() => loadHotspotInterfaces(), 500, 'hs');
+    }
+  });
+  
+  // Debounce helper to prevent excessive API calls during typing
+  const debounceTimers = {};
+  function debounce(func, delay, key = 'default') {
+    clearTimeout(debounceTimers[key]);
+    debounceTimers[key] = setTimeout(func, delay);
+  }
+  
+  // Separate timers for traffic polling and full refresh
+  let trafficPollTimer = null;
+  let refreshTimer = null;
+  let autoRefreshEnabled = false; // Default: OFF
+  
+  // Traffic polling - updates only TX/RX values and sparklines (lightweight)
+  async function pollTraffic() {
+    try {
+      const params = new URLSearchParams({ host: host, limit: 100, offset: 0 });
+      
+      // Poll based on active tab
+      if (document.getElementById('interfaceTab').style.display !== 'none') {
+        params.set('category', 'physical');
+        const res = await fetch('/admin/snmp/interfaces/monitor?' + params.toString());
+        const data = await res.json();
+        if (data.success && data.interfaces) {
+          const tbody = document.getElementById('ifaceBody');
+          
+          data.interfaces.forEach(x => {
+            updateSpark(x);
+            // Find matching row by data-iface-index
+            const row = tbody.querySelector(`tr[data-iface-index="${x.index}"]`);
+            if (row) {
+              const cells = row.querySelectorAll('td');
+              if (cells.length >= 4) {
+                // Always update the last 4 cells: TX, RX, TOTAL TX, TOTAL RX
+                const n = cells.length;
+                cells[n-4].innerHTML = fmtBits(x.tx_bps);
+                cells[n-3].innerHTML = fmtBits(x.rx_bps);
+                cells[n-2].innerHTML = fmtBytes(x.total_tx_bytes);
+                cells[n-1].innerHTML = fmtBytes(x.total_rx_bytes);
+              }
+            }
+          });
+        }
+      } else if (document.getElementById('pppoeTab').style.display !== 'none') {
+        params.set('category', 'pppoe');
+        const res = await fetch('/admin/snmp/interfaces/monitor?' + params.toString());
+        const data = await res.json();
+        if (data.success && data.interfaces) {
+          const tbody = document.getElementById('pppBody');
+          
+          // Filter only running (active) PPPoE like in loadPPPoEInterfaces
+          const activePPP = data.interfaces.filter(x => x.running && !x.disabled);
+          
+          let updatedCount = 0;
+          activePPP.forEach(x => {
+            updateSparkAlt(x, 'ppp');
+            // Find matching row by data-iface-index
+            const row = tbody.querySelector(`tr[data-iface-index="${x.index}"]`);
+            if (row) {
+              const cells = row.querySelectorAll('td');
+              if (cells.length >= 4) {
+                const n = cells.length;
+                cells[n-4].innerHTML = fmtBits(x.tx_bps);
+                cells[n-3].innerHTML = fmtBits(x.rx_bps);
+                cells[n-2].innerHTML = fmtBytes(x.total_tx_bytes);
+                cells[n-1].innerHTML = fmtBytes(x.total_rx_bytes);
+                updatedCount++;
+              }
+            }
+          });
+          console.log(`PPPoE Traffic Poll: Updated ${updatedCount} of ${activePPP.length} interfaces`);
+        }
+      } else if (document.getElementById('hotspotTab').style.display !== 'none') {
+        params.set('category', 'hotspot');
+        const res = await fetch('/admin/snmp/interfaces/monitor?' + params.toString());
+        const data = await res.json();
+        if (data.success && data.interfaces) {
+          const tbody = document.getElementById('hotspotBody');
+          
+          let updatedCount = 0;
+          data.interfaces.forEach(x => {
+            updateSparkAlt(x, 'hs');
+            // Find matching row by data-iface-index
+            const row = tbody.querySelector(`tr[data-iface-index="${x.index}"]`);
+            if (row) {
+              const cells = row.querySelectorAll('td');
+              if (cells.length >= 4) {
+                const n = cells.length;
+                cells[n-4].innerHTML = fmtBits(x.tx_bps);
+                cells[n-3].innerHTML = fmtBits(x.rx_bps);
+                cells[n-2].innerHTML = fmtBytes(x.total_tx_bytes);
+                cells[n-1].innerHTML = fmtBytes(x.total_rx_bytes);
+                updatedCount++;
+              }
+            }
+          });
+          console.log(`Hotspot Traffic Poll: Updated ${updatedCount} of ${data.interfaces.length} interfaces`);
+        }
+      }
+    } catch (e) {
+      console.error('Traffic poll error:', e);
+    }
+  }
+  
+  // Start traffic polling (always runs for live traffic updates)
+  function startTrafficPolling() {
+    if (trafficPollTimer) clearInterval(trafficPollTimer);
+    trafficPollTimer = setInterval(pollTraffic, 5000); // Poll every 5s for traffic
+  }
+  
+  function stopTrafficPolling() {
+    if (trafficPollTimer) {
+      clearInterval(trafficPollTimer);
+      trafficPollTimer = null;
+    }
+  }
+  
+  // Full refresh - reloads entire interface list
+  function startAutoRefresh() {
+    if (refreshTimer) clearInterval(refreshTimer);
+    if (!autoRefreshEnabled) return;
+    
+    refreshTimer = setInterval(() => { 
+      loadHeader(); 
+      if (document.getElementById('dashboardTab').style.display !== 'none') {
+        // Dashboard auto-update
+      } else if (document.getElementById('interfaceTab').style.display !== 'none' && (window.ifaceOffset || 0) === 0) {
+        loadInterfaces();
+      } else if (document.getElementById('pppoeTab').style.display !== 'none' && (window.pppOffset || 0) === 0) {
+        loadPPPoEInterfaces();
+      } else if (document.getElementById('hotspotTab').style.display !== 'none' && (window.hsOffset || 0) === 0) {
+        loadHotspotInterfaces();
+      }
+    }, 30000);
+  }
+  
+  function stopAutoRefresh() {
+    if (refreshTimer) {
+      clearInterval(refreshTimer);
+      refreshTimer = null;
+    }
+  }
+  
+  function toggleAutoRefresh() {
+    autoRefreshEnabled = !autoRefreshEnabled;
+    const btn = document.getElementById('autoRefreshToggle');
+    if (autoRefreshEnabled) {
+      btn.innerHTML = '<i class="fas fa-pause"></i> Stop Auto-Refresh';
+      btn.classList.remove('btn-success');
+      btn.classList.add('btn-danger');
+      startAutoRefresh();
+    } else {
+      btn.innerHTML = '<i class="fas fa-play"></i> Start Auto-Refresh';
+      btn.classList.remove('btn-danger');
+      btn.classList.add('btn-success');
+      stopAutoRefresh();
+    }
+  }
+  
+  loadHeader();
+  loadInterfaces().then(populateLiveIface);
+  startTrafficPolling(); // Always start traffic polling for live updates
+
+  // Tabs behavior
+  const tabDash = document.getElementById('tabDashboard');
+  const tabIface = document.getElementById('tabInterface');
+  const tabPPP = document.getElementById('tabPPPoE');
+  const tabHS = document.getElementById('tabHotspot');
+  const sectionDash = document.getElementById('dashboardTab');
+  const sectionIface = document.getElementById('interfaceTab');
+  const sectionPPP = document.getElementById('pppoeTab');
+  const sectionHS = document.getElementById('hotspotTab');
+  function setTab(which){
+    [tabDash, tabIface, tabPPP, tabHS].forEach(t => t.classList.remove('active'));
+    [sectionDash, sectionIface, sectionPPP, sectionHS].forEach(s => s.style.display = 'none');
+    if (which==='dash'){ tabDash.classList.add('active'); sectionDash.style.display=''; }
+    else if (which==='iface'){ tabIface.classList.add('active'); sectionIface.style.display=''; }
+    else if (which==='ppp'){ tabPPP.classList.add('active'); sectionPPP.style.display=''; loadPPPoEInterfaces(); }
+    else if (which==='hs'){ tabHS.classList.add('active'); sectionHS.style.display=''; loadHotspotInterfaces(); }
+  }
+  tabDash.addEventListener('click', ()=>setTab('dash'));
+  tabIface.addEventListener('click', ()=>setTab('iface'));
+  tabPPP.addEventListener('click', ()=>setTab('ppp'));
+  tabHS.addEventListener('click', ()=>setTab('hs'));
+
+  // Live chart setup with dark theme colors
+  let liveChart, liveTimer=null, liveIfaceName='';
+  function initChart(){
+    const ctx = document.getElementById('liveChart').getContext('2d');
+    liveChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [
+          { label: 'RX (Download)', borderColor:'#58a6ff', backgroundColor:'rgba(88,166,255,0.1)', data: [], tension:0.3, fill:true, borderWidth:2 },
+          { label: 'TX (Upload)', borderColor:'#3fb950', backgroundColor:'rgba(63,185,80,0.1)', data: [], tension:0.3, fill:true, borderWidth:2 },
+        ]
+      },
+      options: {
+        animation:false,
+        responsive:true,
+        interaction: { mode: 'index', intersect: false },
+        scales:{
+          x:{ 
+            ticks:{ color:'#8b949e', font:{ size:11 } },
+            grid:{ color:'#21262d', drawBorder:false }
+          },
+          y:{ 
+            ticks:{ color:'#8b949e', callback:(v)=>fmtBits(v), font:{ size:11 } }, 
+            grid:{ color:'#21262d', drawBorder:false },
+            beginAtZero:true 
+          }
+        },
+        plugins:{ 
+          legend:{ 
+            labels:{ color:'#c9d1d9', font:{ size:12, weight:'600' }, padding:15 }
+          },
+          tooltip:{
+            backgroundColor:'#161b22',
+            titleColor:'#c9d1d9',
+            bodyColor:'#8b949e',
+            borderColor:'#30363d',
+            borderWidth:1
+          }
+        }
+      }
+    });
+  }
+  initChart();
+
+  function populateLiveIface(){
+    // Fill select from table data
+    const select = document.getElementById('liveIface');
+    const rows = document.querySelectorAll('#ifaceBody tr');
+    const opts = [];
+    rows.forEach(r=>{
+      const nameCell = r.children[1];
+      if (!nameCell) return; const name = nameCell.textContent.trim();
+      if (name && !name.includes('Loading') && !name.includes('No data')) opts.push(name);
+    });
+    select.innerHTML = opts.length? opts.map(n=>`<option value="${n}">${n}</option>`).join('') : '<option value="">No interfaces</option>';
+    if (opts.length && !liveIfaceName){ liveIfaceName = opts[0]; select.value = liveIfaceName; startPolling(); }
+  }
+  document.getElementById('liveIface').addEventListener('change', (e)=>{ liveIfaceName = e.target.value; startPolling(true); });
+
+  async function pollOnce(){
+    if (!liveIfaceName) return;
+    const res = await fetch(`/admin/snmp/traffic?interface=${encodeURIComponent(liveIfaceName)}&host=${encodeURIComponent(host)}`);
+    const data = await res.json();
+    if (!data.success) return;
+    const ts = new Date();
+    const label = ts.toLocaleTimeString();
+    const maxPoints = 60;
+    const rx = data.rx||0, tx = data.tx||0;
+    const l = liveChart.data.labels; const d0 = liveChart.data.datasets[0].data; const d1 = liveChart.data.datasets[1].data;
+    l.push(label); d0.push(rx); d1.push(tx);
+    if (l.length>maxPoints){ l.shift(); d0.shift(); d1.shift(); }
+    liveChart.update('none');
+  }
+  function startPolling(reset){
+    if (reset && liveChart){ liveChart.data.labels=[]; liveChart.data.datasets[0].data=[]; liveChart.data.datasets[1].data=[]; liveChart.update('none'); }
+    if (liveTimer) clearInterval(liveTimer);
+    liveTimer = setInterval(pollOnce, 2000);
+    pollOnce();
+  }
+
+  // Sparklines per interface (tiny canvas drawing) - Updated colors for dark theme
+  const sparkHist = new Map(); // index -> {rx:[], tx:[]}
+  function updateSpark(x){
+    const h = sparkHist.get(x.index) || { rx:[], tx:[] };
+    const max=30; h.rx.push(x.rx_bps||0); h.tx.push(x.tx_bps||0); if (h.rx.length>max){ h.rx.shift(); h.tx.shift(); }
+    sparkHist.set(x.index, h);
+    const canvas = document.getElementById('spark-'+x.index);
+    if (!canvas) return; const w = canvas.width = canvas.clientWidth; const hgt = canvas.height = canvas.clientHeight;
+    const ctx = canvas.getContext('2d'); ctx.clearRect(0,0,w,hgt);
+    function drawLine(arr, color){
+      if (!arr.length) return; const maxv = Math.max(1, ...arr); ctx.strokeStyle=color; ctx.lineWidth=2; ctx.beginPath();
+      arr.forEach((v,i)=>{ const xPos = (i/(arr.length-1||1))*w; const yPos = hgt - (v/maxv)*hgt; if(i===0) ctx.moveTo(xPos,yPos); else ctx.lineTo(xPos,yPos); }); ctx.stroke();
+    }
+    drawLine(sparkHist.get(x.index).rx, '#58a6ff'); // Blue for RX
+    drawLine(sparkHist.get(x.index).tx, '#3fb950'); // Green for TX
+  }
+  
+  function updateSparkAlt(x, prefix){
+    const key = `${prefix}-${x.index}`;
+    const h = sparkHist.get(key) || { rx:[], tx:[] };
+    const max=30; h.rx.push(x.rx_bps||0); h.tx.push(x.tx_bps||0); if (h.rx.length>max){ h.rx.shift(); h.tx.shift(); }
+    sparkHist.set(key, h);
+    const canvas = document.getElementById('spark-'+key);
+    if (!canvas) return; const w = canvas.width = canvas.clientWidth; const hgt = canvas.height = canvas.clientHeight;
+    const ctx = canvas.getContext('2d'); ctx.clearRect(0,0,w,hgt);
+    function drawLine(arr, color){
+      if (!arr.length) return; const maxv = Math.max(1, ...arr); ctx.strokeStyle=color; ctx.lineWidth=2; ctx.beginPath();
+      arr.forEach((v,i)=>{ const xPos = (i/(arr.length-1||1))*w; const yPos = hgt - (v/maxv)*hgt; if(i===0) ctx.moveTo(xPos,yPos); else ctx.lineTo(xPos,yPos); }); ctx.stroke();
+    }
+    drawLine(sparkHist.get(key).rx, '#58a6ff'); // Blue for RX
+    drawLine(sparkHist.get(key).tx, '#3fb950'); // Green for TX
+  }
+
+  function openQuickSettings() {
+    const modal = new bootstrap.Modal(document.getElementById('quickSettingsModal'));
+    modal.show();
+  }
+
+  function applyQuickSettings() {
+    const community = document.getElementById('quickCommunity').value.trim();
+    const version = document.getElementById('quickVersion').value.trim();
+    const port = document.getElementById('quickPort').value.trim();
+    
+    const params = new URLSearchParams(window.location.search);
+    params.set('host', host);
+    if (community) params.set('community', community);
+    if (version) params.set('version', version);
+    if (port) params.set('port', port);
+    
+    window.location.href = '/admin/snmp/monitor?' + params.toString();
+  }
+
+  async function clearCacheAndRefresh() {
+    try {
+      const res = await fetch('/admin/snmp/clear-cache', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        // Reload current data
+        loadHeader();
+        if (document.getElementById('interfaceTab').style.display !== 'none') {
+          window.ifaceOffset = 0;
+          loadInterfaces().then(populateLiveIface);
+        } else if (document.getElementById('pppoeTab').style.display !== 'none') {
+          window.pppOffset = 0;
+          loadPPPoEInterfaces();
+        } else if (document.getElementById('hotspotTab').style.display !== 'none') {
+          window.hsOffset = 0;
+          loadHotspotInterfaces();
+        }
+        alert('Cache cleared and data refreshed!');
+      }
+    } catch (e) {
+      console.error('Failed to clear cache:', e);
+      alert('Failed to clear cache');
+    }
+  }
+</script>
+</body>
+</html>

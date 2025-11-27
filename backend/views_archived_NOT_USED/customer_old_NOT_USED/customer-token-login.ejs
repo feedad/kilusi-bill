@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portal Pelanggan - <%= settings.company_header || 'Kilusi Bill' %></title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="/css/style.css">
+    <style>
+        :root {
+            --primary-color: #4361ee;
+            --secondary-color: #3f37c9;
+            --success-color: #4cc9f0;
+            --warning-color: #f72585;
+        }
+
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .login-container {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+
+        .login-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 2rem;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 450px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .logo-section {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .logo-section img {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            margin-bottom: 1rem;
+            border: 3px solid var(--primary-color);
+        }
+
+        .token-section {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 15px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            border: 1px solid #dee2e6;
+        }
+
+        .token-display {
+            background: white;
+            border: 2px dashed var(--primary-color);
+            border-radius: 10px;
+            padding: 1rem;
+            text-align: center;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            font-weight: bold;
+            letter-spacing: 1px;
+            color: var(--primary-color);
+        }
+
+        .loading-spinner {
+            display: none;
+            text-align: center;
+            padding: 1rem;
+        }
+
+        .features-section {
+            background: rgba(67, 97, 238, 0.05);
+            border-radius: 15px;
+            padding: 1.5rem;
+            margin-top: 1.5rem;
+        }
+
+        .feature-item {
+            text-align: center;
+            margin-bottom: 1rem;
+        }
+
+        .feature-icon {
+            font-size: 2rem;
+            color: var(--primary-color);
+            margin-bottom: 0.5rem;
+        }
+
+        .alert-custom {
+            border-radius: 12px;
+            border: none;
+            animation: slideInDown 0.5s ease-out;
+        }
+
+        @keyframes slideInDown {
+            from {
+                transform: translateY(-100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .btn-primary-custom {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            border: none;
+            border-radius: 50px;
+            padding: 12px 24px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary-custom:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(67, 97, 238, 0.3);
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-card">
+            <!-- Logo Section -->
+            <div class="logo-section">
+                <img src="/img/<%= typeof settings !== 'undefined' && settings.logo_filename ? settings.logo_filename : 'logo.png' %>"
+                     alt="Logo" onerror="this.style.display='none'">
+                <h3 class="text-primary mb-1">Portal Pelanggan</h3>
+                <p class="text-muted small mb-0">Akses dashboard Anda dengan token</p>
+            </div>
+
+            <!-- Error/Success Messages -->
+            <% if (typeof error !== 'undefined' && error) { %>
+                <div class="alert alert-danger alert-custom" role="alert">
+                    <i class="bi bi-exclamation-triangle me-2"></i>
+                    <%= error %>
+                </div>
+            <% } %>
+
+            <% if (typeof success !== 'undefined' && success) { %>
+                <div class="alert alert-success alert-custom" role="alert">
+                    <i class="bi bi-check-circle me-2"></i>
+                    <%= success %>
+                </div>
+            <% } %>
+
+            <!-- Token Section -->
+            <div class="token-section">
+                <div class="d-flex align-items-center mb-3">
+                    <i class="bi bi-shield-check text-primary me-2" style="font-size: 1.5rem;"></i>
+                    <div>
+                        <h6 class="mb-0">Akses Aman</h6>
+                        <small class="text-muted">Link valid untuk 30 hari</small>
+                    </div>
+                </div>
+
+                <div class="token-display" id="tokenDisplay">
+                    <%= token || 'Loading...' %>
+                </div>
+
+                <div class="mt-3 text-center">
+                    <small class="text-muted">
+                        <i class="bi bi-lock me-1"></i>
+                        Link khusus untuk Anda. Jangan bagikan ke orang lain.
+                    </small>
+                </div>
+            </div>
+
+            <!-- Loading State -->
+            <div class="loading-spinner" id="loadingSpinner">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mt-2 text-muted">Memproses login...</p>
+            </div>
+
+            <!-- Login Button -->
+            <button class="btn btn-primary btn-lg w-100 btn-primary-custom" id="loginBtn" onclick="proceedToDashboard()">
+                <i class="bi bi-box-arrow-in-right me-2"></i>
+                Masuk ke Dashboard
+            </button>
+
+            <!-- Alternative Login -->
+            <div class="text-center mt-3">
+                <small class="text-muted">
+                    Atau
+                    <a href="/customer/login" class="text-decoration-none">
+                        <strong>login manual dengan nomor HP</strong>
+                    </a>
+                </small>
+            </div>
+
+            <!-- Features Section -->
+            <div class="features-section">
+                <h6 class="text-center mb-3">🚀 Dashboard Features</h6>
+                <div class="row">
+                    <div class="col-4 feature-item">
+                        <i class="bi bi-receipt feature-icon"></i>
+                        <small>Tagihan</small>
+                    </div>
+                    <div class="col-4 feature-item">
+                        <i class="bi bi-wifi feature-icon"></i>
+                        <small>Kelola WiFi</small>
+                    </div>
+                    <div class="col-4 feature-item">
+                        <i class="bi bi-speedometer2 feature-icon"></i>
+                        <small>Monitor Speed</small>
+                    </div>
+                    <div class="col-4 feature-item">
+                        <i class="bi bi-exclamation-triangle feature-icon"></i>
+                        <small>Lapor Gangguan</small>
+                    </div>
+                    <div class="col-4 feature-item">
+                        <i class="bi bi-headset feature-icon"></i>
+                        <small>Support</small>
+                    </div>
+                    <div class="col-4 feature-item">
+                        <i class="bi bi-graph-up feature-icon"></i>
+                        <small>Analytics</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer Info -->
+            <div class="text-center mt-4">
+                <small class="text-muted">
+                    <i class="bi bi-shield-check me-1"></i>
+                    <span id="companyName"><%= settings.company_header || 'Kilusi Digital Network' %></span>
+                    <br>
+                    <span id="currentYear"></span> - Powered by Token Authentication
+                </small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+        // Set current year
+        document.getElementById('currentYear').textContent = new Date().getFullYear();
+
+        // Auto-proceed after 3 seconds (or user clicks)
+        let autoProceedTimer;
+
+        function startAutoProceed() {
+            autoProceedTimer = setTimeout(() => {
+                proceedToDashboard();
+            }, 3000);
+        }
+
+        function proceedToDashboard() {
+            clearTimeout(autoProceedTimer);
+
+            // Show loading state
+            document.getElementById('loadingSpinner').style.display = 'block';
+            document.getElementById('loginBtn').disabled = true;
+            document.getElementById('loginBtn').innerHTML = '<i class="bi bi-arrow-clockwise me-2"></i>Memproses...';
+
+            // Redirect to dashboard
+            setTimeout(() => {
+                window.location.href = '/customer/dashboard';
+            }, 1000);
+        }
+
+        // Start auto-proceed when page loads
+        $(document).ready(function() {
+            // Copy token to clipboard on click
+            $('#tokenDisplay').on('click', function() {
+                const text = $(this).text();
+                navigator.clipboard.writeText(text).then(function() {
+                    showToast('Link berhasil disalin!', 'success');
+                });
+            });
+
+            // Start auto-proceed timer
+            startAutoProceed();
+
+            // Cancel auto-proceed on user interaction
+            $('#loginBtn').on('click', function() {
+                clearTimeout(autoProceedTimer);
+                proceedToDashboard();
+            });
+
+            // Add countdown
+            let countdown = 3;
+            const countdownInterval = setInterval(() => {
+                countdown--;
+                if (countdown <= 0) {
+                    clearInterval(countdownInterval);
+                    $('#loginBtn').html('<i class="bi bi-box-arrow-in-right me-2"></i>Masuk Sekarang');
+                } else {
+                    $('#loginBtn').html(`<i class="bi bi-box-arrow-in-right me-2"></i>Masuk (${countdown})`);
+                }
+            }, 1000);
+        });
+
+        // Toast notification
+        function showToast(message, type = 'info') {
+            const toastHtml = `
+                <div class="toast align-items-center text-white bg-${type === 'success' ? 'success' : 'primary'} border-0" role="alert">
+                    <div class="d-flex">
+                        <div class="toast-body">${message}</div>
+                        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+                    </div>
+                </div>
+            `;
+
+            if (!$('#toastContainer').length) {
+                $('body').append('<div id="toastContainer" class="toast-container position-fixed top-0 end-0 p-3"></div>');
+            }
+
+            const toastElement = $(toastHtml);
+            $('#toastContainer').append(toastElement);
+
+            const toast = new bootstrap.Toast(toastElement[0]);
+            toast.show();
+
+            toastElement.on('hidden.bs.toast', function () {
+                toastElement.remove();
+            });
+        }
+    </script>
+</body>
+</html>

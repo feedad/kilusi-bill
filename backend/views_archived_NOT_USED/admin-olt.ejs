@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OLT Monitoring - <%= settings.company_header %></title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <link href="/css/responsive-admin.css" rel="stylesheet">
+  <link href="/css/dark-theme.css" rel="stylesheet">
+  <link href="/css/theme-unify.css" rel="stylesheet">
+  <link href="/css/dark-theme.css" rel="stylesheet">
+  <style>
+    .olt-card {
+      border-left: 4px solid #667eea;
+      transition: all 0.3s;
+      height: 100%;
+    }
+    .olt-card:hover {
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+      transform: translateY(-2px);
+    }
+    .olt-card.offline {
+      border-left-color: #dc3545;
+      opacity: 0.7;
+    }
+    .olt-card.online {
+      border-left-color: #28a745;
+    }
+    .vendor-badge {
+      font-size: 0.7rem;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .port-badge {
+      font-size: 0.75rem;
+      padding: 0.25rem 0.5rem;
+    }
+    .port-list {
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .port-item {
+      padding: 0.5rem;
+      border-bottom: 1px solid #dee2e6;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .port-item:hover {
+      background-color: #f8f9fa;
+    }
+    .stat-card {
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+    }
+    .loading-spinner {
+      display: inline-block;
+      width: 1rem;
+      height: 1rem;
+      border: 2px solid rgba(0,0,0,.1);
+      border-radius: 50%;
+      border-top-color: #667eea;
+      animation: spinner .6s linear infinite;
+    }
+    @keyframes spinner {
+      to {transform: rotate(360deg);}
+    }
+    
+    /* Mobile responsive fixes */
+    @media (max-width: 767.98px) {
+      .main-content {
+        margin-top: 70px !important;
+        padding-top: 10px !important;
+      }
+    }
+  </style>
+</head>
+<body>
+<div class="container-fluid">
+  <div class="row">
+    <!-- Include Responsive Admin Sidebar -->
+    <%- include('partials/admin-responsive-sidebar', { page: 'olt', settings: settings }) %>
+    
+    <main class="col-md-10 ms-sm-auto main-content">
+      <!-- Header -->
+      <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+          <h2><i class="bi bi-hdd-rack text-primary"></i> OLT Monitoring</h2>
+          <p class="text-muted mb-0">Monitor OLT devices via SNMP - Support ZTE, Huawei, C-Data, HIOSO, HSGQ</p>
+        </div>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addOLTModal">
+          <i class="bi bi-plus-circle"></i> Add OLT Device
+        </button>
+      </div>
+
+      <!-- OLT Devices Grid -->
+      <div id="oltDevicesContainer" class="row g-4">
+        <div class="col-12 text-center py-5">
+          <div class="loading-spinner"></div>
+          <p class="text-muted mt-2">Loading OLT devices...</p>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+  <!-- Add OLT Modal -->
+  <div class="modal fade" id="addOLTModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Add OLT Device</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <form id="addOLTForm">
+            <div class="mb-3">
+              <label class="form-label">Device Name *</label>
+              <input type="text" class="form-control" name="name" required placeholder="e.g., OLT-Main">
+            </div>
+            <div class="mb-3">
+              <label class="form-label">IP Address *</label>
+              <input type="text" class="form-control" name="host" required placeholder="e.g., 192.168.1.1">
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Vendor *</label>
+              <select class="form-select" name="vendor" required>
+                <option value="">Select Vendor</option>
+                <option value="zte">ZTE (C300/C320)</option>
+                <option value="huawei">Huawei (MA5608T/MA5680T)</option>
+                <option value="c-data">C-Data (FD1000 Series)</option>
+                <option value="hioso">HIOSO</option>
+                <option value="hsgq">HSGQ (Guangzhou Shengxi)</option>
+                <option value="fiberhome">Fiberhome</option>
+                <option value="generic">Generic/Other</option>
+              </select>
+              <small class="text-muted">Choose correct vendor for ONU discovery support</small>
+            </div>
+            <div class="row">
+              <div class="col-md-6 mb-3">
+                <label class="form-label">SNMP Community</label>
+                <input type="text" class="form-control" name="community" value="public" placeholder="public">
+              </div>
+              <div class="col-md-6 mb-3">
+                <label class="form-label">SNMP Port</label>
+                <input type="text" class="form-control" name="snmp_port" value="161" placeholder="161">
+              </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Location</label>
+              <input type="text" class="form-control" name="location" placeholder="e.g., Tower A, Floor 2">
+            </div>
+            <div class="row">
+              <div class="col-md-6 mb-3">
+                <label class="form-label">Latitude (for map)</label>
+                <input type="text" class="form-control" name="latitude" placeholder="e.g., -6.2088">
+              </div>
+              <div class="col-md-6 mb-3">
+                <label class="form-label">Longitude (for map)</label>
+                <input type="text" class="form-control" name="longitude" placeholder="e.g., 106.8456">
+              </div>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" onclick="addOLTDevice()">Add Device</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- OLT Details Modal -->
+  <div class="modal fade" id="oltDetailsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="oltDetailsTitle">OLT Details</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body" id="oltDetailsBody">
+          <div class="text-center py-5">
+            <div class="loading-spinner"></div>
+            <p class="text-muted mt-2">Loading...</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    let refreshInterval;
+
+    // Load OLT devices on page load
+    document.addEventListener('DOMContentLoaded', function() {
+      loadOLTDevices();
+      // Auto-refresh every 10 seconds
+      refreshInterval = setInterval(loadOLTDevices, 10000);
+    });
+
+    async function loadOLTDevices() {
+      try {
+        const response = await fetch('/admin/olt/devices');
+        const data = await response.json();
+
+        if (!data.success) {
+          document.getElementById('oltDevicesContainer').innerHTML = `
+            <div class="col-12">
+              <div class="alert alert-warning">
+                <i class="bi bi-exclamation-triangle"></i> ${data.message || 'Failed to load OLT devices'}
+              </div>
+            </div>
+          `;
+          return;
+        }
+
+        if (data.devices.length === 0) {
+          document.getElementById('oltDevicesContainer').innerHTML = `
+            <div class="col-12 text-center py-5">
+              <i class="bi bi-hdd-rack" style="font-size: 4rem; color: #dee2e6;"></i>
+              <h4 class="mt-3 text-muted">No OLT Devices</h4>
+              <p class="text-muted">Click "Add OLT Device" button above to add your first OLT device</p>
+              <button class="btn btn-primary mt-2" data-bs-toggle="modal" data-bs-target="#addOLTModal">
+                <i class="bi bi-plus-circle"></i> Add OLT Device
+              </button>
+            </div>
+          `;
+          return;
+        }
+
+        // Load statistics for each device
+        const devicesHTML = await Promise.all(data.devices.map(async device => {
+          const stats = await loadOLTStatistics(device.id);
+          return createOLTCard(device, stats);
+        }));
+
+        document.getElementById('oltDevicesContainer').innerHTML = devicesHTML.join('');
+      } catch (error) {
+        console.error('Error loading OLT devices:', error);
+        document.getElementById('oltDevicesContainer').innerHTML = `
+          <div class="col-12">
+            <div class="alert alert-danger">
+              <i class="bi bi-x-circle"></i> Error: ${error.message}
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    async function loadOLTStatistics(deviceId) {
+      try {
+        const response = await fetch(`/admin/olt/${deviceId}/statistics`);
+        const data = await response.json();
+        return data.success ? data : null;
+      } catch (error) {
+        console.error(`Error loading statistics for device ${deviceId}:`, error);
+        return null;
+      }
+    }
+
+    function createOLTCard(device, stats) {
+      const isOnline = stats && stats.success;
+      const cardClass = isOnline ? 'olt-card online' : 'olt-card offline';
+      
+      const statusBadge = isOnline 
+        ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Online</span>'
+        : '<span class="badge bg-danger"><i class="bi bi-x-circle"></i> Offline</span>';
+
+      // Vendor badge with color
+      const vendorColors = {
+        'zte': 'bg-primary',
+        'huawei': 'bg-danger',
+        'cdata': 'bg-success',
+        'c-data': 'bg-success',
+        'hioso': 'bg-warning',
+        'hsgq': 'bg-info',
+        'fiberhome': 'bg-secondary',
+        'generic': 'bg-dark'
+      };
+      const vendorColor = vendorColors[device.vendor.toLowerCase()] || 'bg-secondary';
+      const vendorBadge = `<span class="vendor-badge ${vendorColor} text-white">${device.vendor}</span>`;
+
+      const uptime = stats?.device?.uptime || 'N/A';
+      const totalPorts = stats?.totalPorts || 0;
+      const activePorts = stats?.activePorts || 0;
+      const location = device.location || 'N/A';
+
+      return `
+        <div class="col-md-6 col-lg-4">
+          <div class="card ${cardClass}">
+            <div class="card-body">
+              <div class="d-flex justify-content-between align-items-start mb-3">
+                <div>
+                  <h5 class="card-title mb-1">
+                    <i class="bi bi-hdd-rack text-primary"></i> ${device.name}
+                  </h5>
+                  <small class="text-muted"><i class="bi bi-globe"></i> ${device.host}</small>
+                </div>
+                <div class="text-end">
+                  ${statusBadge}
+                  <div class="mt-1">${vendorBadge}</div>
+                </div>
+              </div>
+
+              <div class="mb-3">
+                <div class="row g-2 mb-2">
+                  <div class="col-6">
+                    <div class="card bg-light border-0">
+                      <div class="card-body p-2 text-center">
+                        <div class="text-muted small">PON Ports</div>
+                        <div class="fs-5 fw-bold text-primary">${totalPorts}</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="col-6">
+                    <div class="card bg-light border-0">
+                      <div class="card-body p-2 text-center">
+                        <div class="text-muted small">Active</div>
+                        <div class="fs-5 fw-bold text-success">${activePorts}</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="d-flex justify-content-between align-items-center py-2 border-top">
+                  <span class="text-muted small"><i class="bi bi-clock"></i> Uptime</span>
+                  <strong class="small">${uptime}</strong>
+                </div>
+                <div class="d-flex justify-content-between align-items-center py-2 border-top">
+                  <span class="text-muted small"><i class="bi bi-geo-alt"></i> Location</span>
+                  <strong class="small">${location}</strong>
+                </div>
+              </div>
+
+              <div class="d-grid gap-2">
+                <button class="btn btn-sm btn-primary" onclick="showOLTDetails(${device.id})">
+                  <i class="bi bi-eye"></i> View Details
+                </button>
+                <div class="btn-group btn-group-sm">
+                  <button class="btn btn-outline-secondary" onclick="editOLTDevice(${device.id})">
+                    <i class="bi bi-pencil"></i> Edit
+                  </button>
+                  <button class="btn btn-outline-danger" onclick="deleteOLTDevice(${device.id}, '${device.name}')">
+                    <i class="bi bi-trash"></i> Delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    async function showOLTDetails(deviceId) {
+      const modal = new bootstrap.Modal(document.getElementById('oltDetailsModal'));
+      modal.show();
+
+      document.getElementById('oltDetailsBody').innerHTML = `
+        <div class="text-center py-5">
+          <div class="loading-spinner"></div>
+          <p class="text-muted mt-2">Loading details...</p>
+        </div>
+      `;
+
+      try {
+        const [info, ports] = await Promise.all([
+          fetch(`/admin/olt/${deviceId}/info`).then(r => r.json()),
+          fetch(`/admin/olt/${deviceId}/ports`).then(r => r.json())
+        ]);
+
+        if (!info.success) {
+          throw new Error(info.message || 'Failed to load OLT info');
+        }
+
+        document.getElementById('oltDetailsTitle').textContent = info.device.name;
+
+        let portsHTML = '';
+        if (ports.success && ports.ports.length > 0) {
+          portsHTML = ports.ports.map(port => `
+            <div class="port-item">
+              <div>
+                <strong>${port.name}</strong>
+                <small class="text-muted d-block">Index: ${port.index}</small>
+              </div>
+              <span class="badge ${port.status === 'up' ? 'bg-success' : 'bg-secondary'}">
+                ${port.status.toUpperCase()}
+              </span>
+            </div>
+          `).join('');
+        } else {
+          portsHTML = '<p class="text-muted text-center py-3">No PON ports found</p>';
+        }
+
+        document.getElementById('oltDetailsBody').innerHTML = `
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <div class="stat-card bg-light">
+                <small class="text-muted">Device Name</small>
+                <h6>${info.device.deviceName}</h6>
+              </div>
+            </div>
+            <div class="col-md-6 mb-3">
+              <div class="stat-card bg-light">
+                <small class="text-muted">Location</small>
+                <h6>${info.device.location}</h6>
+              </div>
+            </div>
+            <div class="col-md-6 mb-3">
+              <div class="stat-card bg-light">
+                <small class="text-muted">Uptime</small>
+                <h6>${info.uptime}</h6>
+              </div>
+            </div>
+            <div class="col-md-6 mb-3">
+              <div class="stat-card bg-light">
+                <small class="text-muted">Vendor</small>
+                <h6>${info.device.vendor.toUpperCase()}</h6>
+              </div>
+            </div>
+          </div>
+
+          <h6 class="mt-4 mb-3">PON Ports (${ports.total || 0})</h6>
+          <div class="port-list border rounded">
+            ${portsHTML}
+          </div>
+
+          <div class="mt-3">
+            <small class="text-muted">Description: ${info.description}</small>
+          </div>
+        `;
+      } catch (error) {
+        document.getElementById('oltDetailsBody').innerHTML = `
+          <div class="alert alert-danger">
+            <i class="bi bi-x-circle"></i> Error: ${error.message}
+          </div>
+        `;
+      }
+    }
+
+    async function addOLTDevice() {
+      const form = document.getElementById('addOLTForm');
+      const formData = new FormData(form);
+      const data = Object.fromEntries(formData.entries());
+
+      try {
+        const response = await fetch('/admin/olt/device/add', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          bootstrap.Modal.getInstance(document.getElementById('addOLTModal')).hide();
+          form.reset();
+          loadOLTDevices();
+          alert('OLT device added successfully!');
+        } else {
+          alert('Error: ' + result.message);
+        }
+      } catch (error) {
+        alert('Error adding OLT device: ' + error.message);
+      }
+    }
+
+    async function deleteOLTDevice(deviceId, deviceName) {
+      if (!confirm(`Delete OLT device "${deviceName}"?`)) return;
+
+      try {
+        const response = await fetch(`/admin/olt/device/${deviceId}/delete`, {
+          method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          loadOLTDevices();
+          alert('OLT device deleted successfully!');
+        } else {
+          alert('Error: ' + result.message);
+        }
+      } catch (error) {
+        alert('Error deleting OLT device: ' + error.message);
+      }
+    }
+
+    function editOLTDevice(deviceId) {
+      alert('Edit feature coming soon!');
+    }
+
+    // Clean up interval when leaving page
+    window.addEventListener('beforeunload', function() {
+      if (refreshInterval) clearInterval(refreshInterval);
+    });
+  </script>
+</body>
+</html>

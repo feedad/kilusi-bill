@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %> - SNMP Diagnostics</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <link href="/css/responsive-admin.css" rel="stylesheet">
+    <link href="/css/dark-theme.css" rel="stylesheet">
+    <link href="/css/widgets.css" rel="stylesheet">
+    <link href="/css/theme-unify.css" rel="stylesheet">
+    <link rel="stylesheet" href="/css/dark-theme.css">
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <%- include('partials/admin-responsive-sidebar', { page: 'snmp', settings: settings }) %>
+            
+            <main class="col-md-10 main-content ms-sm-auto">
+                <div class="container-fluid p-4">
+            <div class="row mb-4">
+                <div class="col-12">
+                    <h2><i class="bi bi-diagram-3"></i> SNMP Diagnostics</h2>
+                    <p class="text-muted">Monitor dan diagnosa koneksi SNMP ke perangkat Mikrotik</p>
+                    <div class="d-flex gap-2">
+                        <a class="btn btn-sm btn-outline-secondary" href="/admin/snmp/devices"><i class="bi bi-list"></i> Semua Perangkat</a>
+                        <% if (selectedHost) { %>
+                          <span class="badge bg-dark">Host: <%= selectedHost %></span>
+                        <% } %>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Connection Status -->
+            <div class="row mb-4">
+                <div class="col-md-3">
+                    <div class="card">
+                        <div class="card-body text-center">
+                            <i class="bi bi-router fs-1 text-primary"></i>
+                            <h6 class="mt-2">Connection</h6>
+                            <h4 id="connectionStatus" class="mb-0">
+                                <span class="badge bg-secondary">Checking...</span>
+                            </h4>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card">
+                        <div class="card-body text-center">
+                            <i class="bi bi-hdd-network fs-1 text-info"></i>
+                            <h6 class="mt-2">Interfaces</h6>
+                            <h4 id="interfaceCount" class="mb-0">-</h4>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card">
+                        <div class="card-body text-center">
+                            <i class="bi bi-clock-history fs-1 text-success"></i>
+                            <h6 class="mt-2">Uptime</h6>
+                            <h4 id="uptime" class="mb-0">-</h4>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card">
+                        <div class="card-body text-center">
+                            <i class="bi bi-speedometer2 fs-1 text-warning"></i>
+                            <h6 class="mt-2">CPU Load</h6>
+                            <h4 id="cpuLoad" class="mb-0">-</h4>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Device Info -->
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="bi bi-info-circle"></i> Device Information</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <table class="table table-sm">
+                                        <tr>
+                                            <th width="150">SNMP Host:</th>
+                                            <td id="snmpHost"><%= selectedHost || settings.snmp_host || 'N/A' %></td>
+                                        </tr>
+                                        <tr>
+                                            <th>Port:</th>
+                                            <td id="snmpPort"><%= settings.snmp_port || '161' %></td>
+                                        </tr>
+                                        <tr>
+                                            <th>Community:</th>
+                                            <td id="snmpCommunity"><%= settings.snmp_community || 'public' %></td>
+                                        </tr>
+                                        <tr>
+                                            <th>Version:</th>
+                                            <td id="snmpVersion"><%= settings.snmp_version || '2c' %></td>
+                                        </tr>
+                                    </table>
+                                </div>
+                                <div class="col-md-6">
+                                    <table class="table table-sm">
+                                        <tr>
+                                            <th width="150">System Name:</th>
+                                            <td id="sysName">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>Description:</th>
+                                            <td id="sysDescr">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>Selected Interface:</th>
+                                            <td id="selectedInterface"><%= settings.snmp_interface || settings.main_interface || 'N/A' %></td>
+                                        </tr>
+                                        <tr>
+                                            <th>Monitor Mode:</th>
+                                            <td><span class="badge bg-primary"><%= settings.monitor_mode || 'mikrotik' %></span></td>
+                                        </tr>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Interface Traffic Test -->
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0"><i class="bi bi-graph-up"></i> Traffic Monitor</h5>
+                            <button class="btn btn-sm btn-primary" onclick="testTraffic()">
+                                <i class="bi bi-arrow-clockwise"></i> Test Traffic
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label>Select Interface:</label>
+                                    <select id="trafficInterface" class="form-select">
+                                        <option value="">Loading...</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="card bg-light">
+                                        <div class="card-body">
+                                            <h6><i class="bi bi-arrow-down-circle text-primary"></i> RX (Download)</h6>
+                                            <h3 id="trafficRx" class="mb-0">0 bps</h3>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="card bg-light">
+                                        <div class="card-body">
+                                            <h6><i class="bi bi-arrow-up-circle text-success"></i> TX (Upload)</h6>
+                                            <h3 id="trafficTx" class="mb-0">0 bps</h3>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="alert alert-info mt-3">
+                                <i class="bi bi-info-circle"></i> Traffic values require at least 2 samples to calculate rate. Wait a few seconds between tests for accurate readings.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Interface List -->
+            <div class="row">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0"><i class="bi bi-list-ul"></i> Available Interfaces</h5>
+                            <button class="btn btn-sm btn-success" onclick="refreshInterfaces()">
+                                <i class="bi bi-arrow-clockwise"></i> Refresh
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-hover" id="interfaceTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Index</th>
+                                            <th>Name</th>
+                                            <th>Description</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="interfaceList">
+                                        <tr>
+                                            <td colspan="4" class="text-center">
+                                                <div class="spinner-border spinner-border-sm" role="status">
+                                                    <span class="visually-hidden">Loading...</span>
+                                                </div>
+                                                Loading interfaces...
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let currentInterfaces = [];
+    const selectedHost = '<%= selectedHost || "" %>';
+        const qHost = selectedHost ? ('?host=' + encodeURIComponent(selectedHost)) : '';
+
+        async function loadDeviceInfo() {
+            try {
+                const res = await fetch('/admin/snmp/device-info' + qHost);
+                const data = await res.json();
+                
+                if (data.success) {
+                    document.getElementById('connectionStatus').innerHTML = 
+                        '<span class="badge bg-success">Connected</span>';
+                    document.getElementById('sysName').textContent = data.sysName || 'N/A';
+                    document.getElementById('sysDescr').textContent = data.sysDescr || 'N/A';
+                    document.getElementById('uptime').textContent = data.uptime || 'N/A';
+                    document.getElementById('cpuLoad').textContent = 
+                        data.cpuLoad !== null ? data.cpuLoad + '%' : 'N/A';
+                } else {
+                    document.getElementById('connectionStatus').innerHTML = 
+                        '<span class="badge bg-danger">Error</span>';
+                    console.error('Device info error:', data.message);
+                }
+            } catch (e) {
+                document.getElementById('connectionStatus').innerHTML = 
+                    '<span class="badge bg-danger">Failed</span>';
+                console.error('Failed to load device info:', e);
+            }
+        }
+
+        async function loadInterfaces() {
+            try {
+                const res = await fetch('/admin/snmp/interfaces' + qHost);
+                const data = await res.json();
+                
+                if (data.success && data.interfaces) {
+                    currentInterfaces = data.interfaces;
+                    document.getElementById('interfaceCount').textContent = data.interfaces.length;
+                    
+                    const tbody = document.getElementById('interfaceList');
+                    tbody.innerHTML = '';
+                    
+                    data.interfaces.forEach(iface => {
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td>${iface.index}</td>
+                            <td><code>${iface.name}</code></td>
+                            <td>${iface.descr || '-'}</td>
+                            <td>
+                                <button class="btn btn-sm btn-primary" onclick="testInterfaceTraffic('${iface.name}')">
+                                    <i class="bi bi-speedometer"></i> Test
+                                </button>
+                            </td>
+                        `;
+                        tbody.appendChild(row);
+                    });
+                    
+                    // Populate interface select
+                    const select = document.getElementById('trafficInterface');
+                    select.innerHTML = '<option value="">-- Select Interface --</option>';
+                    data.interfaces.forEach(iface => {
+                        const option = document.createElement('option');
+                        option.value = iface.name;
+                        option.textContent = `${iface.name} (#${iface.index})`;
+                        select.appendChild(option);
+                    });
+                    
+                    // Set current interface as default
+                    const currentIface = '<%= settings.snmp_interface || settings.main_interface || "" %>';
+                    if (currentIface) {
+                        select.value = currentIface;
+                    }
+                } else {
+                    document.getElementById('interfaceList').innerHTML = 
+                        '<tr><td colspan="4" class="text-danger">Failed to load interfaces</td></tr>';
+                }
+            } catch (e) {
+                console.error('Failed to load interfaces:', e);
+                document.getElementById('interfaceList').innerHTML = 
+                    '<tr><td colspan="4" class="text-danger">Error loading interfaces</td></tr>';
+            }
+        }
+
+        async function testTraffic() {
+            const select = document.getElementById('trafficInterface');
+            const iface = select.value;
+            
+            if (!iface) {
+                alert('Please select an interface first');
+                return;
+            }
+            
+            await testInterfaceTraffic(iface);
+        }
+
+        async function testInterfaceTraffic(interfaceName) {
+            try {
+                document.getElementById('trafficRx').innerHTML = '<div class="spinner-border spinner-border-sm"></div>';
+                document.getElementById('trafficTx').innerHTML = '<div class="spinner-border spinner-border-sm"></div>';
+                
+                const res = await fetch(`/admin/snmp/traffic?interface=${encodeURIComponent(interfaceName)}${selectedHost ? '&host=' + encodeURIComponent(selectedHost) : ''}`);
+                const data = await res.json();
+                
+                if (data.success) {
+                    const rxMbps = (data.rx / 1000000).toFixed(2);
+                    const txMbps = (data.tx / 1000000).toFixed(2);
+                    
+                    document.getElementById('trafficRx').textContent = rxMbps + ' Mbps';
+                    document.getElementById('trafficTx').textContent = txMbps + ' Mbps';
+                    
+                    // Set the select to this interface
+                    document.getElementById('trafficInterface').value = interfaceName;
+                } else {
+                    document.getElementById('trafficRx').innerHTML = '<span class="text-danger">Error</span>';
+                    document.getElementById('trafficTx').innerHTML = '<span class="text-danger">Error</span>';
+                    alert('Error: ' + (data.message || 'Failed to get traffic'));
+                }
+            } catch (e) {
+                console.error('Traffic test failed:', e);
+                document.getElementById('trafficRx').innerHTML = '<span class="text-danger">Failed</span>';
+                document.getElementById('trafficTx').innerHTML = '<span class="text-danger">Failed</span>';
+            }
+        }
+
+        function refreshInterfaces() {
+            document.getElementById('interfaceList').innerHTML = 
+                '<tr><td colspan="4" class="text-center"><div class="spinner-border spinner-border-sm"></div> Refreshing...</td></tr>';
+            loadInterfaces();
+        }
+
+        // Auto-refresh
+        setInterval(() => {
+            loadDeviceInfo();
+        }, 5000);
+
+        // Initial load
+        loadDeviceInfo();
+        loadInterfaces();
+    </script>
+</body>
+</html>

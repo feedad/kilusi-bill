@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Profile Berlangganan - Admin</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <link href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/css/responsive-admin.css">
+  <link href="/css/dark-theme.css" rel="stylesheet">
+  <link href="/css/theme-unify.css" rel="stylesheet">
+</head>
+<body>
+  <div class="container-fluid">
+    <div class="row">
+      <%- include('partials/sidebar', { page: 'profiles' }) %>
+
+      <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4 main-content">
+        <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+          <h2><i class="bi bi-diagram-3"></i> Profile Berlangganan</h2>
+          <div class="btn-toolbar mb-2 mb-md-0">
+            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addProfileModal">
+              <i class="bi bi-plus-circle"></i> Tambah Profile
+            </button>
+          </div>
+        </div>
+
+        <!-- Alerts -->
+        <% if (typeof error !== 'undefined' && error) { %>
+          <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="bi bi-exclamation-triangle"></i> <%= error %>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+          </div>
+        <% } %>
+        <% if (typeof success !== 'undefined' && success) { %>
+          <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <i class="bi bi-check-circle"></i> <%= success %>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+          </div>
+        <% } %>
+
+        <!-- Profiles Table -->
+        <div class="card">
+          <div class="card-header">
+            <h5 class="mb-0"><i class="bi bi-list-ul"></i> Daftar Profile</h5>
+          </div>
+          <div class="card-body">
+            <div class="table-responsive">
+              <table class="table table-hover" id="profilesTable">
+                <thead>
+                  <tr>
+                    <th>Nama Profile</th>
+                    <th>Group</th>
+                    <th>Rate Limit</th>
+                    <th>Shared</th>
+                    <th>Aktif</th>
+                    <th class="text-end">HPP</th>
+                    <th class="text-end">Komisi</th>
+                    <th class="text-end">Harga</th>
+                    <th class="text-center">User Online</th>
+                    <th class="text-center">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <% packages.forEach(pkg => { %>
+                    <tr>
+                      <td><strong><%= pkg.name %></strong><br><small class="text-muted"><%= pkg.speed %></small></td>
+                      <td><code><%= pkg.group || '-' %></code></td>
+                      <td><%= pkg.rate_limit || '<span class="text-muted">Dari Mikrotik</span>' %></td>
+                      <td>
+                        <% if (pkg.shared == 1) { %>
+                          <span class="badge bg-warning"><i class="bi bi-people"></i> Shared</span>
+                        <% } else { %>
+                          <span class="badge bg-success"><i class="bi bi-person"></i> Dedicated</span>
+                        <% } %>
+                      </td>
+                      <td>
+                        <% if (pkg.is_active) { %>
+                          <span class="badge bg-success">Aktif</span>
+                        <% } else { %>
+                          <span class="badge bg-secondary">Nonaktif</span>
+                        <% } %>
+                      </td>
+                      <td class="text-end">Rp <%= (pkg.hpp || 0).toLocaleString('id-ID') %></td>
+                      <td class="text-end">Rp <%= (pkg.commission || 0).toLocaleString('id-ID') %></td>
+                      <td class="text-end"><strong>Rp <%= pkg.price.toLocaleString('id-ID') %></strong></td>
+                      <td class="text-center">
+                        <span class="badge bg-info" id="online-<%= pkg.id %>">
+                          <i class="bi bi-wifi"></i> <span class="online-count">0</span>
+                        </span>
+                      </td>
+                      <td class="text-center">
+                        <button class="btn btn-sm btn-warning" onclick="editProfile(<%= pkg.id %>)" 
+                                data-id="<%= pkg.id %>"
+                                data-name="<%= pkg.name %>"
+                                data-speed="<%= pkg.speed %>"
+                                data-group="<%= pkg.group || '' %>"
+                                data-rate_limit="<%= pkg.rate_limit || '' %>"
+                                data-shared="<%= pkg.shared || 0 %>"
+                                data-hpp="<%= pkg.hpp || 0 %>"
+                                data-commission="<%= pkg.commission || 0 %>"
+                                data-price="<%= pkg.price %>"
+                                data-pppoe_profile="<%= pkg.pppoe_profile || 'default' %>"
+                                data-description="<%= pkg.description || '' %>"
+                                data-is_active="<%= pkg.is_active ? 1 : 0 %>">
+                          <i class="bi bi-pencil"></i>
+                        </button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteProfile(<%= pkg.id %>, '<%= pkg.name %>')">
+                          <i class="bi bi-trash"></i>
+                        </button>
+                      </td>
+                    </tr>
+                  <% }) %>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- Add Profile Modal -->
+  <div class="modal fade" id="addProfileModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Tambah Profile Baru</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <form method="POST" action="/admin/billing/packages/create">
+          <div class="modal-body">
+            <div class="row">
+              <div class="col-md-6">
+                <div class="mb-3">
+                  <label class="form-label">Nama Profile <span class="text-danger">*</span></label>
+                  <input type="text" class="form-control" name="name" required>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Kecepatan <span class="text-danger">*</span></label>
+                  <input type="text" class="form-control" name="speed" placeholder="10 Mbps" required>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Group RADIUS</label>
+                  <input type="text" class="form-control" name="group" placeholder="package_1">
+                  <small class="text-muted">Kosongkan untuk auto-generate</small>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Rate Limit</label>
+                  <input type="text" class="form-control" name="rate_limit" placeholder="10M/10M">
+                  <small class="text-muted">Kosongkan jika pakai limit dari Mikrotik PPPoE Profile</small>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">PPPoE Profile Mikrotik</label>
+                  <input type="text" class="form-control" name="pppoe_profile" value="default">
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="mb-3">
+                  <label class="form-label">Harga Jual <span class="text-danger">*</span></label>
+                  <input type="number" class="form-control" name="price" required>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">HPP (Harga Pokok)</label>
+                  <input type="number" class="form-control" name="hpp" value="0">
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Komisi Teknisi</label>
+                  <input type="number" class="form-control" name="commission" value="0">
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Bandwidth Type</label>
+                  <select class="form-select" name="shared">
+                    <option value="0">Dedicated (Per User)</option>
+                    <option value="1">Shared (Bandwidth Dibagi)</option>
+                  </select>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Deskripsi</label>
+                  <textarea class="form-control" name="description" rows="3"></textarea>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+            <button type="submit" class="btn btn-primary">Simpan Profile</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Profile Modal -->
+  <div class="modal fade" id="editProfileModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Edit Profile</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <form method="POST" action="/admin/billing/packages/update">
+          <input type="hidden" name="id" id="edit_id">
+          <div class="modal-body">
+            <div class="row">
+              <div class="col-md-6">
+                <div class="mb-3">
+                  <label class="form-label">Nama Profile <span class="text-danger">*</span></label>
+                  <input type="text" class="form-control" name="name" id="edit_name" required>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Kecepatan <span class="text-danger">*</span></label>
+                  <input type="text" class="form-control" name="speed" id="edit_speed" required>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Group RADIUS</label>
+                  <input type="text" class="form-control" name="group" id="edit_group">
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Rate Limit</label>
+                  <input type="text" class="form-control" name="rate_limit" id="edit_rate_limit">
+                  <small class="text-muted">Kosongkan jika pakai limit dari Mikrotik</small>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">PPPoE Profile Mikrotik</label>
+                  <input type="text" class="form-control" name="pppoe_profile" id="edit_pppoe_profile">
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="mb-3">
+                  <label class="form-label">Harga Jual <span class="text-danger">*</span></label>
+                  <input type="number" class="form-control" name="price" id="edit_price" required>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">HPP (Harga Pokok)</label>
+                  <input type="number" class="form-control" name="hpp" id="edit_hpp">
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Komisi Teknisi</label>
+                  <input type="number" class="form-control" name="commission" id="edit_commission">
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Bandwidth Type</label>
+                  <select class="form-select" name="shared" id="edit_shared">
+                    <option value="0">Dedicated (Per User)</option>
+                    <option value="1">Shared (Bandwidth Dibagi)</option>
+                  </select>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Status</label>
+                  <select class="form-select" name="is_active" id="edit_is_active">
+                    <option value="1">Aktif</option>
+                    <option value="0">Nonaktif</option>
+                  </select>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Deskripsi</label>
+                  <textarea class="form-control" name="description" id="edit_description" rows="2"></textarea>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+            <button type="submit" class="btn btn-warning">Update Profile</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete Confirmation Form -->
+  <form id="deleteForm" method="POST" style="display: none;">
+    <input type="hidden" name="_method" value="DELETE">
+  </form>
+
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+  <script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
+  <script>
+    $(document).ready(function() {
+      // Initialize DataTable
+      $('#profilesTable').DataTable({
+        responsive: true,
+        order: [[7, 'desc']], // Sort by price
+        language: { 
+          url: '//cdn.datatables.net/plug-ins/1.13.4/i18n/id.json' 
+        }
+      });
+
+      // Load online users count
+      loadOnlineUsers();
+      
+      // Refresh every 30 seconds
+      setInterval(loadOnlineUsers, 30000);
+
+      // Auto-hide alerts
+      setTimeout(function() {
+        $('.alert').fadeOut();
+      }, 4000);
+    });
+
+    function loadOnlineUsers() {
+      $.get('/admin/billing/api/online-users-by-profile', function(data) {
+        if (data.success) {
+          // Update badge counts
+          Object.keys(data.onlineUsers).forEach(function(group) {
+            const count = data.onlineUsers[group];
+            $('[id^="online-"]').each(function() {
+              const $row = $(this).closest('tr');
+              const groupCode = $row.find('code').text().trim();
+              if (groupCode === group) {
+                $(this).find('.online-count').text(count);
+                if (count > 0) {
+                  $(this).removeClass('bg-info').addClass('bg-success');
+                } else {
+                  $(this).removeClass('bg-success').addClass('bg-info');
+                }
+              }
+            });
+          });
+        }
+      });
+    }
+
+    function editProfile(id) {
+      const btn = $(`button[data-id="${id}"]`);
+      $('#edit_id').val(id);
+      $('#edit_name').val(btn.data('name'));
+      $('#edit_speed').val(btn.data('speed'));
+      $('#edit_group').val(btn.data('group'));
+      $('#edit_rate_limit').val(btn.data('rate_limit'));
+      $('#edit_shared').val(btn.data('shared'));
+      $('#edit_hpp').val(btn.data('hpp'));
+      $('#edit_commission').val(btn.data('commission'));
+      $('#edit_price').val(btn.data('price'));
+      $('#edit_pppoe_profile').val(btn.data('pppoe_profile'));
+      $('#edit_description').val(btn.data('description'));
+      $('#edit_is_active').val(btn.data('is_active'));
+      
+      const modal = new bootstrap.Modal(document.getElementById('editProfileModal'));
+      modal.show();
+    }
+
+    function deleteProfile(id, name) {
+      if (confirm(`Yakin ingin menghapus profile "${name}"?\n\nPeringatan: Ini akan menghapus group dari RADIUS server juga!`)) {
+        const form = document.getElementById('deleteForm');
+        form.action = `/admin/billing/packages/delete/${id}`;
+        form.submit();
+      }
+    }
+  </script>
+</body>
+</html>

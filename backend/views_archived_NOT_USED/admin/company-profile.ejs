@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Company Profile - <%= settings.company_name || 'Kilusi Bill' %></title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="/css/responsive-admin.css">
+    <link href="/css/dark-theme.css" rel="stylesheet">
+    <style>
+        body {
+            background: #1a1d29 !important;
+            color: #e0e0e0;
+        }
+
+        .main-content {
+            background: #1a1d29;
+            margin-left: 280px;
+            padding: 20px;
+            min-height: 100vh;
+            position: relative;
+            z-index: 1;
+            width: calc(100% - 280px);
+        }
+
+        /* Fix sidebar positioning */
+        .sidebar {
+            position: fixed !important;
+            top: 0;
+            left: 0;
+            width: 280px !important;
+            height: 100vh;
+            z-index: 1000;
+            overflow-y: auto;
+            background: #1a1d29 !important;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.3);
+        }
+
+        /* Ensure content doesn't overlap sidebar */
+        body {
+            overflow-x: hidden;
+        }
+
+        /* Container wrapper untuk proper layout */
+        .container-wrapper {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        /* Fix Bootstrap col-md-2 conflicts */
+        .col-md-2.sidebar {
+            flex: 0 0 280px !important;
+            max-width: 280px !important;
+            position: fixed !important;
+        }
+
+        @media (max-width: 767.98px) {
+            .main-content {
+                margin-left: 0;
+                margin-top: 70px !important;
+                padding-top: 10px !important;
+                z-index: 1;
+                width: 100%;
+            }
+
+            .sidebar {
+                transform: translateX(-100%);
+                transition: transform 0.3s ease-in-out;
+            }
+
+            .sidebar.show {
+                transform: translateX(0);
+            }
+        }
+
+        .card {
+            background: #252a3d !important;
+            border: 1px solid #3a4052;
+            color: #e0e0e0;
+            margin-bottom: 20px;
+        }
+
+        .card-header {
+            background: #2d3348 !important;
+            border-bottom: 1px solid #3a4052;
+            color: #e0e0e0;
+        }
+
+        h2, h3, h4, h5, h6 {
+            color: #ffffff !important;
+        }
+
+        .form-control, .form-select, textarea {
+            background-color: #1a1d29 !important;
+            border: 1px solid #3a4052 !important;
+            color: #e0e0e0 !important;
+        }
+
+        .form-control:focus, .form-select:focus {
+            background-color: #1a1d29 !important;
+            border-color: #007bff !important;
+            color: #e0e0e0 !important;
+        }
+
+        .btn-primary {
+            background: #007bff !important;
+            border-color: #007bff !important;
+        }
+
+        .alert {
+            border: none !important;
+            border-radius: 8px;
+        }
+
+        .alert-success {
+            background: #10b981 !important;
+            color: white !important;
+        }
+
+        .alert-danger {
+            background: #ef4444 !important;
+            color: white !important;
+        }
+
+        .alert-info {
+            background: #3b82f6 !important;
+            color: white !important;
+        }
+    </style>
+</head>
+<body>
+    <!-- Include Responsive Sidebar -->
+    <%- include('../partials/admin-responsive-sidebar.ejs') %>
+
+    <div class="main-content">
+        <div class="container-fluid">
+            <!-- Header -->
+            <div class="mb-4">
+                <h2 class="mb-1">
+                    <i class="bi bi-building me-2"></i>Company Profile Settings
+                </h2>
+                <p class="text-muted mb-0">Manage your company information and branding</p>
+            </div>
+
+            <!-- Success/Error Messages -->
+            <% if (typeof success !== 'undefined' && success) { %>
+                <div class="alert alert-success alert-dismissible fade show" role="alert">
+                    <i class="bi bi-check-circle me-2"></i><%= success %>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            <% } %>
+
+            <% if (typeof error !== 'undefined' && error) { %>
+                <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                    <i class="bi bi-exclamation-circle me-2"></i><%= error %>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            <% } %>
+
+            <form method="POST" action="/admin/setting/company-profile/update">
+                <!-- Company Information -->
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="bi bi-building me-2"></i>Company Information
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="company_name" class="form-label">
+                                        <i class="bi bi-building me-1"></i>Company Name
+                                    </label>
+                                    <input type="text" class="form-control" id="company_name" name="company_name"
+                                           value="<%= settings.company_name || 'Kilusi Bill' %>" required>
+                                    <small class="text-muted">Official company name</small>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="footer_info" class="form-label">
+                                        <i class="bi bi-info-circle me-1"></i>Footer Info
+                                    </label>
+                                    <input type="text" class="form-control" id="footer_info" name="footer_info"
+                                           value="<%= settings.footer_info || 'Info Hubungi : +6281234567890' %>" required>
+                                    <small class="text-muted">Footer text for messages</small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="company_header" class="form-label">
+                                <i class="bi bi-card-heading me-1"></i>Company Header (WhatsApp Messages)
+                            </label>
+                            <textarea class="form-control" id="company_header" name="company_header" rows="3" required><%= settings.company_header || '📱 KILUSI BILL - ISP Management System 📱\n\n' %></textarea>
+                            <small class="text-muted">Header that appears at the top of WhatsApp messages</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Contact Information -->
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="bi bi-telephone me-2"></i>Contact Information
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="contact_whatsapp" class="form-label">
+                                        <i class="bi bi-whatsapp me-1"></i>WhatsApp Number
+                                    </label>
+                                    <input type="tel" class="form-control" id="contact_whatsapp" name="contact_whatsapp"
+                                           value="<%= settings.contact_whatsapp || '+6281234567890' %>" required>
+                                    <small class="text-muted">Primary WhatsApp contact</small>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="contact_phone" class="form-label">
+                                        <i class="bi bi-telephone me-1"></i>Contact Phone
+                                    </label>
+                                    <input type="tel" class="form-control" id="contact_phone" name="contact_phone"
+                                           value="<%= settings.contact_phone || '+6281234567890' %>" required>
+                                    <small class="text-muted">Primary phone contact</small>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="support_phone" class="form-label">
+                                        <i class="bi bi-headset me-1"></i>Support Phone
+                                    </label>
+                                    <input type="tel" class="form-control" id="support_phone" name="support_phone"
+                                           value="<%= settings.support_phone || '+6281234567890' %>" required>
+                                    <small class="text-muted">Customer support phone</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Banking Information -->
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="bi bi-bank me-2"></i>Banking Information
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="bank_name" class="form-label">
+                                        <i class="bi bi-bank me-1"></i>Bank Name
+                                    </label>
+                                    <select class="form-select" id="bank_name" name="bank_name" required>
+                                        <option value="BCA" <%= (settings.bank_name === 'BCA') ? 'selected' : '' %>>BCA</option>
+                                        <option value="BRI" <%= (settings.bank_name === 'BRI') ? 'selected' : '' %>>BRI</option>
+                                        <option value="BANK MANDIRI" <%= (settings.bank_name === 'BANK MANDIRI') ? 'selected' : '' %>>Mandiri</option>
+                                        <option value="BNI" <%= (settings.bank_name === 'BNI') ? 'selected' : '' %>>BNI</option>
+                                        <option value="BANK DANAMON" <%= (settings.bank_name === 'BANK DANAMON') ? 'selected' : '' %>>Danamon</option>
+                                        <option value="CIMB NIAGA" <%= (settings.bank_name === 'CIMB NIAGA') ? 'selected' : '' %>>CIMB Niaga</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="bank_account_number" class="form-label">
+                                        <i class="bi bi-credit-card me-1"></i>Account Number
+                                    </label>
+                                    <input type="text" class="form-control" id="bank_account_number" name="bank_account_number"
+                                           value="<%= settings.bank_account_number || '1234567890' %>" required>
+                                    <small class="text-muted">Bank account number</small>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="bank_account_holder" class="form-label">
+                                        <i class="bi bi-person me-1"></i>Account Holder
+                                    </label>
+                                    <input type="text" class="form-control" id="bank_account_holder" name="bank_account_holder"
+                                           value="<%= settings.bank_account_holder || 'KILUSI BILL INDONESIA' %>" required>
+                                    <small class="text-muted">Account holder name</small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Payment Accounts Preview -->
+                        <div class="mb-3">
+                            <label class="form-label">
+                                <i class="bi bi-eye me-1"></i>Payment Accounts Preview
+                            </label>
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle me-2"></i>
+                                <span id="payment-preview">
+                                    <%= settings.payment_accounts || 'BCA 1234567890 a/n KILUSI BILL INDONESIA\ne-Wallet +6281234567890 a/n KILUSI BILL' %>
+                                </span>
+                            </div>
+                            <small class="text-muted">This will be automatically updated based on the banking information above</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Submit Button -->
+                <div class="card">
+                    <div class="card-body">
+                        <button type="submit" class="btn btn-primary btn-lg">
+                            <i class="bi bi-save me-2"></i>Save Company Profile
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/js/responsive-admin.js"></script>
+
+    <!-- Custom JavaScript for this page -->
+    <script>
+        // Update payment preview when banking info changes
+        function updatePaymentPreview() {
+            const bankName = document.getElementById('bank_name').value;
+            const accountNumber = document.getElementById('bank_account_number').value;
+            const accountHolder = document.getElementById('bank_account_holder').value;
+            const whatsappNumber = document.getElementById('contact_whatsapp').value;
+
+            let preview = '';
+            if (bankName && accountNumber && accountHolder) {
+                preview = `${bankName} ${accountNumber} a/n ${accountHolder}`;
+            }
+
+            if (whatsappNumber) {
+                preview += `\ne-Wallet ${whatsappNumber} a/n ${accountHolder || 'Kilusi Bill'}`;
+            }
+
+            document.getElementById('payment-preview').textContent = preview || 'Please fill in the banking information';
+        }
+
+        // Add event listeners
+        document.getElementById('bank_name').addEventListener('change', updatePaymentPreview);
+        document.getElementById('bank_account_number').addEventListener('input', updatePaymentPreview);
+        document.getElementById('bank_account_holder').addEventListener('input', updatePaymentPreview);
+        document.getElementById('contact_whatsapp').addEventListener('input', updatePaymentPreview);
+
+        // Initialize preview on page load
+        updatePaymentPreview();
+
+        // Auto-expand system section if company profile is active
+        document.addEventListener('DOMContentLoaded', function() {
+            const systemSection = document.getElementById('systemSection');
+            const systemToggle = document.querySelector('[onclick="toggleMenu(\'systemSection\', this)"]');
+
+            if (systemSection && systemToggle && systemSection.classList.contains('show') === false) {
+                // Check if current page is company profile
+                if (window.location.pathname.includes('company-profile')) {
+                    systemSection.classList.add('show');
+                    systemToggle.classList.remove('collapsed');
+                }
+            }
+
+            // Mobile sidebar toggle functionality
+            const sidebarToggle = document.getElementById('sidebarToggle');
+            const sidebarClose = document.getElementById('sidebarClose');
+            const sidebarOverlay = document.getElementById('sidebarOverlay');
+            const sidebar = document.getElementById('adminSidebar');
+
+            if (sidebarToggle && sidebar && sidebarOverlay) {
+                sidebarToggle.addEventListener('click', function() {
+                    sidebar.classList.add('show');
+                    sidebarOverlay.style.display = 'block';
+                });
+            }
+
+            if (sidebarClose && sidebar && sidebarOverlay) {
+                sidebarClose.addEventListener('click', function() {
+                    sidebar.classList.remove('show');
+                    sidebarOverlay.style.display = 'none';
+                });
+            }
+
+            if (sidebarOverlay && sidebar) {
+                sidebarOverlay.addEventListener('click', function() {
+                    sidebar.classList.remove('show');
+                    sidebarOverlay.style.display = 'none';
+                });
+            }
+        });
+    </script>
+</body>
+</html>

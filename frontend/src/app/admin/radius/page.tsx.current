@@ -1,0 +1,1145 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
+import { Modal } from '@/components/ui/modal'
+import {
+  Server,
+  Edit,
+  Trash2,
+  Wifi,
+  WifiOff,
+  Activity,
+  Settings,
+  Network,
+  AlertCircle,
+  CheckCircle,
+  XCircle,
+  RefreshCw,
+  TestTube,
+  Layers,
+  Monitor,
+  Copy,
+  Download,
+  Eye,
+  EyeOff,
+  Save
+} from 'lucide-react'
+import { api, endpoints } from '@/lib/api'
+
+interface NAS {
+  id: string
+  shortname: string
+  nasname: string
+  secret: string
+  type: string
+  description: string
+  ports: number
+  status: 'online' | 'offline' | 'unknown'
+  last_seen?: string
+  priority: number // For load balancing
+  is_active: boolean
+  snmp_community?: string
+  snmp_community_trap?: string
+  snmp_version?: string
+  snmp_port?: number
+  snmp_enabled?: boolean
+  snmp_username?: string
+  snmp_auth_protocol?: string
+  snmp_auth_password?: string
+  snmp_priv_protocol?: string
+  snmp_priv_password?: string
+  snmp_security_level?: string
+  created_at: string
+  updated_at: string
+}
+
+interface NASGroup {
+  id: string
+  name: string
+  description: string
+  nas_servers: NAS[]
+  load_balancing_method: 'round_robin' | 'least_connections' | 'weighted' | 'failover'
+  health_check_enabled: boolean
+  health_check_interval: number
+  created_at: string
+  updated_at: string
+}
+
+interface SNMPStats {
+  uptime?: number
+  cpu_usage?: number
+  memory_usage?: number
+  interface_count?: number
+  active_connections?: number
+  last_checked?: string
+}
+
+export default function RadiusPage() {
+  const [nasList, setNasList] = useState<NAS[]>([])
+  const [nasGroups, setNasGroups] = useState<NASGroup[]>([])
+  const [snmpStats, setSnmpStats] = useState<{ [key: string]: SNMPStats }>({})
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [showModal, setShowModal] = useState(false)
+  const [editingNAS, setEditingNAS] = useState<NAS | null>(null)
+  const [viewMode, setViewMode] = useState<'single' | 'grouped'>('single')
+  const [testLoading, setTestLoading] = useState<{ [key: string]: boolean }>({})
+  const [showSecrets, setShowSecrets] = useState<{ [key: string]: boolean }>({})
+  const [selectedNAS, setSelectedNAS] = useState<string[]>([])
+  const [showDetailModal, setShowDetailModal] = useState(false)
+  const [detailNAS, setDetailNAS] = useState<NAS | null>(null)
+  const [formData, setFormData] = useState({
+    shortname: '',
+    nasname: '',
+    secret: '',
+    type: 'mikrotik',
+    description: '',
+    priority: 1,
+    snmp_enabled: false,
+    snmp_community: 'kilusibill',
+    snmp_community_trap: 'kilusibill',
+    snmp_version: '2c',
+    snmp_port: 161,
+    snmp_username: '',
+    snmp_auth_protocol: 'SHA',
+    snmp_auth_password: '',
+    snmp_priv_protocol: 'AES',
+    snmp_priv_password: '',
+    snmp_security_level: 'authPriv'
+  })
+
+  const fetchNAS = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const response = await api.get(endpoints.radius.nas)
+      if (response.data.success) {
+        setNasList(response.data.data.nas || [])
+        setSnmpStats(response.data.data.snmpStats || {})
+        if (response.data.data.groups) {
+          setNasGroups(response.data.data.groups || [])
+        }
+      } else {
+        setError(response.data.message || 'Failed to load NAS list')
+      }
+    } catch (err: any) {
+      console.error('Error fetching NAS:', err)
+      setError(err.message || 'Failed to load NAS list')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const toggleSecretVisibility = (nasId: string) => {
+    setShowSecrets(prev => ({
+      ...prev,
+      [nasId]: !prev[nasId]
+    }))
+  }
+
+  const handleSelectAll = () => {
+    if (selectedNAS.length === nasList.length) {
+      setSelectedNAS([])
+    } else {
+      setSelectedNAS(nasList.map(nas => nas.id))
+    }
+  }
+
+  const handleSelectNAS = (nasId: string) => {
+    setSelectedNAS(prev =>
+      prev.includes(nasId)
+        ? prev.filter(id => id !== nasId)
+        : [...prev, nasId]
+    )
+  }
+
+  
+  useEffect(() => {
+    fetchNAS()
+  }, [])
+
+  const handleTestConnection = async (nasId: string) => {
+    try {
+      setTestLoading(prev => ({ ...prev, [nasId]: true }))
+      const response = await api.post(`${endpoints.radius.nas}/${nasId}/test`)
+
+      if (response.data.success) {
+        // Refresh data to get updated stats
+        await fetchNAS()
+        alert('Connection test successful!')
+      } else {
+        alert(`Connection test failed: ${response.data.message}`)
+      }
+    } catch (err: any) {
+      alert(`Connection test failed: ${err.message}`)
+    } finally {
+      setTestLoading(prev => ({ ...prev, [nasId]: false }))
+    }
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+
+    try {
+      const payload = {
+        ...formData,
+        type: formData.type || 'other'
+      }
+
+      if (editingNAS) {
+        await api.put(`${endpoints.radius.nas}/${editingNAS.id}`, payload)
+      } else {
+        await api.post(endpoints.radius.nas, payload)
+      }
+
+      await fetchNAS()
+      setShowModal(false)
+      setEditingNAS(null)
+      resetForm()
+    } catch (err: any) {
+      alert(`Error: ${err.response?.data?.message || err.message}`)
+    }
+  }
+
+  const handleEdit = (nas: NAS) => {
+    setEditingNAS(nas)
+    setFormData({
+      shortname: nas.shortname,
+      nasname: nas.nasname,
+      secret: nas.secret,
+      type: nas.type,
+      description: nas.description,
+      snmp_enabled: nas.snmp_enabled || false,
+      snmp_community: nas.snmp_community || 'kilusibill',
+      snmp_community_trap: nas.snmp_community_trap || 'kilusibill',
+      snmp_version: nas.snmp_version || '2c',
+      snmp_port: nas.snmp_port || 161,
+      snmp_username: nas.snmp_username || '',
+      snmp_auth_protocol: nas.snmp_auth_protocol || 'SHA',
+      snmp_auth_password: nas.snmp_auth_password || '',
+      snmp_priv_protocol: nas.snmp_priv_protocol || 'AES',
+      snmp_priv_password: nas.snmp_priv_password || '',
+      snmp_security_level: nas.snmp_security_level || 'authPriv'
+    })
+    setShowModal(true)
+  }
+
+  const handleDelete = async (nasId: string) => {
+    if (!confirm('Are you sure you want to delete this NAS server?')) return
+
+    try {
+      await api.delete(`${endpoints.radius.nas}/${nasId}`)
+      await fetchNAS()
+    } catch (err: any) {
+      alert(`Error: ${err.response?.data?.message || err.message}`)
+    }
+  }
+
+  const handleBulkDelete = async () => {
+    if (selectedNAS.length === 0) {
+      alert('Please select at least one NAS server to delete')
+      return
+    }
+
+    if (!confirm(`Are you sure you want to delete ${selectedNAS.length} NAS servers?`)) return
+
+    try {
+      await Promise.all(
+        selectedNAS.map(nasId => api.delete(`${endpoints.radius.nas}/${nasId}`))
+      )
+      await fetchNAS()
+      setSelectedNAS([])
+    } catch (err: any) {
+      alert(`Error: ${err.response?.data?.message || err.message}`)
+    }
+  }
+
+  const handleBulkAction = async (action: string) => {
+    if (selectedNAS.length === 0) {
+      alert('Please select at least one NAS server')
+      return
+    }
+
+    try {
+      switch (action) {
+        case 'enable':
+          await Promise.all(
+            selectedNAS.map(nasId => api.put(`${endpoints.radius.nas}/${nasId}`, { is_active: true }))
+          )
+          break
+        case 'disable':
+          await Promise.all(
+            selectedNAS.map(nasId => api.put(`${endpoints.radius.nas}/${nasId}`, { is_active: false }))
+          )
+          break
+        case 'test':
+          await Promise.all(
+            selectedNAS.map(nasId => handleTestConnection(nasId))
+          )
+          break
+      }
+      await fetchNAS()
+      setSelectedNAS([])
+    } catch (err: any) {
+      alert(`Error: ${err.response?.data?.message || err.message}`)
+    }
+  }
+
+  
+  const resetForm = () => {
+    setFormData({
+      shortname: '',
+      nasname: '',
+      secret: generateRandomSecret(),
+      type: 'mikrotik',
+      description: '',
+      priority: 1,
+      snmp_enabled: false,
+      snmp_community: 'kilusibill',
+      snmp_community_trap: 'kilusibill',
+      snmp_version: '2c',
+      snmp_port: 161,
+      snmp_username: '',
+      snmp_auth_protocol: 'SHA',
+      snmp_auth_password: '',
+      snmp_priv_protocol: 'AES',
+      snmp_priv_password: '',
+      snmp_security_level: 'authPriv'
+    })
+  }
+
+  const generateRandomSecret = () => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*'
+    let result = ''
+    for (let i = 0; i < 10; i++) {
+      result += chars.charAt(Math.floor(Math.random() * chars.length))
+    }
+    return result
+  }
+
+  const openDetailModal = (nas: NAS) => {
+    setDetailNAS(nas)
+    setShowDetailModal(true)
+  }
+
+  const navigateToDetail = (nas: NAS) => {
+    window.location.href = `/admin/server/${nas.id}`
+  }
+
+  const generateMikrotikScript = (nas: any) => {
+    // Get server IP from window location or use a default
+    const serverIP = window.location.hostname || '192.168.1.1'
+    const snmpCommunity = nas.snmp_community || 'kilusibill'
+    const snmpCommunityTrap = nas.snmp_community_trap || 'kilusibill'
+
+    const script = `# MikroTik Configuration Script
+# Generated by Kilusi Bill ISP Management System
+# NAS Server: ${nas.shortname}
+# IP Address: ${nas.nasname}
+# Server IP: ${serverIP}
+# Generated: ${new Date().toLocaleString('id-ID')}
+
+# add SNMP
+/snmp community
+set [ find default=yes ] disabled=yes write-access=no
+rem [find name!=public]
+add addresses=${serverIP} name=${snmpCommunity} write-access=yes
+/snmp
+set enabled=yes trap-community=${snmpCommunityTrap} trap-version=2
+
+/system identity
+set name="${nas.shortname}"
+
+# Update NTP
+/system ntp client server rem [find]
+/system ntp client set enabled=yes server=162.159.200.1,162.159.200.123
+
+# Script Radius
+/radius
+rem [find]
+add address=${serverIP} comment=kilusirad authentication-port=1812 accounting-port=1813 secret="${nas.secret}" service=ppp,login src-address=${nas.nasname} timeout=3s
+/radius
+set require-message-auth=no num=0
+
+/ppp aaa
+set use-radius=yes accounting=yes
+set interim-update=0s
+`
+
+    return script
+  }
+
+  const downloadScript = async (nas: NAS) => {
+    try {
+      const scriptContent = generateMikrotikScript(nas)
+      const blob = new Blob([scriptContent], { type: 'text/plain' })
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `mikrotik-nas-${nas.shortname.toLowerCase().replace(/\s+/g, '-')}.txt`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      window.URL.revokeObjectURL(url)
+
+      alert('Script downloaded successfully!')
+    } catch (error) {
+      alert('Error downloading script')
+      console.error('Download error:', error)
+    }
+  }
+
+  
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'online':
+        return 'bg-green-100 text-green-800 border-green-300'
+      case 'offline':
+        return 'bg-red-100 text-red-800 border-red-300'
+      case 'unknown':
+        return 'bg-gray-100 text-gray-800 border-gray-300'
+      default:
+        return 'bg-gray-100 text-gray-800 border-gray-300'
+    }
+  }
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'online':
+        return <CheckCircle className="h-4 w-4" />
+      case 'offline':
+        return <XCircle className="h-4 w-4" />
+      case 'unknown':
+        return <AlertCircle className="h-4 w-4" />
+      default:
+        return <AlertCircle className="h-4 w-4" />
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Page Header */}
+      <div className="text-center">
+        <h1 className="text-2xl font-semibold text-foreground">RADIUS Management</h1>
+        <p className="text-muted-foreground">
+          Kelola Network Access Server (NAS) dan monitoring SNMP
+        </p>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between space-y-0 pb-2">
+              <h3 className="text-sm font-medium text-muted-foreground">Total NAS</h3>
+              <Server className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <div className="text-2xl font-bold">{nasList.length}</div>
+            <p className="text-xs text-muted-foreground">
+              Network Access Servers
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between space-y-0 pb-2">
+              <h3 className="text-sm font-medium text-muted-foreground">Online</h3>
+              <CheckCircle className="h-4 w-4 text-green-600" />
+            </div>
+            <div className="text-2xl font-bold text-green-600">
+              {nasList.filter(nas => nas.status === 'online').length}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Connected servers
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between space-y-0 pb-2">
+              <h3 className="text-sm font-medium text-muted-foreground">Offline</h3>
+              <XCircle className="h-4 w-4 text-red-600" />
+            </div>
+            <div className="text-2xl font-bold text-red-600">
+              {nasList.filter(nas => nas.status === 'offline').length}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Disconnected servers
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between space-y-0 pb-2">
+              <h3 className="text-sm font-medium text-muted-foreground">SNMP Enabled</h3>
+              <Activity className="h-4 w-4 text-blue-600" />
+            </div>
+            <div className="text-2xl font-bold text-blue-600">
+              {nasList.filter(nas => nas.snmp_enabled).length}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              SNMP monitoring active
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* NAS List */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center space-x-2">
+              <Server className="h-5 w-5" />
+              <span>Daftar Network Access Server</span>
+            </CardTitle>
+            <Button
+              onClick={() => {
+                setEditingNAS(null)
+                resetForm()
+                setShowModal(true)
+              }}
+              className="flex items-center space-x-2"
+            >
+                <span>Tambah NAS</span>
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            </div>
+          ) : error ? (
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <AlertCircle className="h-12 w-12 text-destructive mb-4" />
+              <h3 className="text-lg font-semibold mb-2">Error Loading Data</h3>
+              <p className="text-muted-foreground mb-4">{error}</p>
+              <Button onClick={fetchNAS}>Try Again</Button>
+            </div>
+          ) : nasList.length === 0 ? (
+            <div className="flex items-center justify-center py-8 text-center">
+              <Server className="h-12 w-12 text-muted-foreground mb-4" />
+              <h3 className="text-lg font-semibold mb-2">No NAS Servers Found</h3>
+              <p className="text-muted-foreground">
+                Add your first Network Access Server to get started with RADIUS management
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left p-4 font-medium text-foreground">Status</th>
+                    <th className="text-left p-4 font-medium text-foreground">NAS Name</th>
+                    <th className="text-left p-4 font-medium text-foreground">IP Address</th>
+                      <th className="text-left p-4 font-medium text-foreground">SNMP</th>
+                    <th className="text-left p-4 font-medium text-foreground">Last Seen</th>
+                    <th className="text-left p-4 font-medium text-foreground">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {nasList.map((nas) => (
+                    <tr key={nas.id} className="border-b hover:bg-muted/50">
+                      <td className="p-4">
+                        <button
+                          onClick={() => nas.status === 'online' && navigateToDetail(nas)}
+                          className={`cursor-pointer transition-all duration-200 ${
+                            nas.status === 'online'
+                              ? 'hover:scale-105 hover:shadow-lg'
+                              : 'cursor-default'
+                          }`}
+                          disabled={nas.status !== 'online'}
+                        >
+                          <Badge className={getStatusColor(nas.status)}>
+                            <span className="flex items-center space-x-1">
+                              {getStatusIcon(nas.status)}
+                              <span className="capitalize">{nas.status}</span>
+                              {nas.status === 'online' && (
+                                <span className="ml-1 text-xs">(view details)</span>
+                              )}
+                            </span>
+                          </Badge>
+                        </button>
+                      </td>
+                      <td className="p-4">
+                        <div>
+                          <div className="font-medium">{nas.shortname}</div>
+                          {nas.description && (
+                            <div className="text-sm text-muted-foreground">{nas.description}</div>
+                          )}
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        <div className="font-mono text-sm">{nas.nasname}</div>
+                      </td>
+                      <td className="p-4">
+                        <div className="flex items-center space-x-2">
+                          {nas.snmp_enabled ? (
+                            <>
+                              <Badge variant="secondary" className="bg-blue-100 text-blue-800">
+                                <Activity className="h-3 w-3 mr-1" />
+                                v{nas.snmp_version || '2c'}
+                              </Badge>
+                              {snmpStats[nas.id] && (
+                                <div className="text-xs text-muted-foreground">
+                                  CPU: {snmpStats[nas.id].cpu_usage}%
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <Badge variant="outline" className="text-gray-500">
+                              <WifiOff className="h-3 w-3 mr-1" />
+                              Disabled
+                            </Badge>
+                          )}
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        <div className="text-sm text-muted-foreground">
+                          {nas.last_seen || 'Never'}
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        <div className="flex items-center space-x-2">
+                          {nas.snmp_enabled && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleTestConnection(nas.id)}
+                              disabled={testLoading[nas.id]}
+                              className="h-8"
+                            >
+                              {testLoading[nas.id] ? (
+                                <RefreshCw className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <TestTube className="h-3 w-3" />
+                              )}
+                            </Button>
+                          )}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleEdit(nas)}
+                            className="h-8"
+                          >
+                            <Edit className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => downloadScript(nas)}
+                            className="h-8"
+                            title="Download MikroTik Script"
+                          >
+                            <Download className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleDelete(nas.id)}
+                            className="h-8 text-destructive hover:text-destructive"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* NAS Form Modal */}
+      <Modal
+        isOpen={showModal}
+        onClose={() => {
+          setShowModal(false)
+          setEditingNAS(null)
+          resetForm()
+        }}
+        title={editingNAS ? 'Edit NAS Server' : 'Tambah NAS Server'}
+      >
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-2">Short Name *</label>
+              <Input
+                value={formData.shortname}
+                onChange={(e) => setFormData({ ...formData, shortname: e.target.value })}
+                placeholder="Mikrotik-Main"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-2">IP Address *</label>
+              <Input
+                value={formData.nasname}
+                onChange={(e) => setFormData({ ...formData, nasname: e.target.value })}
+                placeholder="192.168.1.1"
+                required
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-2">Secret *</label>
+              <div className="flex space-x-2">
+                <Input
+                  type={showSecrets[formData.secret] ? "text" : "password"}
+                  value={formData.secret}
+                  onChange={(e) => setFormData({ ...formData, secret: e.target.value })}
+                  placeholder="Auto-generated"
+                  required
+                  className="flex-1"
+                />
+                  <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowSecrets(prev => ({ ...prev, [formData.secret]: !prev[formData.secret] }))}
+                  className="h-9"
+                  title={showSecrets[formData.secret] ? "Hide secret" : "Show secret"}
+                >
+                  {showSecrets[formData.secret] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">Auto-generated 10 karakter random</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-2">Priority</label>
+              <Input
+                type="number"
+                value={formData.priority}
+                onChange={(e) => setFormData({ ...formData, priority: parseInt(e.target.value) || 1 })}
+                placeholder="1"
+                min="1"
+                max="100"
+              />
+              <p className="text-xs text-gray-500 mt-1">Urutan prioritas (1 = tertinggi)</p>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2">Description</label>
+            <Input
+              value={formData.description}
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              placeholder="Main MikroTik Router"
+            />
+          </div>
+
+          {/* SNMP Configuration */}
+          <div className="border-t pt-4">
+            <h3 className="text-lg font-medium mb-4 flex items-center">
+              <Network className="h-5 w-5 mr-2" />
+              SNMP Configuration
+            </h3>
+
+            <div className="flex items-center space-x-2 mb-4">
+              <input
+                type="checkbox"
+                id="snmp_enabled"
+                checked={formData.snmp_enabled}
+                onChange={(e) => setFormData({ ...formData, snmp_enabled: e.target.checked })}
+                className="rounded"
+              />
+              <label htmlFor="snmp_enabled" className="text-sm font-medium">
+                Enable SNMP Monitoring
+              </label>
+            </div>
+
+            {formData.snmp_enabled && (
+              <div className="space-y-6">
+                {/* SNMP Version Selection */}
+                <div>
+                  <label className="block text-sm font-medium mb-2">Versi SNMP</label>
+                  <select
+                    value={formData.snmp_version}
+                    onChange={(e) => setFormData({ ...formData, snmp_version: e.target.value })}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="1">SNMP v1</option>
+                    <option value="2c">SNMP v2c</option>
+                    <option value="3">SNMP v3</option>
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">Pilih versi SNMP yang sesuai dengan device</p>
+                </div>
+
+                {/* SNMP v1/v2c Configuration */}
+                {(formData.snmp_version === '1' || formData.snmp_version === '2c') && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium mb-2">SNMP Community</label>
+                      <Input
+                        value={formData.snmp_community}
+                        onChange={(e) => setFormData({ ...formData, snmp_community: e.target.value })}
+                        placeholder="kilusibill"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">Community string untuk SNMP queries</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-2">SNMP Trap Community</label>
+                      <Input
+                        value={formData.snmp_community_trap}
+                        onChange={(e) => setFormData({ ...formData, snmp_community_trap: e.target.value })}
+                        placeholder="kilusibill"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">Community string untuk SNMP traps</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* SNMP v3 Configuration */}
+                {formData.snmp_version === '3' && (
+                  <div className="space-y-4 border rounded-lg p-4 bg-gray-50">
+                    <h4 className="font-medium text-sm mb-3">SNMP v3 Security Settings</h4>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium mb-2">Username</label>
+                        <Input
+                          value={formData.snmp_username}
+                          onChange={(e) => setFormData({ ...formData, snmp_username: e.target.value })}
+                          placeholder="snmpuser"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">SNMP v3 username</p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-2">Security Level</label>
+                        <select
+                          value={formData.snmp_security_level}
+                          onChange={(e) => setFormData({ ...formData, snmp_security_level: e.target.value })}
+                          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        >
+                          <option value="noAuthNoPriv">No Authentication, No Privacy</option>
+                          <option value="authNoPriv">Authentication, No Privacy</option>
+                          <option value="authPriv">Authentication, Privacy</option>
+                        </select>
+                        <p className="text-xs text-gray-500 mt-1">SNMP v3 security level</p>
+                      </div>
+                    </div>
+
+                    {/* Authentication Settings */}
+                    {(formData.snmp_security_level === 'authNoPriv' || formData.snmp_security_level === 'authPriv') && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium mb-2">Auth Protocol</label>
+                          <select
+                            value={formData.snmp_auth_protocol}
+                            onChange={(e) => setFormData({ ...formData, snmp_auth_protocol: e.target.value })}
+                            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          >
+                            <option value="MD5">MD5</option>
+                            <option value="SHA">SHA</option>
+                            <option value="SHA-224">SHA-224</option>
+                            <option value="SHA-256">SHA-256</option>
+                            <option value="SHA-384">SHA-384</option>
+                            <option value="SHA-512">SHA-512</option>
+                          </select>
+                          <p className="text-xs text-gray-500 mt-1">Authentication protocol</p>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium mb-2">Auth Password</label>
+                          <Input
+                            type="password"
+                            value={formData.snmp_auth_password}
+                            onChange={(e) => setFormData({ ...formData, snmp_auth_password: e.target.value })}
+                            placeholder="authpassword"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">Authentication password</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Privacy Settings */}
+                    {formData.snmp_security_level === 'authPriv' && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium mb-2">Privacy Protocol</label>
+                          <select
+                            value={formData.snmp_priv_protocol}
+                            onChange={(e) => setFormData({ ...formData, snmp_priv_protocol: e.target.value })}
+                            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          >
+                            <option value="DES">DES</option>
+                            <option value="AES">AES</option>
+                            <option value="AES-192">AES-192</option>
+                            <option value="AES-256">AES-256</option>
+                            <option value="AES-192C">AES-192C</option>
+                            <option value="AES-256C">AES-256C</option>
+                          </select>
+                          <p className="text-xs text-gray-500 mt-1">Privacy/encryption protocol</p>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium mb-2">Privacy Password</label>
+                          <Input
+                            type="password"
+                            value={formData.snmp_priv_password}
+                            onChange={(e) => setFormData({ ...formData, snmp_priv_password: e.target.value })}
+                            placeholder="privpassword"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">Privacy/encryption password</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* SNMP Port */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Port SNMP</label>
+                    <Input
+                      type="number"
+                      value={formData.snmp_port}
+                      onChange={(e) => setFormData({ ...formData, snmp_port: parseInt(e.target.value) || 161 })}
+                      placeholder="161"
+                      min="1"
+                      max="65535"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Port kustom SNMP (default: 161)</p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end space-x-2 pt-4">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setShowModal(false)
+                setEditingNAS(null)
+                resetForm()
+              }}
+            >
+              Cancel
+            </Button>
+            <Button type="submit">
+              {editingNAS ? 'Update' : 'Create'} NAS
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* NAS Detail Modal */}
+      <Modal
+        isOpen={showDetailModal}
+        onClose={() => {
+          setShowDetailModal(false)
+          setDetailNAS(null)
+        }}
+        title={`Detail Perangkat - ${detailNAS?.shortname}`}
+        size="lg"
+      >
+        {detailNAS && (
+          <div className="space-y-6">
+            {/* Basic Information */}
+            <div>
+              <h3 className="text-lg font-semibold mb-3 text-gray-900">Informasi Dasar</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium text-gray-600">Nama NAS</label>
+                  <p className="text-gray-900 font-medium">{detailNAS.shortname}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-600">IP Address</label>
+                  <p className="text-gray-900 font-mono">{detailNAS.nasname}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-600">Tipe</label>
+                  <p className="text-gray-900 font-medium">{detailNAS.type}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-600">Status</label>
+                  <Badge className={getStatusColor(detailNAS.status)}>
+                    <span className="flex items-center space-x-1">
+                      {getStatusIcon(detailNAS.status)}
+                      <span className="capitalize">{detailNAS.status}</span>
+                    </span>
+                  </Badge>
+                </div>
+              </div>
+            </div>
+
+            {/* SNMP Configuration */}
+            <div>
+              <h3 className="text-lg font-semibold mb-3 text-gray-900">Konfigurasi SNMP</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium text-gray-600">SNMP Status</label>
+                  <p className="text-gray-900">
+                    {detailNAS.snmp_enabled ? (
+                      <Badge variant="secondary" className="bg-blue-100 text-blue-800">
+                        <Activity className="h-3 w-3 mr-1" />
+                        Enabled
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-gray-500">
+                        <WifiOff className="h-3 w-3 mr-1" />
+                        Disabled
+                      </Badge>
+                    )}
+                  </p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-600">SNMP Version</label>
+                  <p className="text-gray-900 font-medium">{detailNAS.snmp_version || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-600">SNMP Community</label>
+                  <p className="text-gray-900 font-mono">{detailNAS.snmp_community || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-600">SNMP Port</label>
+                  <p className="text-gray-900 font-medium">{detailNAS.snmp_port || 'N/A'}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Performance Metrics */}
+            {detailNAS.status === 'online' && snmpStats[detailNAS.id] && (
+              <div>
+                <h3 className="text-lg font-semibold mb-3 text-gray-900">Metrik Kinerja</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-gray-600">CPU Usage</span>
+                      <Monitor className="h-4 w-4 text-gray-400" />
+                    </div>
+                    <div className="mt-2">
+                      <div className="flex items-center">
+                        <span className="text-2xl font-bold text-gray-900">
+                          {snmpStats[detailNAS.id].cpu_usage || 0}%
+                        </span>
+                      </div>
+                      <div className="mt-2 w-full bg-gray-200 rounded-full h-2">
+                        <div
+                          className={`h-2 rounded-full ${
+                            (snmpStats[detailNAS.id].cpu_usage || 0) > 80
+                              ? 'bg-red-500'
+                              : (snmpStats[detailNAS.id].cpu_usage || 0) > 60
+                                ? 'bg-yellow-500'
+                                : 'bg-green-500'
+                          }`}
+                          style={{ width: `${snmpStats[detailNAS.id].cpu_usage || 0}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-gray-600">Memory Usage</span>
+                      <Server className="h-4 w-4 text-gray-400" />
+                    </div>
+                    <div className="mt-2">
+                      <div className="flex items-center">
+                        <span className="text-2xl font-bold text-gray-900">
+                          {snmpStats[detailNAS.id].memory_usage || 0}%
+                        </span>
+                      </div>
+                      <div className="mt-2 w-full bg-gray-200 rounded-full h-2">
+                        <div
+                          className={`h-2 rounded-full ${
+                            (snmpStats[detailNAS.id].memory_usage || 0) > 80
+                              ? 'bg-red-500'
+                              : (snmpStats[detailNAS.id].memory_usage || 0) > 60
+                                ? 'bg-yellow-500'
+                                : 'bg-green-500'
+                          }`}
+                          style={{ width: `${snmpStats[detailNAS.id].memory_usage || 0}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-gray-600">Interfaces</span>
+                      <Network className="h-4 w-4 text-gray-400" />
+                    </div>
+                    <div className="mt-2">
+                      <span className="text-2xl font-bold text-gray-900">
+                        {snmpStats[detailNAS.id].interface_count || 0}
+                      </span>
+                      <p className="text-sm text-gray-600">Total interfaces</p>
+                    </div>
+                  </div>
+
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-gray-600">Last Check</span>
+                      <RefreshCw className="h-4 w-4 text-gray-400" />
+                    </div>
+                    <div className="mt-2">
+                      <span className="text-sm font-medium text-gray-900">
+                        {snmpStats[detailNAS.id].last_checked
+                          ? new Date(snmpStats[detailNAS.id].last_checked).toLocaleString('id-ID')
+                          : 'Never'
+                        }
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Connection History */}
+            <div>
+              <h3 className="text-lg font-semibold mb-3 text-gray-900">Riwayat Koneksi</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium text-gray-600">Last Seen</label>
+                  <p className="text-gray-900">
+                    {detailNAS.last_seen
+                      ? new Date(detailNAS.last_seen).toLocaleString('id-ID')
+                      : 'Never'
+                    }
+                  </p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-600">Priority</label>
+                  <p className="text-gray-900 font-medium">{detailNAS.priority}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex justify-end space-x-2 pt-4 border-t">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowDetailModal(false)
+                  setDetailNAS(null)
+                }}
+              >
+                Close
+              </Button>
+              <Button
+                onClick={() => {
+                  setShowDetailModal(false)
+                  openEditModal(detailNAS)
+                }}
+              >
+                Edit NAS
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      </div>
+  )
+}

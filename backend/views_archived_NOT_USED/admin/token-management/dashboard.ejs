@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Token Management - <%= settings.company_header || 'Admin Panel' %></title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="/css/admin-style.css">
+    <style>
+        .stat-card {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.07);
+            transition: transform 0.3s ease;
+            border-left: 4px solid;
+        }
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+        .stat-card.total { border-left-color: #4361ee; }
+        .stat-card.active { border-left-color: #4cc9f0; }
+        .stat-card.expired { border-left-color: #f72585; }
+        .stat-card.none { border-left-color: #6c757d; }
+
+        .stat-number {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin: 0;
+        }
+        .stat-label {
+            color: #6c757d;
+            font-size: 0.9rem;
+            margin: 0;
+        }
+
+        .recent-activity {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.07);
+        }
+
+        .activity-item {
+            border-left: 3px solid #4361ee;
+            padding: 10px 15px;
+            margin-bottom: 10px;
+            background: rgba(67, 97, 238, 0.05);
+            border-radius: 0 8px 8px 0;
+            transition: all 0.3s ease;
+        }
+        .activity-item:hover {
+            background: rgba(67, 97, 238, 0.1);
+            transform: translateX(5px);
+        }
+
+        .activity-item.expired {
+            border-left-color: #f72585;
+            background: rgba(247, 37, 133, 0.05);
+        }
+        .activity-item.expired:hover {
+            background: rgba(247, 37, 133, 0.1);
+        }
+
+        .quick-action-btn {
+            border-radius: 12px;
+            padding: 15px;
+            text-align: center;
+            background: white;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.07);
+            transition: all 0.3s ease;
+            text-decoration: none;
+            color: inherit;
+            display: block;
+        }
+
+        .quick-action-btn:hover {
+            transform: translateY(-5px);
+            text-decoration: none;
+            color: inherit;
+            box-shadow: 0 8px 15px rgba(0,0,0,0.1);
+        }
+
+        .quick-action-btn i {
+            font-size: 2rem;
+            margin-bottom: 10px;
+            display: block;
+        }
+
+        .coverage-bar {
+            height: 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+
+        .coverage-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4361ee, #4cc9f0);
+            transition: width 1s ease;
+        }
+    </style>
+</head>
+<body>
+    <!-- Admin Navbar (include your existing navbar) -->
+    <%- include('../partials/navbar') %>
+
+    <div class="container-fluid py-4">
+        <!-- Header -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <h1 class="h3 mb-1">🔑 Token Management</h1>
+                <p class="text-muted mb-0">Kelola token akses portal pelanggan</p>
+            </div>
+            <div>
+                <a href="/admin/token-management/customers" class="btn btn-primary">
+                    <i class="bi bi-people me-2"></i>Lihat Semua Token
+                </a>
+            </div>
+        </div>
+
+        <!-- Statistics Cards -->
+        <div class="row mb-4">
+            <div class="col-md-3 col-sm-6 mb-3">
+                <div class="stat-card total">
+                    <p class="stat-number text-primary"><%= stats.totalCustomers %></p>
+                    <p class="stat-label">Total Pelanggan</p>
+                    <div class="mt-2">
+                        <small class="text-muted">Semua pelanggan terdaftar</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6 mb-3">
+                <div class="stat-card active">
+                    <p class="stat-number text-success"><%= stats.activeTokens %></p>
+                    <p class="stat-label">Token Aktif</p>
+                    <div class="mt-2">
+                        <div class="coverage-bar">
+                            <div class="coverage-fill" style="width: <%= stats.tokenCoverage %>%"></div>
+                        </div>
+                        <small class="text-muted"><%= stats.tokenCoverage %>% coverage</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6 mb-3">
+                <div class="stat-card expired">
+                    <p class="stat-number text-warning"><%= stats.expiredTokens %></p>
+                    <p class="stat-label">Token Kadaluarsa</p>
+                    <div class="mt-2">
+                        <small class="text-muted">Perlu diperbarui</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6 mb-3">
+                <div class="stat-card none">
+                    <p class="stat-number text-secondary"><%= stats.noTokens %></p>
+                    <p class="stat-label">Belum Ada Token</p>
+                    <div class="mt-2">
+                        <small class="text-muted">Generate token</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Actions & Recent Activity -->
+        <div class="row">
+            <!-- Quick Actions -->
+            <div class="col-lg-6 mb-4">
+                <h5 class="mb-3">🚀 Aksi Cepat</h5>
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <a href="/admin/token-management/bulk-operations" class="quick-action-btn">
+                            <i class="bi bi-stack text-primary"></i>
+                            <strong>Bulk Generate</strong>
+                            <div class="text-muted small">Generate token untuk semua pelanggan</div>
+                        </a>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <a href="javascript:void(0)" class="quick-action-btn" onclick="cleanupTokens()">
+                            <i class="bi bi-trash text-warning"></i>
+                            <strong>Cleanup Token</strong>
+                            <div class="text-muted small">Hapus token kadaluarsa</div>
+                        </a>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <a href="/admin/token-management/customers" class="quick-action-btn">
+                            <i class="bi bi-search text-info"></i>
+                            <strong>Cari Token</strong>
+                            <div class="text-muted small">Cari dan kelola token pelanggan</div>
+                        </a>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <a href="/admin/token-management/whatsapp-billing" class="quick-action-btn">
+                            <i class="bi bi-whatsapp text-success"></i>
+                            <strong>WhatsApp Billing</strong>
+                            <div class="text-muted small">Kirim tagihan dengan link portal</div>
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Export Section -->
+                <div class="mt-4">
+                    <h6 class="mb-3">📊 Export Data</h6>
+                    <div class="d-flex gap-2">
+                        <a href="/admin/token-management/export" class="btn btn-outline-success btn-sm">
+                            <i class="bi bi-file-earmark-excel me-1"></i>Export CSV
+                        </a>
+                        <button class="btn btn-outline-primary btn-sm" onclick="refreshStats()">
+                            <i class="bi bi-arrow-clockwise me-1"></i>Refresh Stats
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Activity -->
+            <div class="col-lg-6 mb-4">
+                <div class="recent-activity">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h5 class="mb-0">📋 Aktivitas Terbaru</h5>
+                        <a href="/admin/token-management/customers" class="text-decoration-none">
+                            Lihat Semua →
+                        </a>
+                    </div>
+
+                    <% if (recentTokens.length > 0) { %>
+                        <% recentTokens.forEach(function(token) { %>
+                            <div class="activity-item <%= token.isExpired ? 'expired' : '' %>">
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <div>
+                                        <strong><%= token.name %></strong>
+                                        <div class="text-muted small"><%= token.phone %></div>
+                                        <% if (token.isExpired) { %>
+                                            <div class="text-warning small">
+                                                <i class="bi bi-clock me-1"></i>
+                                                Kadaluarsa: <%= new Date(token.expiresAt).toLocaleDateString('id-ID') %>
+                                            </div>
+                                        <% } else { %>
+                                            <div class="text-success small">
+                                                <i class="bi bi-check-circle me-1"></i>
+                                                Aktif: <%= new Date(token.expiresAt).toLocaleDateString('id-ID') %>
+                                            </div>
+                                        <% } %>
+                                    </div>
+                                    <div class="text-end">
+                                        <div class="text-muted small">
+                                            <%= new Date(token.updatedAt).toLocaleDateString('id-ID') %>
+                                        </div>
+                                        <div class="text-muted small" style="font-family: monospace;">
+                                            <%= token.token.substring(0, 8) %>...
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        <% }); %>
+                    <% } else { %>
+                        <div class="text-center text-muted py-4">
+                            <i class="bi bi-inbox" style="font-size: 3rem; opacity: 0.3;"></i>
+                            <p class="mb-0">Belum ada aktivitas token</p>
+                        </div>
+                    <% } %>
+                </div>
+            </div>
+        </div>
+
+        <!-- Info Cards -->
+        <div class="row">
+            <div class="col-md-6 mb-4">
+                <div class="card border-info">
+                    <div class="card-body">
+                        <h6 class="card-title text-info">
+                            <i class="bi bi-info-circle me-2"></i>Tentang Token Portal
+                        </h6>
+                        <p class="card-text">
+                            Token memungkinkan pelanggan mengakses dashboard tanpa login manual.
+                            Setiap pelanggan dapat memiliki token unik yang berlaku selama 30 hari.
+                        </p>
+                        <ul class="small">
+                            <li>Token berupa 20 karakter alphanumeric</li>
+                            <li>Berlaku 30 hari sejak dibuat</li>
+                            <li>Dapat diperbarui kapan saja</li>
+                            <li>Link format: /customer/login/{TOKEN}</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 mb-4">
+                <div class="card border-success">
+                    <div class="card-body">
+                        <h6 class="card-title text-success">
+                            <i class="bi bi-lightbulb me-2"></i>Best Practices
+                        </h6>
+                        <p class="card-text">
+                            Gunakan token dengan efektif untuk meningkatkan experience pelanggan:
+                        </p>
+                        <ul class="small">
+                            <li>Generate token untuk pelanggan aktif</li>
+                            <li>Sertakan link portal di WhatsApp billing</li>
+                            <li>Regenerate token secara berkala</li>
+                            <li>Monitor token coverage</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+        // Cleanup tokens
+        async function cleanupTokens() {
+            if (!confirm('Apakah Anda yakin ingin membersihkan token kadaluarsa?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/admin/token-management/cleanup', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showToast(`✅ ${result.data.cleanedTokens} token kadaluarsa dibersihkan`, 'success');
+                    refreshStats();
+                } else {
+                    showToast('❌ Gagal membersihkan token', 'error');
+                }
+            } catch (error) {
+                showToast('❌ Terjadi kesalahan', 'error');
+                console.error('Cleanup error:', error);
+            }
+        }
+
+        // Refresh statistics
+        async function refreshStats() {
+            try {
+                const response = await fetch('/admin/token-management');
+                // In real implementation, you might want to have an API endpoint for stats
+                window.location.reload();
+            } catch (error) {
+                console.error('Refresh error:', error);
+            }
+        }
+
+        // Show toast notification
+        function showToast(message, type = 'info') {
+            const toastHtml = `
+                <div class="toast align-items-center text-white bg-${type === 'success' ? 'success' : type === 'error' ? 'danger' : 'primary'} border-0" role="alert">
+                    <div class="d-flex">
+                        <div class="toast-body">
+                            ${message}
+                        </div>
+                        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+                    </div>
+                </div>
+            `;
+
+            if (!$('#toastContainer').length) {
+                $('body').append('<div id="toastContainer" class="toast-container position-fixed top-0 end-0 p-3"></div>');
+            }
+
+            const toastElement = $(toastHtml);
+            $('#toastContainer').append(toastElement);
+
+            const toast = new bootstrap.Toast(toastElement[0]);
+            toast.show();
+
+            toastElement.on('hidden.bs.toast', function () {
+                toastElement.remove();
+            });
+        }
+
+        // Auto-refresh stats every 30 seconds
+        setInterval(refreshStats, 30000);
+    </script>
+</body>
+</html>

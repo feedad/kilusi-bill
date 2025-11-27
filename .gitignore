@@ -1,0 +1,220 @@
+# Dependencies
+node_modules/
+*/node_modules/
+
+# Build outputs
+.next/
+dist/
+build/
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.docker
+
+# Docker environment files
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Configuration files with sensitive data
+backend/settings.json
+backend/.env
+backend/.env.local
+backend/.env.development.local
+backend/.env.test.local
+backend/.env.production.local
+!backend/config/backup-system.js
+
+doc/
+.claude
+
+# Frontend environment files
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+# Session and authentication files
+backend/whatsapp-session/*
+backend/session/
+backend/sessions/
+backend/auth/keys/
+
+# Certificate files
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Backup files (already included but keeping for clarity)
+backend/backups/
+*.sql
+*.dump
+*.backup
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+*.lcov
+
+# nyc test coverage
+.nyc_output
+
+# Dependency directories
+jspm_packages/
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Optional REPL history
+.node_repl_history
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
+
+# dotenv environment variables file
+.env
+
+# parcel-bundler cache (https://parceljs.org/)
+.cache
+.parcel-cache
+
+# Next.js build output
+.next
+
+# Nuxt.js build / generate output
+.nuxt
+dist
+
+# Gatsby files
+.cache/
+public
+
+# Storybook build outputs
+.out
+.storybook-out
+
+# Temporary folders
+tmp/
+temp/
+
+# Editor directories and files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Screenshot files (exclude from git)
+Screenshot*
+*Screenshots*
+screenshot*
+*screenshots*
+/Screenshot*
+/*Screenshots*
+
+# Database backups
+backend/backups/
+*.sql
+*.dump
+*.backup
+!scripts/*.sql
+
+# Documentation files (except README.md)
+*.md
+!README.md
+!config-examples/README.md
+!backend/README.md
+!frontend/README.md
+
+# Exclude all documentation from backend/scripts-extras
+backend/scripts-extras/*.md
+backend/docs/*.md
+backend/freeradius-docker/docs/*.md
+
+# Exclude changelog and progress files
+CHANGELOG*
+*MIGRATION*
+*PROGRESS*
+WORK_PROGRESS*
+STATUS*
+DIAGNOSTIC*
+TROUBLESHOOTING*
+GUIDE*
+FAQ*
+
+# Exclude test files and scripts
+test-*.js
+debug-*.js
+check-*.js
+create-*.js
+fix-*.js
+analyze-*.js
+monitor-*.js
+simple-*.js
+reset-*.js
+update-*.js
+verify-*.js
+setup-*.js
+cleanup-*.js
+backup-temp-*.js
+restore-temp-*.js
+
+# Exclude batch and shell scripts (except development scripts)
+*.bat
+!start-dev.bat
+*.sh
+!start-dev.sh
+!docker/postgres/init/*.sh
+!scripts/*.sh
+!backend/freeradius-docker/scripts/*.sh
+
+# Exclude configuration backups
+*.conf.backup
+*.config.backup
+settings.json.backup
+*.env.backup
+
+# Documentation folder (exclude from git)
+docs/CUSTOMER_INVOICE_DETAIL.md
+docs/
+<arg_value>home

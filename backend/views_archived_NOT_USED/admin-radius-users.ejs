@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <title>RADIUS Users - Admin</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="/css/responsive-admin.css" rel="stylesheet">
+    <link href="/css/dark-theme.css" rel="stylesheet">
+    <link href="/css/widgets.css" rel="stylesheet">
+    <link href="/css/theme-unify.css" rel="stylesheet">
+    <style>
+        body { background: #1a1d29 !important; color: #e0e0e0; }
+        .main-content { background: #1a1d29; }
+        .card { background: #252a3d !important; border: 1px solid #3a4052; color: #e0e0e0; }
+        .card-header { background: #2d3348 !important; border-bottom: 1px solid #3a4052; color: #e0e0e0; }
+        .table { color: #e0e0e0 !important; border-color: #3a4052; }
+        .table thead th { background: #2d3348; border-color: #3a4052; color: #ffffff !important; }
+        .table tbody tr { background: #252a3d; border-color: #3a4052; }
+        .table tbody tr:hover { background: #2d3348; }
+        .table td, .table th { border-color: #3a4052; }
+        .action-col .btn { margin-right: 6px; }
+    </style>
+</head>
+<body>
+<div class="container-fluid">
+    <div class="row">
+        <%- include('partials/admin-responsive-sidebar', { page: 'radius-users', settings: settings }) %>
+        <main class="col-md-10 ms-sm-auto main-content">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2><i class="bi bi-people"></i> RADIUS Users</h2>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-primary" onclick="loadUsers()">
+                        <i class="bi bi-arrow-clockwise"></i> Reload
+                    </button>
+                    <a href="/admin/radius" class="btn btn-outline-light">
+                        <i class="bi bi-shield-lock"></i> Server Status
+                    </a>
+                </div>
+            </div>
+            <div id="alertContainer"></div>
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="bi bi-person-lines-fill"></i> Users</h5>
+                    <span class="badge bg-primary" id="userCount">0</span>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Username</th>
+                                    <th>Status</th>
+                                    <th>Created</th>
+                                    <th>Updated</th>
+                                    <th class="text-end">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="usersTableBody">
+                                <tr>
+                                    <td colspan="5" class="text-center text-muted">Loading users...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    </div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="/js/responsive-admin.js"></script>
+<script>
+function showAlert(message, type = 'info') {
+    const html = `
+        <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>`;
+    document.getElementById('alertContainer').innerHTML = html;
+    setTimeout(() => {
+        const el = document.querySelector('.alert');
+        if (el) el.remove();
+    }, 5000);
+}
+
+function formatDate(dateString) {
+    if (!dateString) return '-';
+    const d = new Date(dateString);
+    return d.toLocaleString('id-ID');
+}
+
+async function loadUsers() {
+    try {
+        const res = await fetch('/admin/radius/users');
+        const data = await res.json();
+        const tbody = document.getElementById('usersTableBody');
+        if (!data.success) {
+            showAlert(data.error || 'Gagal memuat users', 'danger');
+            return;
+        }
+        const users = data.users || [];
+        document.getElementById('userCount').textContent = users.length;
+        if (users.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No users found</td></tr>';
+            return;
+        }
+        tbody.innerHTML = users.map(u => `
+            <tr>
+                <td><strong>${u.username}</strong></td>
+                <td>
+                    <span class="badge bg-${u.enabled ? 'success' : 'secondary'}">${u.enabled ? 'Active' : 'Inactive'}</span>
+                </td>
+                <td>${formatDate(u.created_at)}</td>
+                <td>${formatDate(u.updated_at)}</td>
+                <td class="text-end action-col">
+                    <button class="btn btn-sm btn-primary" onclick="syncUser('${u.username}')"><i class="bi bi-arrow-repeat"></i> Sync</button>
+                </td>
+            </tr>`).join('');
+    } catch (e) {
+        console.error(e);
+        showAlert('Error loading users: ' + e.message, 'danger');
+    }
+}
+
+async function syncUser(username) {
+    try {
+        const resp = await fetch(`/admin/radius/user/${encodeURIComponent(username)}/sync`, { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) {
+            showAlert(`User ${username} synced successfully`, 'success');
+            await loadUsers();
+        } else {
+            showAlert(data.error || 'Sync failed', 'danger');
+        }
+    } catch (e) {
+        showAlert('Error syncing user: ' + e.message, 'danger');
+    }
+}
+
+document.addEventListener('DOMContentLoaded', loadUsers);
+</script>
+</body>
+</html>

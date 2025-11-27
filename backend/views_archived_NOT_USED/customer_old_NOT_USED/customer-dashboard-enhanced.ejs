@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Dashboard Pelanggan - <%= settings.company_header || 'Kilusi Bill' %></title>
+    <link rel="manifest" href="/manifest.json">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="/css/dark-theme.css" rel="stylesheet">
+    <link href="/css/theme-unify.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .mobile-container {
+            max-width: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
+        .mobile-header {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 1rem;
+            box-shadow: 0 2px 20px rgba(0,0,0,0.1);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        .mobile-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: transform 0.3s ease;
+        }
+
+        .mobile-card:hover {
+            transform: translateY(-3px);
+        }
+
+        .portal-access-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 20px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            box-shadow: 0 8px 32px rgba(102, 126, 234, 0.3);
+            border: none;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .portal-access-card::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+            animation: pulse 4s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 0.5; }
+            50% { transform: scale(1.1); opacity: 0.3; }
+        }
+
+        .portal-link {
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 50px;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.3s ease;
+            font-weight: 600;
+            backdrop-filter: blur(10px);
+        }
+
+        .portal-link:hover {
+            background: rgba(255, 255, 255, 0.3);
+            color: white;
+            transform: translateY(-2px);
+            text-decoration: none;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        .portal-token-display {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+            padding: 12px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            word-break: break-all;
+            color: rgba(255, 255, 255, 0.9);
+            margin: 10px 0;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .portal-token-display:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .copy-btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        .copy-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            color: white;
+            transform: translateY(-1px);
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            border-radius: 15px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            text-align: center;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            transition: transform 0.3s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-3px);
+        }
+
+        .stat-card.warning {
+            background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+        }
+
+        .stat-card.danger {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+        }
+
+        .stat-card.success {
+            background: linear-gradient(135deg, #56ab2f 0%, #a8e6cf 100%);
+        }
+
+        .stat-number {
+            font-size: 2rem;
+            font-weight: bold;
+            margin: 0;
+        }
+
+        .stat-label {
+            font-size: 0.9rem;
+            opacity: 0.9;
+            margin: 0;
+        }
+
+        .customer-info {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 15px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .info-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid rgba(255,255,255,0.2);
+        }
+
+        .info-item:last-child {
+            border-bottom: none;
+        }
+
+        .info-label {
+            font-weight: 500;
+            opacity: 0.9;
+        }
+
+        .info-value {
+            font-weight: bold;
+        }
+
+        .status-badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+
+        .status-active { background: #28a745; color: white; }
+        .status-inactive { background: #6c757d; color: white; }
+        .status-suspended { background: #ffc107; color: #000; }
+
+        .btn-custom {
+            border-radius: 15px;
+            padding: 12px 24px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            border: none;
+            backdrop-filter: blur(10px);
+        }
+
+        .btn-primary-custom {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary-custom:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+            color: white;
+        }
+
+        .announcement-item {
+            background: white;
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-left: 4px solid;
+            transition: all 0.3s ease;
+        }
+
+        .announcement-item:hover {
+            transform: translateX(5px);
+        }
+
+        .announcement-critical { border-left-color: #dc3545; }
+        .announcement-high { border-left-color: #fd7e14; }
+        .announcement-normal { border-left-color: #17a2b8; }
+        .announcement-low { border-left-color: #6c757d; }
+
+        .announcement-unread {
+            background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 10%);
+        }
+
+        .portal-features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .portal-feature {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 12px;
+            text-align: center;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        .portal-feature:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-3px);
+        }
+
+        .portal-feature i {
+            font-size: 1.5rem;
+            margin-bottom: 5px;
+            display: block;
+        }
+
+        .navbar-brand {
+            font-weight: 700;
+            color: #333 !important;
+            letter-spacing: -0.5px;
+        }
+
+        .quick-actions {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+
+        .quick-action-btn {
+            background: white;
+            border: none;
+            border-radius: 15px;
+            padding: 15px;
+            text-align: center;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+
+        .quick-action-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+        }
+
+        .quick-action-btn i {
+            font-size: 1.5rem;
+            margin-bottom: 8px;
+            display: block;
+        }
+
+        /* Mobile optimizations */
+        @media (max-width: 576px) {
+            .portal-features {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .quick-actions {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Toast notifications */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+        }
+
+        .custom-toast {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+            padding: 15px;
+            margin-bottom: 10px;
+            animation: slideInRight 0.3s ease-out;
+        }
+
+        @keyframes slideInRight {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Mobile Header -->
+    <div class="mobile-header">
+        <div class="container d-flex justify-content-between align-items-center">
+            <div class="d-flex align-items-center">
+                <img src="/img/<%= typeof settings !== 'undefined' && settings.logo_filename ? settings.logo_filename : 'logo.png' %>" alt="Logo" style="height: 40px; max-width: 80px; border-radius: 10px; margin-right: 15px;">
+                <span class="navbar-brand">Dashboard Pelanggan</span>
+            </div>
+            <div>
+                <a href="/customer/billing" class="btn btn-outline-primary btn-sm">
+                    <i class="fas fa-file-invoice me-1"></i>Tagihan
+                </a>
+                <a href="/customer/logout" class="btn btn-outline-secondary btn-sm ms-2">
+                    <i class="fas fa-sign-out-alt"></i>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="container mobile-container py-4">
+        <!-- Portal Access Card -->
+        <% if (portalData && portalData.loginUrl) { %>
+        <div class="portal-access-card">
+            <div class="mb-3">
+                <h5 class="mb-2">
+                    <i class="fas fa-link me-2"></i>
+                    Link Akses Pribadi
+                </h5>
+                <p class="mb-0 opacity-90">Simpan link ini untuk akses cepat ke dashboard</p>
+            </div>
+
+            <div class="portal-token-display" onclick="copyToClipboard('<%= portalData.loginUrl %>')" title="Klik untuk menyalin">
+                <%= portalData.loginUrl %>
+            </div>
+
+            <div class="d-flex gap-2 mb-3">
+                <a href="<%= portalData.loginUrl %>"
+                   class="portal-link"
+                   target="_blank">
+                    <i class="fas fa-external-link-alt"></i>
+                    Buka di Tab Baru
+                </a>
+                <button class="copy-btn" onclick="copyToClipboard('<%= portalData.loginUrl %>')">
+                    <i class="fas fa-clipboard"></i>
+                    Salin
+                </button>
+            </div>
+
+            <% if (portalData.expiresAt) { %>
+            <small class="opacity-75">
+                <i class="fas fa-clock me-1"></i>
+                Berlaku sampai: <%= new Date(portalData.expiresAt).toLocaleDateString('id-ID') %>
+            </small>
+            <% } %>
+
+            <div class="portal-features">
+                <div class="portal-feature">
+                    <i class="fas fa-receipt"></i>
+                    <strong>Tagihan</strong>
+                </div>
+                <div class="portal-feature">
+                    <i class="fas fa-wifi"></i>
+                    <strong>Kelola WiFi</strong>
+                </div>
+                <div class="portal-feature">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <strong>Lapor Gangguan</strong>
+                </div>
+                <div class="portal-feature">
+                    <i class="fas fa-headset"></i>
+                    <strong>Support</strong>
+                </div>
+            </div>
+        </div>
+        <% } %>
+
+        <!-- Customer Info Card -->
+        <% if (customer) { %>
+        <div class="customer-info">
+            <h6 class="mb-3">
+                <i class="fas fa-user-circle me-2"></i>Informasi Pelanggan
+            </h6>
+            <div class="info-item">
+                <span class="info-label">Nama:</span>
+                <span class="info-value"><%= customer.name || 'Pelanggan' %></span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">No. HP:</span>
+                <span class="info-value"><%= customer.phone %></span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Status:</span>
+                <span class="status-badge status-<%= customer.status || 'active' %>">
+                    <%= customer.status || 'active' %>
+                </span>
+            </div>
+            <% if (customer.ssid) { %>
+            <div class="info-item">
+                <span class="info-label">WiFi Name:</span>
+                <span class="info-value"><%= customer.ssid %></span>
+            </div>
+            <% } %>
+        </div>
+        <% } %>
+
+        <!-- Announcements -->
+        <% if (announcements && announcements.length > 0) { %>
+        <div class="mobile-card">
+            <h6 class="mb-3">
+                <i class="fas fa-bullhorn me-2"></i>Pengumuman
+            </h6>
+            <% announcements.forEach(function(announcement) { %>
+            <div class="announcement-item announcement-<%= announcement.priority %> <%= !announcement.is_read ? 'announcement-unread' : '' %>">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div class="flex-grow-1">
+                        <h6 class="mb-2">
+                            <%= announcement.type === 'maintenance' ? '🔧' :
+                               announcement.type === 'outage' ? '⚠️' :
+                               announcement.type === 'promo' ? '🎉' : 'ℹ️' %>
+                            <%= announcement.title %>
+                            <% if (!announcement.is_read) { %>
+                                <span class="badge bg-primary ms-2">BARU</span>
+                            <% } %>
+                        </h6>
+                        <p class="mb-2 small"><%= announcement.content %></p>
+                        <small class="text-muted">
+                            <i class="fas fa-clock me-1"></i>
+                            <%= new Date(announcement.created_at).toLocaleString('id-ID') %>
+                        </small>
+                    </div>
+                </div>
+            </div>
+            <% }); %>
+        </div>
+        <% } %>
+
+        <!-- Quick Actions -->
+        <div class="mobile-card">
+            <h6 class="mb-3">
+                <i class="fas fa-bolt me-2"></i>Aksi Cepat
+            </h6>
+            <div class="quick-actions">
+                <a href="/customer/billing" class="quick-action-btn text-decoration-none">
+                    <i class="fas fa-file-invoice text-primary"></i>
+                    <strong>Lihat Tagihan</strong>
+                    <small class="text-muted d-block">Riwayat pembayaran</small>
+                </a>
+                <button class="quick-action-btn text-decoration-none" onclick="restartDevice()">
+                    <i class="fas fa-sync-alt text-warning"></i>
+                    <strong>Restart Device</strong>
+                    <small class="text-muted d-block">Reset modem</small>
+                </button>
+                <a href="/customer/trouble/simple" class="quick-action-btn text-decoration-none">
+                    <i class="fas fa-exclamation-triangle text-danger"></i>
+                    <strong>Lapor Gangguan</strong>
+                    <small class="text-muted d-block">Buat tiket support</small>
+                </a>
+                <button class="quick-action-btn text-decoration-none" onclick="showSupportModal()">
+                    <i class="fas fa-headset text-success"></i>
+                    <strong>Hubungi Support</strong>
+                    <small class="text-muted d-block">WhatsApp kami</small>
+                </button>
+            </div>
+        </div>
+
+        <!-- Status Cards -->
+        <% if (billingStats) { %>
+        <div class="row">
+            <div class="col-6">
+                <div class="stat-card">
+                    <p class="stat-number"><%= billingStats.totalInvoices || 0 %></p>
+                    <p class="stat-label">Total Tagihan</p>
+                </div>
+            </div>
+            <div class="col-6">
+                <div class="stat-card <%= billingStats.unpaidInvoices > 0 ? 'warning' : 'success' %>">
+                    <p class="stat-number"><%= billingStats.unpaidInvoices || 0 %></p>
+                    <p class="stat-label">Belum Lunas</p>
+                </div>
+            </div>
+        </div>
+        <% } %>
+    </div>
+
+    <!-- Footer -->
+    <div class="container mt-5">
+        <div class="text-center text-white">
+            <small>
+                © <%= new Date().getFullYear() %> <%= settings.company_header || 'KILUSI DIGITAL NETWORK' %>
+                <br>
+                <i class="fas fa-shield-alt me-1"></i>
+                Aman & Terpercaya
+            </small>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Scripts -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+        // Copy to clipboard
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(function() {
+                showToast('✅ Link berhasil disalin!', 'success');
+            }).catch(function(err) {
+                // Fallback for older browsers
+                const textArea = document.createElement("textarea");
+                textArea.value = text;
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+
+                try {
+                    document.execCommand('copy');
+                    showToast('✅ Link berhasil disalin!', 'success');
+                } catch (err) {
+                    showToast('❌ Gagal menyalin link', 'error');
+                }
+
+                document.body.removeChild(textArea);
+            });
+        }
+
+        // Show toast notification
+        function showToast(message, type = 'info') {
+            const toastHtml = `
+                <div class="custom-toast">
+                    <div class="d-flex align-items-center">
+                        <div class="flex-grow-1">
+                            ${message}
+                        </div>
+                        <button type="button" class="btn-close ms-3" onclick="this.closest('.custom-toast').remove()"></button>
+                    </div>
+                </div>
+            `;
+
+            const toastElement = $(toastHtml);
+            $('#toastContainer').append(toastElement);
+
+            // Auto-remove after 3 seconds
+            setTimeout(() => {
+                toastElement.fadeOut(function() {
+                    toastElement.remove();
+                });
+            }, 3000);
+        }
+
+        // Restart device
+        async function restartDevice() {
+            if (!confirm('Apakah Anda yakin ingin me-restart device? Internet akan terputus selama 1-2 menit.')) {
+                return;
+            }
+
+            showToast('🔄 Mengirim perintah restart...', 'info');
+
+            try {
+                const response = await fetch('/customer/restart-device', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showToast('✅ Perintah restart berhasil dikirim. Device akan restart dalam 1-2 menit.', 'success');
+                } else {
+                    showToast('❌ ' + result.message, 'error');
+                }
+            } catch (error) {
+                showToast('❌ Terjadi kesalahan saat mengirim perintah restart', 'error');
+                console.error('Restart error:', error);
+            }
+        }
+
+        // Show support modal
+        function showSupportModal() {
+            const adminNumber = '<%= settings.contact_whatsapp || "6281947215703" %>';
+            const message = encodeURIComponent('Halo admin, saya butuh bantuan dengan layanan internet saya.');
+            const whatsappUrl = `https://wa.me/${adminNumber}?text=${message}`;
+
+            window.open(whatsappUrl, '_blank');
+        }
+
+        // Mark announcements as read
+        async function markAnnouncementsAsRead() {
+            // Implementation for marking announcements as read
+            // This would call an API endpoint to mark announcements as read
+        }
+
+        $(document).ready(function() {
+            // Auto-hide success messages after 5 seconds
+            setTimeout(function() {
+                $('.alert-success').fadeOut();
+            }, 5000);
+
+            // Initialize tooltips
+            const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+            const tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+                return new bootstrap.Tooltip(tooltipTriggerEl);
+            });
+
+            // Check for token login indication
+            if (window.location.search.includes('token=true')) {
+                showToast('🔐 Login berhasil via token', 'success');
+            }
+        });
+
+        // Pull-to-refresh functionality for mobile
+        let startY = 0;
+        let isPulling = false;
+
+        document.addEventListener('touchstart', function(e) {
+            startY = e.touches[0].pageY;
+        });
+
+        document.addEventListener('touchmove', function(e) {
+            const currentY = e.touches[0].pageY;
+            const diff = currentY - startY;
+
+            if (diff > 100 && window.scrollY === 0 && !isPulling) {
+                isPulling = true;
+                showToast('🔄 Refreshing...', 'info');
+                setTimeout(() => {
+                    window.location.reload();
+                }, 500);
+            }
+        });
+
+        document.addEventListener('touchend', function() {
+            isPulling = false;
+        });
+    </script>
+</body>
+</html>

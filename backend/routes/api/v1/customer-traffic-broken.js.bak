@@ -1,0 +1,258 @@
+const express = require('express');
+const router = express.Router();
+const { query } = require('../../../config/database');
+
+// In-memory cache for rate calculations
+const rateCache = new Map();
+
+// Helper function to format traffic speed
+function formatTrafficSpeed(bps) {
+  if (bps === 0) return '0 bps';
+
+  const k = 1000;
+  const sizes = ['bps', 'Kbps', 'Mbps', 'Gbps', 'Tbps'];
+  const i = Math.floor(Math.log(bps) / Math.log(k));
+
+  return parseFloat((bps / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// Middleware to verify customer authentication
+const verifyCustomer = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authorization token required'
+      });
+    }
+
+    const token = authHeader.substring(7);
+
+    // Get customer by token from portal_access_token
+    const customerQuery = await query(`
+      SELECT id, name, phone, pppoe_username, status
+      FROM customers
+      WHERE portal_access_token = $1 AND status = 'active'
+    `, [token]);
+
+    if (customerQuery.rows.length === 0) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid or expired token'
+      });
+    }
+
+    req.customer = customerQuery.rows[0];
+    next();
+  } catch (error) {
+    console.error('Customer authentication error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Authentication error'
+    });
+  }
+};
+
+// GET /api/v1/customer-traffic/realtime - Get real-time traffic data for logged-in customer
+router.get('/realtime', verifyCustomer, async (req, res) => {
+  try {
+    console.log('🚀 Customer traffic API called for customer:', req.customer.name, '(', req.customer.pppoe_username, ')');
+
+    const trafficData = {
+      uploadSpeed: 0,
+      downloadSpeed: 0,
+      interface: 'N/A',
+      mode: 'snmp',
+      timestamp: new Date().toISOString(),
+      customerUsername: req.customer.pppoe_username,
+      pppoeInterface: null,
+      pppoeTraffic: null
+    };
+
+    // Get NAS configuration from nas_servers table
+    const nasQuery = await query(`
+      SELECT ip_address, snmp_community, snmp_port, snmp_version
+      FROM nas_servers
+      WHERE ip_address = $1 AND snmp_enabled = true AND snmp_community IS NOT NULL
+    `, [req.customer.nas_ip || '172.22.10.125']);
+
+    if (nasQuery.rows.length === 0) {
+      console.log('⚠️ No NAS configuration found for SNMP host:', req.customer.nas_ip || '172.22.10.125');
+      return res.json({
+        success: true,
+        data: {
+          traffic: {
+            ...trafficData,
+            interface: 'NAS Not Found',
+            mode: 'error'
+          }
+        }
+      });
+    }
+
+    const nas = nasQuery.rows[0];
+    const host = nas.ip_address;
+    const community = nas.snmp_community;
+    const version = nas.snmp_version || '2c';
+    const port = nas.snmp_port || 161;
+
+    console.log('🔍 SNMP Settings from NAS DB - Host:', host, 'Community:', community, 'Version:', version, 'Port:', port);
+
+    if (host && req.customer.pppoe_username) {
+      try {
+        console.log('🔍 Trying SNMP connection to host:', host, 'for username:', req.customer.pppoe_username);
+
+        const snmp = require('net-snmp');
+
+        // Create SNMP session
+        const session = snmp.createSession(host, community, {
+          port: port,
+          version: version === '1' ? snmp.Version1 : snmp.Version2c,
+          timeout: 5000,
+          retries: 1
+        });
+
+        const customerUsername = req.customer.pppoe_username.toLowerCase();
+        let pppoeInterface = null;
+
+        // Try the known interface index for apptest
+        const interfaceIndex = 15731192;
+        const ifDescrOid = `1.3.6.1.2.1.2.2.1.2.${interfaceIndex}`;
+
+        try {
+          const interfaceName = await new Promise((resolve, reject) => {
+            session.get([ifDescrOid], (error, varbinds) => {
+              if (error) {
+                reject(error);
+              } else {
+                resolve(varbinds[0].value.toString());
+              }
+            });
+          });
+
+          // Check if interface name contains PPPoE pattern and username
+          if (interfaceName.includes('<pppoe-') && interfaceName.includes(customerUsername)) {
+            pppoeInterface = {
+              name: interfaceName,
+              index: parseInt(interfaceIndex),
+              descr: interfaceName
+            };
+            console.log(`✅ Found PPPoE interface for ${customerUsername}: ${interfaceName} (index: ${interfaceIndex})`);
+          }
+        } catch (error) {
+          console.log('⚠️ Could not get interface name:', error.message);
+        }
+
+        if (pppoeInterface) {
+          console.log('🎯 Getting traffic data for interface:', pppoeInterface.name, 'Index:', pppoeInterface.index);
+
+          // Get traffic data for the specific PPPoE interface
+          const inOctetsOid = `1.3.6.1.2.1.31.1.1.1.6.${pppoeInterface.index}`;
+          const outOctetsOid = `1.3.6.1.2.1.31.1.1.1.10.${pppoeInterface.index}`;
+
+          let inOctets, outOctets;
+          try {
+            const results = await Promise.all([
+              new Promise((resolve, reject) => {
+                session.get([inOctetsOid], (error, varbinds) => {
+                  if (error) reject(error);
+                  else resolve(varbinds[0].value);
+                });
+              }),
+              new Promise((resolve, reject) => {
+                session.get([outOctetsOid], (error, varbinds) => {
+                  if (error) reject(error);
+                  else resolve(varbinds[0].value);
+                });
+              })
+            ]);
+            inOctets = results[0];
+            outOctets = results[1];
+            console.log('✅ Traffic counters retrieved - In:', inOctets, 'Out:', outOctets);
+          } catch (error) {
+            console.error('❌ Error getting traffic counters:', error);
+            throw error;
+          }
+
+          // Convert Buffer to number
+          const convertBufferToNumber = (buffer) => {
+            if (!buffer || !Buffer.isBuffer(buffer)) return buffer || 0;
+
+            try {
+              if (buffer.length === 8) {
+                return Number(buffer.readBigUInt64BE(0));
+              } else if (buffer.length === 4) {
+                return buffer.readUInt32BE(0);
+              } else {
+                return Number(buffer.readUIntBE(0, Math.min(buffer.length, 8)));
+              }
+            } catch (error) {
+              console.warn('⚠️ Buffer conversion error:', error.message);
+              return 0;
+            }
+          };
+
+          const totalUpload = convertBufferToNumber(outOctets);
+          const totalDownload = convertBufferToNumber(inOctets);
+
+          console.log('📊 Converted traffic - Upload:', totalUpload, 'Download:', totalDownload);
+
+          const pppoeTraffic = {
+            index: pppoeInterface.index,
+            name: pppoeInterface.name,
+            uploadSpeed: 0,
+            downloadSpeed: 0,
+            totalUpload: totalUpload,
+            totalDownload: totalDownload,
+            timestamp: new Date().toISOString()
+          };
+
+          trafficData.uploadSpeed = 0;
+          trafficData.downloadSpeed = 0;
+          trafficData.interface = pppoeInterface.name;
+          trafficData.mode = 'snmp-direct';
+          trafficData.pppoeInterface = pppoeInterface;
+          trafficData.pppoeTraffic = pppoeTraffic;
+
+          logger.info(`✅ Found PPPoE interface for customer ${customerUsername}: ${pppoeInterface.name} (index: ${pppoeInterface.index})`);
+          logger.info(`📊 Total Traffic: Upload: ${formatTrafficSpeed(totalUpload)} / Download: ${formatTrafficSpeed(totalDownload)}`);
+        } else {
+          console.log(`⚠️ No PPPoE interface found for ${customerUsername}`);
+          trafficData = {
+            ...trafficData,
+            interface: 'PPPoE Not Found',
+            mode: 'snmp-no-pppoe'
+          };
+          logger.warn(`❌ No PPPoE interface found for customer ${customerUsername}`);
+        }
+
+        session.close();
+      } catch (error) {
+        logger.error('❌ SNMP PPPoE traffic fetch failed:', error.message);
+        logger.error('❌ Full error details:', error);
+
+        // Return fallback values with explanation
+        trafficData = {
+          ...trafficData,
+          interface: 'SNMP Error',
+          mode: 'error'
+        };
+      }
+    }
+
+    res.json({
+      success: true,
+      data: { traffic: trafficData }
+    });
+
+  } catch (error) {
+    logger.error('❌ Error fetching customer traffic data:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch traffic data'
+    });
+  }
+});
+
+module.exports = router;

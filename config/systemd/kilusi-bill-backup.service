@@ -1,0 +1,26 @@
+[Unit]
+Description=Kilusi Bill Backup Service
+Documentation=https://github.com/your-org/kilusi-bill
+After=network.target kilusi-bill-docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=kilusi
+Group=kilusi
+WorkingDirectory=/opt/kilusi-bill
+Environment=NODE_ENV=production
+ExecStart=/usr/local/bin/kilusi-bill-backup
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=kilusi-bill-backup
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/backups/kilusi-bill
+
+[Install]
+WantedBy=multi-user.target
