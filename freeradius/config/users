@@ -1,0 +1,311 @@
+# ===========================================
+# FreeRADIUS Users File
+# ===========================================
+# This file contains user definitions and configurations.
+# It's used as a fallback when the SQL database is not available
+# or for defining special users and rules.
+#
+# Format:
+# username    Check-Items = Value
+#             Reply-Items = Value
+#
+# Check-Items control access
+# Reply-Items are returned to the NAS
+# ===========================================
+
+# ===========================================
+# Test Users
+# ===========================================
+
+# Default test user for basic authentication
+# Username: testuser
+# Password: test123
+testuser    Cleartext-Password := "test123"
+            Service-Type = Framed-User,
+            Framed-Protocol = PPP,
+            Framed-IP-Address = 192.168.100.10,
+            Framed-IP-Netmask = 255.255.255.0,
+            Reply-Message := "Hello, %{User-Name}! Welcome to Kilusi ISP."
+
+# Test user with time restrictions
+# Username: testtime
+# Password: testtime
+testtime    Cleartext-Password := "testtime"
+            Service-Type = Framed-User,
+            Framed-Protocol = PPP,
+            Login-Time = "Mon0900-1700, Tue0900-1700, Wed0900-1700, Thu0900-1700, Fri0900-1700",
+            Reply-Message := "Access granted during business hours only"
+
+# Test user with bandwidth limitations
+# Username: testbw
+# Password: testbw
+testbw      Cleartext-Password := "testbw"
+            Service-Type = Framed-User,
+            Framed-Protocol = PPP,
+            WISPr-Bandwidth-Max-Up := 1048576,      # 1 Mbps upload
+            WISPr-Bandwidth-Max-Down := 2097152,    # 2 Mbps download
+            Reply-Message := "Bandwidth limited to 1/2 Mbps"
+
+# ===========================================
+# Default Fallthrough Users
+# ===========================================
+
+# This is a special entry that will match any user
+# Useful for testing and debugging
+# WARNING: This accepts any password! Remove in production!
+DEFAULT     Auth-Type := Accept
+            Reply-Message := "Default user authenticated (testing mode)"
+
+# This rejects any user that doesn't match above entries
+# This should be the LAST entry in the file
+DEFAULT    Auth-Type := Reject
+           Reply-Message = "Access denied - User not found or incorrect password"
+
+# ===========================================
+# Example User Configurations
+# ===========================================
+
+# Standard PPPoE user example
+# user1      Cleartext-Password := "password1"
+#             Service-Type = Framed-User,
+#             Framed-Protocol = PPP,
+#             Framed-IP-Address = 192.168.1.100,
+#             Framed-IP-Netmask = 255.255.255.0,
+#             Framed-MTU = 1492,
+#             Framed-Compression = Van-Jacobson-TCP-IP
+
+# Static IP user
+# user2      Cleartext-Password := "password2"
+#             Service-Type = Framed-User,
+#             Framed-Protocol = PPP,
+#             Framed-IP-Address = 192.168.1.101,
+#             Framed-IP-Netmask = 255.255.255.255,
+#             Idle-Timeout = 1800,        # 30 minutes idle timeout
+#             Session-Timeout = 14400     # 4 hours session timeout
+
+# Hotspot user example
+# hotspot1   Cleartext-Password := "hotspot123"
+#             Service-Type = Login-User,
+#             Login-Service = Telnet,
+#             Login-TCP-Port = 23,
+#             Reply-Message := "Welcome to Kilusi Hotspot"
+
+# VLAN assignment example
+# vlan1      Cleartext-Password := "vlan123"
+#             Service-Type = Framed-User,
+#             Framed-Protocol = PPP,
+#             Tunnel-Type = VLAN,
+#             Tunnel-Medium-Type = IEEE-802,
+#             Tunnel-Private-Group-ID = "100",
+#             Reply-Message := "Assigned to VLAN 100"
+
+# ===========================================
+# Time-Based Access Examples
+# ===========================================
+
+# Business hours only (Mon-Fri, 9AM-5PM)
+# business   Cleartext-Password := "business123"
+#             Login-Time = "Mon0900-1700, Tue0900-1700, Wed0900-1700, Thu0900-1700, Fri0900-1700"
+#             Reply-Message := "Access granted during business hours"
+
+# Weekend only access
+# weekend    Cleartext-Password := "weekend123"
+#             Login-Time = "Sat0000-2359, Sun0000-2359"
+#             Reply-Message := "Weekend access only"
+
+# Night time access (10PM - 6AM)
+# night      Cleartext-Password := "night123"
+#             Login-Time = "Mon2200-2359, Tue2200-2359, Wed2200-2359, Thu2200-2359, Fri2200-2359, Sat2200-2359, Sun2200-2359, Mon0000-0559, Tue0000-0559, Wed0000-0559, Thu0000-0559, Fri0000-0559, Sat0000-0559, Sun0000-0559"
+#             Reply-Message := "Night time access only"
+
+# ===========================================
+# Bandwidth Control Examples
+# ===========================================
+
+# Basic package - 1Mbps
+# basic      Cleartext-Password := "basic123"
+#             Service-Type = Framed-User,
+#             Framed-Protocol = PPP,
+#             WISPr-Bandwidth-Max-Up := 1048576,      # 1 Mbps upload
+#             WISPr-Bandwidth-Max-Down := 1048576,    # 1 Mbps download
+#             Reply-Message := "Basic package - 1 Mbps"
+
+# Standard package - 5Mbps
+# standard   Cleartext-Password := "standard123"
+#             Service-Type = Framed-User,
+#             Framed-Protocol = PPP,
+#             WISPr-Bandwidth-Max-Up := 5242880,      # 5 Mbps upload
+#             WISPr-Bandwidth-Max-Down := 5242880,    # 5 Mbps download
+#             Reply-Message := "Standard package - 5 Mbps"
+
+# Premium package - 10Mbps
+# premium    Cleartext-Password := "premium123"
+#             Service-Type = Framed-User,
+#             Framed-Protocol = PPP,
+#             WISPr-Bandwidth-Max-Up := 10485760,     # 10 Mbps upload
+#             WISPr-Bandwidth-Max-Down := 10485760,   # 10 Mbps download
+#             Reply-Message := "Premium package - 10 Mbps"
+
+# ===========================================
+# Data Limit Examples
+# ===========================================
+
+# 1GB data limit per day
+# data1gb    Cleartext-Password := "data1gb123"
+#             Service-Type = Framed-User,
+#             Framed-Protocol = PPP,
+#             Mikrotik-Total-Limit = "1073741824",     # 1GB in bytes
+#             Reply-Message := "1GB data limit per session"
+
+# 5GB data limit per day
+# data5gb    Cleartext-Password := "data5gb123"
+#             Service-Type = Framed-User,
+#             Framed-Protocol = PPP,
+#             Mikrotik-Total-Limit = "5368709120",    # 5GB in bytes
+#             Reply-Message := "5GB data limit per session"
+
+# ===========================================
+# Session Control Examples
+# ===========================================
+
+# 1 hour session limit
+# hour1      Cleartext-Password := "hour1123"
+#             Service-Type = Framed-User,
+#             Framed-Protocol = PPP,
+#             Session-Timeout = 3600,                 # 1 hour in seconds
+#             Reply-Message := "1 hour session limit"
+
+# 8 hour session limit
+# hour8      Cleartext-Password := "hour8123"
+#             Service-Type = Framed-User,
+#             Framed-Protocol = PPP,
+#             Session-Timeout = 28800,                # 8 hours in seconds
+#             Reply-Message := "8 hour session limit"
+
+# Idle timeout example
+# idle30     Cleartext-Password := "idle30123"
+#             Service-Type = Framed-User,
+#             Framed-Protocol = PPP,
+#             Idle-Timeout = 1800,                    # 30 minutes
+#             Reply-Message := "30 minute idle timeout"
+
+# ===========================================
+# Special Users
+# ===========================================
+
+# Emergency access user (always allowed)
+# emergency  Cleartext-Password := "emergency123"
+#             Service-Type = Framed-User,
+#             Framed-Protocol = PPP,
+#             Login-Time = "Al",
+#             Reply-Message := "Emergency access granted"
+
+# Guest user (temporary access)
+# guest      Cleartext-Password := "guest123"
+#             Service-Type = Framed-User,
+#             Framed-Protocol = PPP,
+#             Session-Timeout = 3600,                 # 1 hour
+#             WISPr-Bandwidth-Max-Up := 262144,      # 256 Kbps
+#             WISPr-Bandwidth-Max-Down := 262144,    # 256 Kbps
+#             Reply-Message := "Guest access - 1 hour limit"
+
+# Maintenance user (for network maintenance)
+# maint      Cleartext-Password := "maint123"
+#             Service-Type = Framed-User,
+#             Framed-Protocol = PPP,
+#             Service-Type = Administrative-User,
+#             Reply-Message := "Maintenance access granted"
+
+# ===========================================
+# IPv6 Examples
+# ===========================================
+
+# IPv6 user example
+# ipv6user   Cleartext-Password := "ipv6123"
+#             Service-Type = Framed-User,
+#             Framed-Protocol = PPP,
+#             Framed-IPv6-Prefix = "2001:db8::/64",
+#             Framed-Interface-Id = "::1",
+#             Reply-Message := "IPv6 access granted"
+
+# ===========================================
+# Special Return Values
+# ===========================================
+
+# User that gets redirected to a captive portal
+# redirect   Cleartext-Password := "redirect123"
+#             Service-Type = Login-User,
+#             Reply-Message := "http://portal.kilusi.com/login",
+#             WISPr-Location-ID = "ISP-001",
+#             WISpr-Location-Name = "Kilusi ISP"
+
+# User with custom attributes
+# custom     Cleartext-Password := "custom123"
+#             Service-Type = Framed-User,
+#             Framed-Protocol = PPP,
+#             Class = "custom-class-123",
+#             Vendor-Specific = "Kilusi-Custom-Attr",
+#             Reply-Message := "Custom attributes applied"
+
+# ===========================================
+# Group-Based Examples
+# ===========================================
+
+# Note: These are examples of how you might structure group-based access
+# In practice, you'd typically manage groups in the SQL database
+
+# Member of "active" group gets standard access
+# usergroup  Cleartext-Password := "group123"
+#             Service-Type = Framed-User,
+#             Framed-Protocol = PPP,
+#             Fall-Through = Yes
+
+# Member of "trial" group gets limited access
+# trial      Cleartext-Password := "trial123"
+#             Service-Type = Framed-User,
+#             Framed-Protocol = PPP,
+#             Session-Timeout = 86400,                # 24 hours
+#             WISPr-Bandwidth-Max-Up := 524288,      # 512 Kbps
+#             WISPr-Bandwidth-Max-Down := 524288,    # 512 Kbps
+#             Reply-Message := "Trial account - 24 hours, 512 Kbps"
+
+# ===========================================
+# Notes and Tips
+# ===========================================
+#
+# 1. Order matters: FreeRADIUS processes users from top to bottom
+#    Put specific users before DEFAULT entries
+#
+# 2. Use Cleartext-Password for testing only
+#    In production, use encrypted passwords like:
+#    - Crypt-Password
+#    - MD5-Password
+#    - SHA1-Password
+#    - SSHA-Password
+#
+# 3. Common check items:
+#    - Cleartext-Password: Plain text password
+#    - Auth-Type: Authentication method (Accept, Reject, etc.)
+#    - Simultaneous-Use: Number of concurrent connections
+#    - Login-Time: Allowed login times
+#    - Called-Station-Id: Limit to specific NAS
+#
+# 4. Common reply items:
+#    - Service-Type: Type of service (Framed-User, Login-User)
+#    - Framed-Protocol: Protocol (PPP, SLIP)
+#    - Framed-IP-Address: Assigned IP address
+#    - Session-Timeout: Maximum session time
+#    - Idle-Timeout: Idle time before disconnect
+#    - Reply-Message: Message to send to user
+#
+# 5. Bandwidth control (Mikrotik specific):
+#    - Mikrotik-Rate-Limit: "rx-rate/tx-rate"
+#    - WISPr-Bandwidth-Max-Up: Upload limit in bps
+#    - WISPr-Bandwidth-Max-Down: Download limit in bps
+#
+# 6. For production use, consider moving users to SQL database
+#    This allows for better management, scalability, and integration
+#    with the Kilusi Bill billing system
+#
+# 7. Always test new user configurations in a lab environment
+#    before deploying to production

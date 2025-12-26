@@ -1,0 +1,56 @@
+{
+  "name": "kilusi-bill",
+  "version": "1.0.0",
+  "description": "Kilusi Bill - Billing + RADIUS with SNMP-based monitoring (no Mikrotik API)",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js",
+    "migrate:init": "node migrations/init-database.js",
+    "migrate:multi": "node migrations/add-multi-nas-mikrotik.js",
+    "migrate:all": "node migrations/init-database.js && node migrations/add-multi-nas-mikrotik.js",
+    "db:check": "node migrations/check-db.js",
+    "pg:init": "node migrations/init-postgres.js",
+    "pg:migrate": "node migrations/migrate-sqlite-to-postgres.js"
+  },
+  "dependencies": {
+    "@hapi/boom": "^10.0.1",
+    "@whiskeysockets/baileys": "^6.7.17",
+    "axios": "^1.13.2",
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "ejs": "^3.1.10",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.5.1",
+    "express-session": "^1.18.1",
+    "express-validator": "^7.3.0",
+    "helmet": "^7.2.0",
+    "jsonwebtoken": "^9.0.2",
+    "leaflet": "^1.9.4",
+    "mongo-sanitize": "^1.1.0",
+    "multer": "^2.0.2",
+    "mysql2": "^3.9.7",
+    "net-snmp": "^3.8.0",
+    "node-cron": "^4.2.1",
+    "pg": "^8.16.3",
+    "pino": "^10.1.0",
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0",
+    "radius": "^1.1.4",
+    "socket.io": "^4.8.1",
+    "swagger-ui-express": "^5.0.0",
+    "uuid": "^13.0.0",
+    "winston": "^3.8.2",
+    "ws": "^8.18.3",
+    "yamljs": "^0.3.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "author": "",
+  "license": "ISC"
+}

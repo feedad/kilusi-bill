@@ -1,0 +1,28 @@
+[Unit]
+Description=Kilusi Bill Docker Services
+Documentation=https://github.com/your-org/kilusi-bill
+After=docker.service network-online.target
+Wants=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=kilusi
+Group=kilusi
+WorkingDirectory=/opt/kilusi-bill
+EnvironmentFile=/opt/kilusi-bill/.env
+ExecStart=/opt/kilusi-bill/docker-start.sh start
+ExecStop=/opt/kilusi-bill/docker-start.sh stop
+ExecReload=/opt/kilusi-bill/docker-start.sh restart
+TimeoutStartSec=300
+TimeoutStopSec=120
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

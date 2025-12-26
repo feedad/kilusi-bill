@@ -1,0 +1,353 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Horizon UI Light Mode */
+    --background: 220 33% 98%; /* #F4F7FE */
+    --foreground: 228 35% 20%; /* #2B3674 text */
+    --card: 0 0% 100%; /* #FFFFFF */
+    --card-foreground: 228 35% 20%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 228 35% 20%;
+    --primary: 231 100% 55%; /* #4318FF Brand */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 222 17% 65%; /* #A3AED0 Secondary Text */
+    --secondary-foreground: 228 35% 20%;
+    --muted: 220 33% 98%;
+    --muted-foreground: 222 17% 65%;
+    --accent: 220 33% 98%;
+    --accent-foreground: 228 35% 20%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 222 17% 90%;
+    --input: 222 17% 90%;
+    --ring: 231 100% 55%;
+    --radius: 1rem; /* Rounded corners for Horizon */
+
+    /* Status Colors */
+    --success: 142 76% 36%;
+    --success-foreground: 355 100% 97%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 48 96% 89%;
+    --error: 0 84% 60%;
+    --error-foreground: 210 40% 98%;
+    --info: 221 83% 53%;
+    --info-foreground: 210 40% 98%;
+
+    /* Sidebar */
+    --sidebar: 0 0% 100%;
+    --sidebar-foreground: 222 17% 65%; /* Gray for inactive */
+    --sidebar-border: 222 17% 90%;
+    --sidebar-accent: 220 33% 98%;
+    --sidebar-accent-foreground: 231 100% 55%; /* Brand color for active */
+  }
+
+  .dark {
+    /* Horizon UI Dark Mode */
+    --background: 228 67% 13%; /* #0B1437 */
+    --foreground: 0 0% 100%;
+    --card: 227 60% 17%; /* #111C44 */
+    --card-foreground: 0 0% 100%;
+    --popover: 227 60% 17%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 231 100% 64%; /* Brighter Brand for dark mode */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222.2 84% 4.9%;
+    --muted: 228 67% 13%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 228 67% 13%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 227 60% 17%;
+    --input: 227 60% 17%;
+    --ring: 231 100% 64%;
+
+    /* Status Colors */
+    --success: 142 76% 36%;
+    --success-foreground: 355 100% 97%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 48 96% 89%;
+    --error: 0 62.8% 30.6%;
+    --error-foreground: 210 40% 98%;
+    --info: 217 91% 60%;
+    --info-foreground: 222.2 84% 4.9%;
+
+    /* Sidebar */
+    --sidebar: 227 60% 17%; /* #111C44 */
+    --sidebar-foreground: 215 20.2% 65.1%;
+    --sidebar-border: 228 67% 13%;
+    --sidebar-accent: 228 67% 13%;
+    --sidebar-accent-foreground: 0 0% 100%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-[hsl(var(--border))];
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Custom scrollbar styles */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgb(203 213 225);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(148 163 184);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgb(71 85 105);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgb(100 116 139);
+}
+
+/* Focus styles */
+.focus-visible:focus-visible {
+  @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+}
+
+/* Animation classes */
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-in-out;
+}
+
+.animate-slide-in {
+  animation: slideIn 0.3s ease-out;
+}
+
+.animate-bounce-in {
+  animation: bounceIn 0.6s ease-out;
+}
+
+/* Print styles */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  body {
+    @apply text-black bg-white;
+  }
+}
+
+/* Mobile responsive utilities */
+@media (max-width: 640px) {
+  .mobile-hidden {
+    display: none;
+  }
+}
+
+/* Loading animation */
+.loading-spinner {
+  @apply inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin;
+}
+
+/* Skeleton loading */
+.skeleton {
+  @apply animate-pulse bg-gray-200 dark:bg-gray-700 rounded;
+}
+
+.skeleton-text {
+  @apply skeleton h-4 mb-2;
+}
+
+.skeleton-text:last-child {
+  @apply mb-0;
+}
+
+/* Custom components */
+.btn {
+  @apply inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none ring-offset-background;
+}
+
+/* Dashboard card improvements */
+.dashboard-card {
+  @apply bg-card text-card-foreground rounded-md border shadow-sm hover:shadow-md transition-all duration-200;
+}
+
+.dashboard-card-header {
+  @apply flex flex-col space-y-1.5 p-6 pb-3;
+}
+
+.dashboard-card-content {
+  @apply p-6 pt-0;
+}
+
+/* Chart placeholder styling */
+.chart-placeholder {
+  @apply h-64 flex items-center justify-center bg-muted/50 rounded-lg border border-dashed border-border;
+}
+
+/* Sidebar Theme Classes */
+.sidebar {
+  background: hsl(var(--sidebar));
+  color: hsl(var(--sidebar-foreground));
+  border-right: 1px solid hsl(var(--sidebar-border));
+}
+
+.sidebar .text-foreground {
+  color: hsl(var(--sidebar-foreground));
+}
+
+.sidebar .text-muted-foreground {
+  color: hsl(var(--muted-foreground));
+}
+
+.sidebar .border-border {
+  border-color: hsl(var(--sidebar-border));
+}
+
+.sidebar .bg-card {
+  background-color: hsl(var(--sidebar));
+}
+
+.sidebar nav {
+  background-color: hsl(var(--sidebar));
+}
+
+.sidebar .nav-link-active {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+.sidebar .nav-link-inactive {
+  color: hsl(var(--sidebar-foreground));
+}
+
+.sidebar .nav-link-inactive:hover {
+  background: hsl(var(--sidebar-accent));
+  color: hsl(var(--sidebar-accent-foreground));
+}
+
+/* Status Color Utilities */
+.text-success {
+  color: hsl(var(--success));
+}
+
+.text-success-foreground {
+  color: hsl(var(--success-foreground));
+}
+
+.text-warning {
+  color: hsl(var(--warning));
+}
+
+.text-warning-foreground {
+  color: hsl(var(--warning-foreground));
+}
+
+.text-error {
+  color: hsl(var(--error));
+}
+
+.text-error-foreground {
+  color: hsl(var(--error-foreground));
+}
+
+.text-info {
+  color: hsl(var(--info));
+}
+
+.text-info-foreground {
+  color: hsl(var(--info-foreground));
+}
+
+.btn-primary {
+  @apply bg-primary text-primary-foreground hover:bg-primary/90;
+}
+
+.btn-secondary {
+  @apply bg-secondary text-secondary-foreground hover:bg-secondary/80;
+}
+
+.btn-destructive {
+  @apply bg-destructive text-destructive-foreground hover:bg-destructive/90;
+}
+
+.btn-outline {
+  @apply border border-input hover:bg-accent hover:text-accent-foreground;
+}
+
+.btn-ghost {
+  @apply hover:bg-accent hover:text-accent-foreground;
+}
+
+.btn-link {
+  @apply underline-offset-4 hover:underline text-primary;
+}
+
+.btn-sm {
+  @apply h-9 px-3 rounded-md;
+}
+
+.btn-md {
+  @apply h-10 py-2 px-4;
+}
+
+.btn-lg {
+  @apply h-11 px-8 rounded-md;
+}
+
+.card {
+  @apply rounded-md border bg-card text-card-foreground shadow-sm;
+}
+
+.card-header {
+  @apply flex flex-col space-y-1.5 p-6;
+}
+
+.card-title {
+  @apply text-2xl font-semibold leading-none tracking-tight;
+}
+
+.card-description {
+  @apply text-sm text-muted-foreground;
+}
+
+.card-content {
+  @apply p-6 pt-0;
+}
+
+.card-footer {
+  @apply flex items-center p-6 pt-0;
+}
+
+.input {
+  @apply flex h-10 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+.label {
+  @apply text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70;
+}
+
+.select {
+  @apply flex h-10 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+.textarea {
+  @apply flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+}

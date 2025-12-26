@@ -1,0 +1,353 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* MaterialM Light Mode */
+    --background: 214 20% 97%; /* #F4F6F9 - Light gray bg */
+    --foreground: 213 27% 24%; /* #2A3547 - Navy gray text */
+    --card: 0 0% 100%; /* Pure white cards */
+    --card-foreground: 213 27% 24%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 213 27% 24%;
+    --primary: 224 100% 68%; /* #5D87FF - MaterialM Blue */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 214 20% 97%; /* Same as background */
+    --secondary-foreground: 213 27% 24%;
+    --muted: 214 15% 93%; /* Slightly darker than bg */
+    --muted-foreground: 215 16% 47%; /* #5A6A85 */
+    --accent: 224 100% 96%; /* #ECF2FF - Light blue accent */
+    --accent-foreground: 224 100% 55%;
+    --destructive: 15 91% 70%; /* #FA896B - Soft coral */
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 20% 90%; /* Subtle borders */
+    --input: 214 20% 90%;
+    --ring: 224 100% 68%;
+    --radius: 0.75rem; /* Balanced rounded corners */
+
+    /* MaterialM Status Colors */
+    --success: 166 82% 47%; /* #13DEB9 - Mint green */
+    --success-foreground: 0 0% 100%;
+    --warning: 38 100% 56%; /* #FFAE1F - Amber */
+    --warning-foreground: 0 0% 100%;
+    --error: 15 91% 70%; /* #FA896B */
+    --error-foreground: 0 0% 100%;
+    --info: 224 100% 68%; /* Same as primary */
+    --info-foreground: 0 0% 100%;
+
+    /* Sidebar - White with subtle distinction */
+    --sidebar: 0 0% 100%;
+    --sidebar-foreground: 215 16% 47%; /* Muted text */
+    --sidebar-border: 214 20% 92%;
+    --sidebar-accent: 224 100% 96%; /* Light blue on hover/active */
+    --sidebar-accent-foreground: 224 100% 55%;
+  }
+
+  .dark {
+    /* MaterialM Dark Mode */
+    --background: 220 26% 14%; /* #1C2536 - Deep navy */
+    --foreground: 210 20% 95%; /* Off-white text */
+    --card: 220 26% 17%; /* #212B3E - Slightly lighter */
+    --card-foreground: 210 20% 95%;
+    --popover: 220 26% 19%;
+    --popover-foreground: 210 20% 95%;
+    --primary: 224 100% 68%; /* #5D87FF - Same blue */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 26% 20%;
+    --secondary-foreground: 210 20% 95%;
+    --muted: 220 26% 20%;
+    --muted-foreground: 215 16% 60%;
+    --accent: 224 60% 25%; /* Darker blue accent */
+    --accent-foreground: 224 100% 75%;
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 26% 22%; /* Subtle dark border */
+    --input: 220 26% 22%;
+    --ring: 224 100% 68%;
+
+    /* Dark Mode Status Colors */
+    --success: 166 82% 47%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 100% 56%;
+    --warning-foreground: 0 0% 100%;
+    --error: 0 62% 50%;
+    --error-foreground: 0 0% 100%;
+    --info: 224 100% 68%;
+    --info-foreground: 0 0% 100%;
+
+    /* Sidebar - Dark navy */
+    --sidebar: 220 26% 17%;
+    --sidebar-foreground: 215 16% 60%;
+    --sidebar-border: 220 26% 22%;
+    --sidebar-accent: 224 60% 25%;
+    --sidebar-accent-foreground: 210 20% 95%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-[hsl(var(--border))];
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Custom scrollbar styles */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgb(203 213 225);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(148 163 184);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgb(71 85 105);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgb(100 116 139);
+}
+
+/* Focus styles */
+.focus-visible:focus-visible {
+  @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+}
+
+/* Animation classes */
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-in-out;
+}
+
+.animate-slide-in {
+  animation: slideIn 0.3s ease-out;
+}
+
+.animate-bounce-in {
+  animation: bounceIn 0.6s ease-out;
+}
+
+/* Print styles */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  body {
+    @apply text-black bg-white;
+  }
+}
+
+/* Mobile responsive utilities */
+@media (max-width: 640px) {
+  .mobile-hidden {
+    display: none;
+  }
+}
+
+/* Loading animation */
+.loading-spinner {
+  @apply inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin;
+}
+
+/* Skeleton loading */
+.skeleton {
+  @apply animate-pulse bg-gray-200 dark:bg-gray-700 rounded;
+}
+
+.skeleton-text {
+  @apply skeleton h-4 mb-2;
+}
+
+.skeleton-text:last-child {
+  @apply mb-0;
+}
+
+/* Custom components */
+.btn {
+  @apply inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none ring-offset-background;
+}
+
+/* Dashboard card improvements */
+.dashboard-card {
+  @apply bg-card text-card-foreground rounded-md border shadow-sm hover:shadow-md transition-all duration-200;
+}
+
+.dashboard-card-header {
+  @apply flex flex-col space-y-1.5 p-6 pb-3;
+}
+
+.dashboard-card-content {
+  @apply p-6 pt-0;
+}
+
+/* Chart placeholder styling */
+.chart-placeholder {
+  @apply h-64 flex items-center justify-center bg-muted/50 rounded-lg border border-dashed border-border;
+}
+
+/* Sidebar Theme Classes */
+.sidebar {
+  background: hsl(var(--sidebar));
+  color: hsl(var(--sidebar-foreground));
+  border-right: 1px solid hsl(var(--sidebar-border));
+}
+
+.sidebar .text-foreground {
+  color: hsl(var(--sidebar-foreground));
+}
+
+.sidebar .text-muted-foreground {
+  color: hsl(var(--muted-foreground));
+}
+
+.sidebar .border-border {
+  border-color: hsl(var(--sidebar-border));
+}
+
+.sidebar .bg-card {
+  background-color: hsl(var(--sidebar));
+}
+
+.sidebar nav {
+  background-color: hsl(var(--sidebar));
+}
+
+.sidebar .nav-link-active {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+.sidebar .nav-link-inactive {
+  color: hsl(var(--sidebar-foreground));
+}
+
+.sidebar .nav-link-inactive:hover {
+  background: hsl(var(--sidebar-accent));
+  color: hsl(var(--sidebar-accent-foreground));
+}
+
+/* Status Color Utilities */
+.text-success {
+  color: hsl(var(--success));
+}
+
+.text-success-foreground {
+  color: hsl(var(--success-foreground));
+}
+
+.text-warning {
+  color: hsl(var(--warning));
+}
+
+.text-warning-foreground {
+  color: hsl(var(--warning-foreground));
+}
+
+.text-error {
+  color: hsl(var(--error));
+}
+
+.text-error-foreground {
+  color: hsl(var(--error-foreground));
+}
+
+.text-info {
+  color: hsl(var(--info));
+}
+
+.text-info-foreground {
+  color: hsl(var(--info-foreground));
+}
+
+.btn-primary {
+  @apply bg-primary text-primary-foreground hover:bg-primary/90;
+}
+
+.btn-secondary {
+  @apply bg-secondary text-secondary-foreground hover:bg-secondary/80;
+}
+
+.btn-destructive {
+  @apply bg-destructive text-destructive-foreground hover:bg-destructive/90;
+}
+
+.btn-outline {
+  @apply border border-input hover:bg-accent hover:text-accent-foreground;
+}
+
+.btn-ghost {
+  @apply hover:bg-accent hover:text-accent-foreground;
+}
+
+.btn-link {
+  @apply underline-offset-4 hover:underline text-primary;
+}
+
+.btn-sm {
+  @apply h-9 px-3 rounded-md;
+}
+
+.btn-md {
+  @apply h-10 py-2 px-4;
+}
+
+.btn-lg {
+  @apply h-11 px-8 rounded-md;
+}
+
+.card {
+  @apply rounded-md border bg-card text-card-foreground shadow-sm;
+}
+
+.card-header {
+  @apply flex flex-col space-y-1.5 p-6;
+}
+
+.card-title {
+  @apply text-2xl font-semibold leading-none tracking-tight;
+}
+
+.card-description {
+  @apply text-sm text-muted-foreground;
+}
+
+.card-content {
+  @apply p-6 pt-0;
+}
+
+.card-footer {
+  @apply flex items-center p-6 pt-0;
+}
+
+.input {
+  @apply flex h-10 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+.label {
+  @apply text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70;
+}
+
+.select {
+  @apply flex h-10 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+.textarea {
+  @apply flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+}

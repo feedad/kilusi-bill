@@ -1,0 +1,48 @@
+sql {
+	dialect = "postgresql"
+
+	driver = "rlm_sql_${dialect}"
+
+	# PostgreSQL connection string format
+	radius_db = "host=postgres port=5432 dbname=kilusi_bill user=kilusi_user password=kilusi1234"
+
+	postgresql {
+		send_application_name = yes
+	}
+
+	acct_table1 = "radacct"
+	acct_table2 = "radacct"
+
+	postauth_table = "radpostauth"
+	authcheck_table = "radcheck"
+	authreply_table = "radreply"
+	groupcheck_table = "radgroupcheck"
+	groupreply_table = "radgroupreply"
+	usergroup_table = "radusergroup"
+
+	delete_stale_sessions = yes
+
+	sqltrace = no
+	sqltracefile = ${logdir}/sqltrace.sql
+
+	num_sql_socks = 5
+
+	connect_timeout = 3
+
+	lifetime = 0
+
+	max_queries = 0
+
+	read_clients = no
+
+	client_table = "nas"
+
+	read_groups = yes
+
+	group_attribute = "SQL-Group"
+
+	delete_stale_sessions = yes
+
+	# Use the correct path for queries configuration
+	$INCLUDE /etc/freeradius/mods-config/sql/main/${dialect}/queries.conf
+}

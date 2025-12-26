@@ -1,0 +1,110 @@
+version: '3.8'
+
+services:
+  # FreeRADIUS Server
+  freeradius:
+    image: freeradius/freeradius-server:3.2
+    container_name: kilusi-freeradius
+    restart: unless-stopped
+    volumes:
+      - ./docker/freeradius/clients.conf:/etc/freeradius/3.0/clients.conf
+      - ./docker/freeradius/mods-enabled:/etc/freeradius/3.0/mods-enabled
+      - ./docker/freeradius/sites-available:/etc/freeradius/3.0/sites-available
+      - ./docker/freeradius/users:/etc/freeradius/3.0/users
+      - ./docker/freeradius/config:/etc/freeradius/3.0/mods-config/sql/main/postgresql
+    ports:
+      - "1812:1812/udp"   # Authentication
+      - "1813:1813/udp"   # Accounting
+      - "18120:18120/tcp" # Admin
+    environment:
+      - DB_NAME=${DB_NAME:-radius}
+      - DB_HOST=${DB_HOST:-postgres}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_USER=${DB_USER:-radius}
+      - DB_PASS=${DB_PASSWORD:-radius1234}
+    networks:
+      - radius-network
+    depends_on:
+      - postgres
+    healthcheck:
+      test: ["CMD", "pgrep", "freeradius"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # PostgreSQL Database (Optional - use external database in production)
+  postgres:
+    image: postgres:15-alpine
+    container_name: kilusi-postgres-radius
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-radius}
+      POSTGRES_USER: ${DB_USER:-radius}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-radius1234}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --locale=C"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./config/radius-schema.sql:/docker-entrypoint-initdb.d/01-radius-schema.sql
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    networks:
+      - radius-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-radius} -d ${DB_NAME:-radius}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    profiles:
+      - postgres
+
+  # PgAdmin (Optional - for database management)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: kilusi-pgadmin-radius
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@kilusi.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin123}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    ports:
+      - "5051:80"
+    networks:
+      - radius-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - admin
+
+  # Redis (Optional - for caching)
+  redis:
+    image: redis:7-alpine
+    container_name: kilusi-redis-radius
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis1234}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - radius-network
+    profiles:
+      - redis
+
+volumes:
+  postgres_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  radius-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16

@@ -1,0 +1,551 @@
+/* 
+ * Unified Widget Styling for All Pages
+ * Modern minimalist card design
+ */
+
+/* Widget Cards Modern Styling - Minimalist & Clean */
+.widget-card {
+    border: none !important;
+    border-radius: 12px;
+    padding: 20px;
+    min-height: 140px;
+    height: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 12px;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    position: relative;
+    overflow: hidden;
+}
+
+.widget-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+/* Stats Card (Alternative naming) */
+.stats-card {
+    border: none !important;
+    border-radius: 12px;
+    padding: 20px;
+    min-height: 140px;
+    height: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 12px;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    position: relative;
+    overflow: hidden;
+}
+
+.stats-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+/* GenieACS Cards - Clean gradients */
+.widget-card.genieacs-total,
+.stats-card.genieacs-total {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.widget-card.genieacs-online,
+.stats-card.genieacs-online {
+    background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+    color: white;
+}
+
+.widget-card.genieacs-offline,
+.stats-card.genieacs-offline {
+    background: linear-gradient(135deg, #ee0979 0%, #ff6a00 100%);
+    color: white;
+}
+
+/* Mikrotik/PPPoE Cards */
+.widget-card.pppoe-total,
+.stats-card.pppoe-total {
+    background: linear-gradient(135deg, #4776e6 0%, #8e54e9 100%);
+    color: white;
+}
+
+.widget-card.pppoe-active,
+.stats-card.pppoe-active {
+    background: linear-gradient(135deg, #56ab2f 0%, #a8e063 100%);
+    color: white;
+}
+
+.widget-card.pppoe-offline,
+.stats-card.pppoe-offline {
+    background: linear-gradient(135deg, #fc4a1a 0%, #f7b733 100%);
+    color: white;
+}
+
+.widget-card.pppoe-server,
+.stats-card.pppoe-server {
+    background: linear-gradient(135deg, #2980b9 0%, #6dd5fa 100%);
+    color: white;
+}
+
+/* Billing Cards */
+.widget-card.billing-customers,
+.stats-card.billing-customers,
+.stats-card.customers {
+    background: linear-gradient(135deg, #2980b9 0%, #2c3e50 100%);
+    color: white;
+}
+
+.widget-card.billing-paid,
+.stats-card.billing-paid {
+    background: linear-gradient(135deg, #00b09b 0%, #96c93d 100%);
+    color: white;
+}
+
+.widget-card.billing-unpaid,
+.stats-card.billing-unpaid {
+    background: linear-gradient(135deg, #f2994a 0%, #f2c94c 100%);
+    color: white;
+}
+
+.widget-card.billing-overdue,
+.stats-card.billing-overdue {
+    background: linear-gradient(135deg, #ee0979 0%, #ff6a00 100%);
+    color: white;
+}
+
+.widget-card.billing-late,
+.stats-card.billing-late {
+    background: linear-gradient(135deg, #eb3349 0%, #f45c43 100%);
+    color: white;
+}
+
+.widget-card.billing-revenue,
+.stats-card.billing-revenue,
+.stats-card.revenue {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+/* Packages Card */
+.stats-card.packages {
+    background: linear-gradient(135deg, #56ab2f 0%, #a8e063 100%);
+    color: white;
+}
+
+/* Invoices Card */
+.stats-card.invoices {
+    background: linear-gradient(135deg, #f2994a 0%, #f2c94c 100%);
+    color: white;
+}
+
+/* Generic Color Variants */
+.widget-card.primary,
+.stats-card.primary {
+    background: linear-gradient(135deg, #4776e6 0%, #8e54e9 100%);
+    color: white;
+}
+
+.widget-card.success,
+.stats-card.success {
+    background: linear-gradient(135deg, #56ab2f 0%, #a8e063 100%);
+    color: white;
+}
+
+.widget-card.danger,
+.stats-card.danger {
+    background: linear-gradient(135deg, #ee0979 0%, #ff6a00 100%);
+    color: white;
+}
+
+.widget-card.warning,
+.stats-card.warning {
+    background: linear-gradient(135deg, #f2994a 0%, #f2c94c 100%);
+    color: white;
+}
+
+.widget-card.info,
+.stats-card.info {
+    background: linear-gradient(135deg, #2980b9 0%, #6dd5fa 100%);
+    color: white;
+}
+
+/* Widget Content Styling - Minimalist */
+.widget-icon {
+    font-size: 48px;
+    color: rgba(255, 255, 255, 0.95);
+    margin: 0;
+}
+
+.widget-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.85);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin: 0;
+    line-height: 1.4;
+}
+
+.widget-value {
+    font-size: 32px;
+    font-weight: 700;
+    color: #ffffff;
+    line-height: 1;
+    margin: 0;
+}
+
+.widget-sub {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.7);
+    font-weight: 400;
+}
+
+/* Stats card specific content - Clean typography */
+.stats-card .stat-value,
+.stats-card h3 {
+    font-size: 32px;
+    font-weight: 700;
+    color: #ffffff;
+    line-height: 1;
+    margin: 0;
+}
+
+.stats-card .stat-label,
+.stats-card small,
+.stats-card p {
+    font-size: 13px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.85);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin: 0;
+    line-height: 1.4;
+}
+
+.stats-card .text-muted {
+    color: rgba(255, 255, 255, 0.7) !important;
+    font-size: 11px;
+}
+
+.stats-card i,
+.stats-card .bi {
+    color: rgba(255, 255, 255, 0.9);
+}
+
+/* Modern stats card layout - Minimalist */
+.stats-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 12px;
+    padding: 20px;
+}
+
+.stats-icon {
+    font-size: 48px;
+    color: rgba(255, 255, 255, 0.95);
+    flex-shrink: 0;
+}
+
+.stats-icon i {
+    font-size: 48px;
+}
+
+.stats-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+}
+
+.stats-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.85);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    line-height: 1.4;
+}
+
+.stats-value {
+    font-size: 32px;
+    font-weight: 700;
+    color: #ffffff;
+    line-height: 1;
+}
+
+/* Uniform spacing for rows */
+.widget-row {
+    margin-bottom: 20px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 767.98px) {
+    .widget-card,
+    .stats-card {
+        min-height: 120px;
+        height: auto;
+        padding: 16px;
+        margin-bottom: 12px;
+    }
+
+    .widget-value,
+    .stats-card .stat-value,
+    .stats-card h3,
+    .stats-value {
+        font-size: 24px;
+    }
+
+    .widget-icon,
+    .stats-icon,
+    .stats-icon i {
+        font-size: 40px;
+    }
+
+    .stats-label {
+        font-size: 12px;
+    }
+}
+
+/* Additional specific color combinations for various modules */
+
+/* Cable Network / ODP */
+.stats-card.cable-total {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.stats-card.cable-active {
+    background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+}
+
+.stats-card.cable-available {
+    background: linear-gradient(135deg, #56ab2f 0%, #a8e063 100%);
+}
+
+.stats-card.cable-used {
+    background: linear-gradient(135deg, #f2994a 0%, #f2c94c 100%);
+}
+
+/* Installation Jobs */
+.stats-card.job-pending {
+    background: linear-gradient(135deg, #f2994a 0%, #f2c94c 100%);
+}
+
+.stats-card.job-progress {
+    background: linear-gradient(135deg, #2980b9 0%, #6dd5fa 100%);
+}
+
+.stats-card.job-completed {
+    background: linear-gradient(135deg, #56ab2f 0%, #a8e063 100%);
+}
+
+.stats-card.job-cancelled {
+    background: linear-gradient(135deg, #ee0979 0%, #ff6a00 100%);
+}
+
+/* Analytics */
+.stats-card.analytics-users {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.stats-card.analytics-revenue {
+    background: linear-gradient(135deg, #00b09b 0%, #96c93d 100%);
+}
+
+.stats-card.analytics-growth {
+    background: linear-gradient(135deg, #2980b9 0%, #6dd5fa 100%);
+}
+
+/* Backup */
+.stats-card.backup-total {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.stats-card.backup-auto,
+.stats-card.backup-running {
+    background: linear-gradient(135deg, #56ab2f 0%, #a8e063 100%);
+}
+
+.stats-card.backup-max,
+.stats-card.backup-storage {
+    background: linear-gradient(135deg, #2980b9 0%, #6dd5fa 100%);
+}
+
+.stats-card.backup-schedule,
+.stats-card.backup-next {
+    background: linear-gradient(135deg, #f2994a 0%, #f2c94c 100%);
+}
+
+/* Profile Management (PPPoE/Hotspot) */
+.stats-card.profile-total {
+    background: linear-gradient(135deg, #4776e6 0%, #8e54e9 100%);
+}
+
+.stats-card.profile-default,
+.stats-card.profile-active {
+    background: linear-gradient(135deg, #56ab2f 0%, #a8e063 100%);
+}
+
+.stats-card.profile-ratelimit {
+    background: linear-gradient(135deg, #2980b9 0%, #6dd5fa 100%);
+}
+
+.stats-card.profile-comment,
+.stats-card.profile-shared {
+    background: linear-gradient(135deg, #f2994a 0%, #f2c94c 100%);
+}
+
+/* SNMP Monitoring */
+.stats-card.snmp-devices {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.stats-card.snmp-online {
+    background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+}
+
+.stats-card.snmp-offline {
+    background: linear-gradient(135deg, #ee0979 0%, #ff6a00 100%);
+}
+
+.stats-card.snmp-warning {
+    background: linear-gradient(135deg, #f2994a 0%, #f2c94c 100%);
+}
+
+/* RADIUS */
+.stats-card.radius-total {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.stats-card.radius-users {
+    background: linear-gradient(135deg, #4776e6 0%, #8e54e9 100%);
+}
+
+.stats-card.radius-active,
+.widget-card.radius-active {
+    background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+    color: white;
+}
+
+.stats-card.radius-online,
+.widget-card.radius-online {
+    background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+    color: white;
+}
+
+.stats-card.radius-inactive {
+    background: linear-gradient(135deg, #fc4a1a 0%, #f7b733 100%);
+}
+
+.stats-card.radius-sessions {
+    background: linear-gradient(135deg, #2980b9 0%, #6dd5fa 100%);
+}
+
+.stats-card.radius-traffic {
+    background: linear-gradient(135deg, #f2994a 0%, #f2c94c 100%);
+}
+
+/* Hotspot */
+.stats-card.hotspot-total {
+    background: linear-gradient(135deg, #4776e6 0%, #8e54e9 100%);
+}
+
+.stats-card.hotspot-active {
+    background: linear-gradient(135deg, #56ab2f 0%, #a8e063 100%);
+}
+
+.stats-card.hotspot-offline {
+    background: linear-gradient(135deg, #fc4a1a 0%, #f7b733 100%);
+}
+
+.stats-card.hotspot-profiles {
+    background: linear-gradient(135deg, #2980b9 0%, #6dd5fa 100%);
+}
+
+/* ======================================
+   TRAFFIC MONITORING CARDS
+   ====================================== */
+.traffic-card {
+    border: none !important;
+    border-radius: 12px;
+    padding: 20px;
+    min-height: 120px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 10px;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    color: white !important;
+}
+
+.traffic-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+.traffic-card-rx {
+    background: linear-gradient(135deg, #36a2eb 0%, #1e88e5 100%);
+}
+
+.traffic-card-tx {
+    background: linear-gradient(135deg, #ff6384 0%, #e91e63 100%);
+}
+
+.traffic-card-total {
+    background: linear-gradient(135deg, #4bc0c0 0%, #26a69a 100%);
+}
+
+.traffic-card-status {
+    background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+}
+
+.traffic-card h6 {
+    font-size: 13px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin: 0;
+    opacity: 0.85;
+}
+
+.traffic-card h3 {
+    font-size: 28px;
+    font-weight: 700;
+    margin: 0;
+    line-height: 1;
+}
+
+.traffic-card small {
+    font-size: 11px;
+    opacity: 0.7;
+}
+
+@media (max-width: 768px) {
+    .traffic-card {
+        padding: 16px;
+        min-height: 100px;
+        gap: 8px;
+    }
+    
+    .traffic-card h3 {
+        font-size: 22px;
+    }
+    
+    .traffic-card h6 {
+        font-size: 12px;
+    }
+}

@@ -1,0 +1,367 @@
+# ===========================================
+# FreeRADIUS Default Site Configuration
+# ===========================================
+# This file processes authentication and accounting requests.
+# It's the main virtual server configuration for FreeRADIUS.
+#
+# This configuration includes:
+# - Authentication processing
+# - Accounting logging
+# - Session management
+# - Post-authentication actions
+# ===========================================
+
+# Read the main attribute dictionaries
+$INCLUDE ${modconfdir}/attr_filter
+
+# ===========================================
+# Authenticate Section
+# ===========================================
+# This section processes authentication requests
+
+authenticate {
+    #  PAP authentication module
+    pap
+
+    #  CHAP authentication module
+    chap
+
+    #  MS-CHAP authentication module
+    mschap
+
+    #  EAP authentication module
+    eap
+
+    #  If you have a PostgreSQL database as a backend,
+    #  uncomment the following line
+    sql
+
+    #  Reject users that are not in the SQL database
+    #  Uncomment if you want to reject unknown users
+    #  reject
+
+    #  Otherwise, if the user is not found, fall back to files
+    files
+
+    #  If the above fails, try to authenticate with PAP again
+    #  This is useful for testing
+    #  pap
+}
+
+# ===========================================
+# Authorize Section
+# ===========================================
+# This section processes authorization requests
+
+authorize {
+    #  Preprocess the request
+    preprocess
+
+    #  Update the request with some attributes
+    update request {
+        #  Add the SQL-User-Name attribute
+        #  This is used by the sql module
+        SQL-User-Name := "%{User-Name}"
+    }
+
+    #  Look for users in the SQL database
+    #  This will check the radcheck table
+    sql
+
+    #  If you want to use the files module (users file)
+    #  uncomment the following line
+    #  files
+
+    #  Look for groups in the SQL database
+    #  This will check the radgroupcheck and radgroupreply tables
+    #  and the radusergroup table
+    #  The sql module handles this automatically if sql is enabled in authenticate
+
+    #  Expire users if their time has expired
+    expiration
+
+    #  Log users out when their time is up
+    logintime
+
+    #  If no other module has decided to accept or reject the user,
+    #  then the user is rejected
+    #  This should be the LAST module in the authorize section
+    #  reject
+
+    #  For debugging purposes, you can uncomment the following
+    #  This will print the request and reply attributes
+    #  ok
+}
+
+# ===========================================
+# Pre-Accounting Section
+# ===========================================
+# This section processes accounting requests before logging
+
+preacct {
+    #  Clean up the request attributes
+    preprocess
+
+    #  Ensure we have a sane accounting request
+    #  Create a unique session identifier
+    acct_unique
+
+    #  Look for IP addresses in NAS-IP-Address and Framed-IP-Address
+    #  If they're not found, look in the Client-IP-Address
+    files
+
+    #  If we still don't have an IP address, look in the Calling-Station-Id
+    expr
+
+    #  Stop processing at this point if we don't have a valid request
+    #  This is useful for debugging
+    #  if (ok) {
+    #      ok
+    #  } else {
+    #      reject
+    #  }
+}
+
+# ===========================================
+# Accounting Section
+# ===========================================
+# This section processes accounting requests
+
+accounting {
+    #  Log accounting details to a file
+    #  This creates detailed logs in /var/log/radius/radacct/
+    detail
+
+    #  Create a unique session ID for each accounting record
+    #  This is done in preacct, but we check it here too
+    acct_unique
+
+    #  Write accounting data to the SQL database
+    #  This updates the radacct table
+    sql
+
+    #  Filter the attributes to make sure we only send back
+    #  attributes that we understand
+    attr_filter.accounting_response
+
+    #  Log accounting data to SQL in a different format
+    #  Uncomment if you need additional SQL logging
+    #  sql_log
+
+    #  Use radutmp to track simultaneous connections
+    #  This is used for checking Simultaneous-Use
+    #  Uncomment if you need this feature
+    #  radutmp
+
+    #  SQL session module to track active sessions
+    #  This creates a SQL table of users who are currently logged in
+    #  Uncomment if you need active session tracking
+    #  sqlsession
+
+    #  Lastlog module to track last login time
+    #  This creates a SQL table of the last login time for each user
+    #  Uncomment if you need last login tracking
+    #  lastlog
+}
+
+# ===========================================
+# Session Section
+# ===========================================
+# This section processes simultaneous-use checks
+
+session {
+    #  Use radutmp to track simultaneous connections
+    radutmp
+
+    #  Include the SQL session module
+    #  This checks the radacct table for active sessions
+    sql
+
+    #  Alternative SQL session module
+    #  This provides more detailed session tracking
+    #  Uncomment if you need detailed session tracking
+    #  sqlsession
+}
+
+# ===========================================
+# Post-Authentication Section
+# ===========================================
+# This section processes successful authentications
+
+post-auth {
+    #  Get the client IP address and add it to the reply
+    update reply {
+        &Reply-Message := "Authentication successful"
+    }
+
+    #  Log successful authentications to the SQL database
+    #  This updates the radpostauth table
+    sql
+
+    #  Log successful authentications to a file
+    #  This creates logs in /var/log/radius/radutmp/
+    #  exec
+
+    #  No more processing
+    #  The user is now authenticated
+    #  This prevents the authenticate section from being called twice
+
+    #  Log post-auth information
+    #  Uncomment for debugging
+    #  if (ok) {
+    #      ok
+    #  } else {
+    #      reject
+    #  }
+}
+
+# ===========================================
+# Post-Proxy Section
+# ===========================================
+# This section processes replies from proxy servers
+
+post-proxy {
+    #  Modify the response after it comes back from the home server
+    #  Uncomment if you need to modify proxied responses
+    #  attr_filter.post-proxy
+
+    #  Use the rewrite module to modify the response
+    #  Uncomment if you need to rewrite proxied responses
+    #  rewrite
+
+    #  Handle failed proxy requests
+    #  Post-Proxy-Type Fail {
+    #      #  If we fail, reject the request
+    #      reject
+    #  }
+}
+
+# ===========================================
+# Pre-Proxy Section
+# ===========================================
+# This section processes requests before they are sent to proxy servers
+
+pre-proxy {
+    #  Modify the request before it is sent to the home server
+    #  Uncomment if you need to modify proxied requests
+    #  attr_filter.pre-proxy
+
+    #  Use the rewrite module to modify the request
+    #  Uncomment if you need to rewrite proxied requests
+    #  rewrite
+}
+
+# ===========================================
+# Accounting-On/Off Section
+# ===========================================
+# This section handles Accounting-On and Accounting-Off packets
+
+accounting-on {
+    #  Update the database when a NAS comes online
+    #  This marks all sessions from that NAS as terminated
+    sql
+}
+
+accounting-off {
+    #  Update the database when a NAS goes offline
+    #  This marks all sessions from that NAS as terminated
+    sql
+}
+
+# ===========================================
+# Status Server Section
+# ===========================================
+# This handles Status-Server requests
+
+status-server {
+    #  Respond to Status-Server packets
+    #  This is used for monitoring the RADIUS server
+    #  Uncomment if you want to enable status checking
+    #  ok
+}
+
+# ===========================================
+# Additional Configurations
+# ===========================================
+
+#  If you have multiple virtual servers, you can include them here
+#  $INCLUDE sites-available/inner-tunnel
+#  $INCLUDE sites-available/tunnel
+
+#  You can also define additional sections here
+#  For example, for CoA (Change of Authorization) or Disconnect messages
+
+# CoA (Change of Authorization) section
+# Uncomment if you need to handle CoA requests
+# coa {
+#     #  Process CoA requests
+#     update request {
+#         #  Add any attributes you need
+#     }
+#
+#     #  Update the database if needed
+#     sql
+#
+#     #  Send the CoA response
+#     ok
+# }
+
+# Disconnect section
+# Uncomment if you need to handle Disconnect requests
+# disconnect {
+#     #  Process Disconnect requests
+#     update request {
+#         #  Add any attributes you need
+#     }
+#
+#     #  Update the database
+#     sql
+#
+#     #  Send the Disconnect response
+#     ok
+# }
+
+# ===========================================
+# Debugging Options
+# ===========================================
+
+#  For debugging purposes, you can uncomment the following
+#  This will print detailed information about each request
+
+#  if (User-Name) {
+#      update request {
+#          Debug-Message := "Processing user %{User-Name}"
+#      }
+#  }
+
+#  You can also add debugging to specific sections
+#  For example, to debug SQL queries:
+#  sql {
+#      if ("%{sql:SELECT COUNT(*) FROM radcheck WHERE username='%{User-Name}'}" > 0) {
+#          ok
+#      }
+#  }
+
+# ===========================================
+# Performance Considerations
+# ===========================================
+
+# 1. Order modules based on usage frequency
+#    - Put most commonly used modules first
+#    - SQL queries are expensive, so use them judiciously
+
+# 2. Use caching where possible
+#    - The 'cache' module can cache frequently accessed data
+#    - Consider caching group memberships
+
+# 3. Minimize database queries
+#    - Use a single SQL module call instead of multiple
+#    - Combine related checks in single queries
+
+# 4. Use appropriate indexing in your database
+#    - Index the username column in radcheck and radreply
+#    - Index the session ID in radacct
+
+# 5. Consider connection pooling
+#    - Configure sql module with appropriate num_sql_socks
+#    - Default is 5, increase for high-load systems
