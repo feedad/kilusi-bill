@@ -1242,7 +1242,7 @@ app.use((err, req, res, next) => {
         next();
     }
 });
-});
+
 
 // Serve legacy dashboard (Vite Build)
 const dashboardPath = path.join(__dirname, 'public', 'dashboard');
