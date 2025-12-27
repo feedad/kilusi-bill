@@ -263,7 +263,7 @@ install_dependencies() {
         if [[ "$DEPLOYMENT" == "native" ]] || [[ "$DEPLOYMENT" == "docker-db-radius" ]] || [[ "$DEPLOYMENT" == "docker-backend" ]]; then
             if ! command -v node &> /dev/null; then
                 print_info "Installing Node.js..."
-                curl -fsSL https://deb.nodesource.com/setup_18.x | $SUDO -E bash -
+                curl -fsSL https://deb.nodesource.com/setup_18.x | $SUDO bash -
                 $SUDO apt-get install -y nodejs
             fi
         fi
