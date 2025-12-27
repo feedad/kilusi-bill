@@ -241,11 +241,21 @@ const defaultOrigins = [
     'http://billing.kilusi.id',   // Admin frontend domain (HTTP)
     'http://portal.kilusi.id'     // Customer frontend domain (HTTP)
 ];
-const allowedOrigins = process.env.ALLOWED_ORIGINS
-    ? process.env.ALLOWED_ORIGINS.split(',')
-    : defaultOrigins;
+const allowedOriginsEnv = process.env.ALLOWED_ORIGINS;
+let corsOrigin;
+
+if (allowedOriginsEnv === '*') {
+    // If set to *, use reflection (origin: true) to allow all origins while supporting credentials
+    // Standard wildcard '*' does not support credentials: true
+    corsOrigin = true;
+} else if (allowedOriginsEnv) {
+    corsOrigin = allowedOriginsEnv.split(',');
+} else {
+    corsOrigin = defaultOrigins;
+}
+
 app.use(cors({
-    origin: allowedOrigins,
+    origin: corsOrigin,
     credentials: true, // Enable credentials for cookie/session support
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'x-customer-phone', 'X-Customer-Phone']
@@ -1096,7 +1106,7 @@ function startServer(portToUse) {
         try {
             const { initializeLogWebSocket, handleUpgrade: handleLogUpgrade } = require('./config/websocket-logs');
             initializeLogWebSocket(server);
-            
+
             // Manual upgrade handling to prevent conflict with Socket.IO
             server.on('upgrade', (request, socket, head) => {
                 if (request.url === '/ws/logs') {
