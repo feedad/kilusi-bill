@@ -645,8 +645,7 @@ if [[ "$DEPLOYMENT" == "docker"* ]]; then
             # All services
             DOCKER_SERVICES=""
             ;;
-            DOCKER_SERVICES=""
-            ;;
+
     esac
 
     # Configure Connectivity (Interactive)
