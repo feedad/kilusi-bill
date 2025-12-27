@@ -213,37 +213,28 @@ app.use(helmet({
 }));
 
 // CORS (allow configured origins or localhost default)
+// CORS (allow configured origins or localhost default)
 const defaultOrigins = [
-    'http://localhost',             // Docker frontend on port 80
-    'http://localhost:80',          // Explicit port 80
-    `http://localhost:${process.env.PORT || 3001}`,
-    'http://localhost:3000',  // Next.js default port
-    'http://localhost:3001',  // Next.js dev port
-    'http://localhost:3002',  // Next.js alternative dev port
-    'http://localhost:8080',  // Frontend PM2 production port
-    'http://127.0.0.1:3000',  // Localhost alternatives
+    'http://localhost',
+    'http://localhost:80',
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:8080',
+    'http://127.0.0.1',
+    'http://127.0.0.1:3000',
     'http://127.0.0.1:3001',
-    'http://127.0.0.1:3002',
-    'http://127.0.0.1:8080',  // Frontend PM2 production port
-    'http://172.22.10.29:3000',  // Network IP for Next.js frontend
-    'http://172.22.10.29:3001',  // Network IP for Next.js dev frontend
-    'http://172.22.10.29:3002',  // Network IP for Next.js dev frontend
-    'http://172.22.10.29:8080',  // Network IP for frontend PM2 production
-    'http://0.0.0.0:3000',        // Docker access
-    'http://0.0.0.0:3001',        // Docker access
-    'http://0.0.0.0:3002',        // Docker access
-    'http://0.0.0.0:8080',        // Docker access for frontend PM2
-    // Production domains
-    'https://api.kilusi.id',      // Backend API domain
-    'https://billing.kilusi.id',  // Admin frontend domain
-    'https://portal.kilusi.id',   // Customer frontend domain
-    'http://api.kilusi.id',       // Backend API domain (HTTP)
-    'http://billing.kilusi.id',   // Admin frontend domain (HTTP)
-    'http://portal.kilusi.id'     // Customer frontend domain (HTTP)
+    'http://127.0.0.1:8080'
 ];
-const allowedOrigins = process.env.ALLOWED_ORIGINS
-    ? process.env.ALLOWED_ORIGINS.split(',')
-    : defaultOrigins;
+
+// Combine default local origins with environment-specified origins
+let allowedOrigins = [...defaultOrigins];
+if (process.env.ALLOWED_ORIGINS) {
+    const envOrigins = process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim());
+    allowedOrigins = [...allowedOrigins, ...envOrigins];
+}
+
+// Ensure uniqueness
+allowedOrigins = [...new Set(allowedOrigins)];
 app.use(cors({
     origin: allowedOrigins,
     credentials: true, // Enable credentials for cookie/session support
@@ -1096,7 +1087,7 @@ function startServer(portToUse) {
         try {
             const { initializeLogWebSocket, handleUpgrade: handleLogUpgrade } = require('./config/websocket-logs');
             initializeLogWebSocket(server);
-            
+
             // Manual upgrade handling to prevent conflict with Socket.IO
             server.on('upgrade', (request, socket, head) => {
                 if (request.url === '/ws/logs') {
