@@ -71,7 +71,6 @@ if [ "$(id -u)" -eq 0 ]; then
     else
         SUDO="sudo"
     fi
-fi
 
 # =====================================================================
 # Connectivity Configuration
