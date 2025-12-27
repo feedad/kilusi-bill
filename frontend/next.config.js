@@ -28,8 +28,7 @@ const nextConfig = {
     removeConsole: process.env.NODE_ENV === 'production'
       ? { exclude: ['error'] }  // Keep console.error only
       : false  // Keep all console in development
-  }
-},
+  },
   async rewrites() {
     return [
       {
