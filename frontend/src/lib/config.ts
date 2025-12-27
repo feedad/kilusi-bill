@@ -40,8 +40,8 @@ function getApiBaseUrl(): string {
   }
 
   // 3. Production fallback (change to your actual production domain)
-  console.log('🔧 Using production fallback')
-  return 'https://your-production-domain.com'
+  console.log('🔧 Using production fallback: relative path')
+  return ''
 }
 
 /**
@@ -52,8 +52,9 @@ export async function validateApiConnection(): Promise<boolean> {
     const response = await fetch(`${CONFIG.API_BASE_URL}/api/v1/health`, {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' },
+      // @ts-ignore - timeout is supported in some environments or added by polyfills
       timeout: 5000
-    })
+    } as RequestInit)
     return response.ok
   } catch (error) {
     console.error('API Connection validation failed:', error)
