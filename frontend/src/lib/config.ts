@@ -28,9 +28,11 @@ export const CONFIG = {
  */
 function getApiBaseUrl(): string {
   // 1. Check explicit environment variable FIRST (highest priority)
-  if (process.env.NEXT_PUBLIC_API_URL) {
-    console.log('🔧 Using NEXT_PUBLIC_API_URL:', process.env.NEXT_PUBLIC_API_URL)
-    return process.env.NEXT_PUBLIC_API_URL
+  // Check against undefined to allow empty string (for relative path proxying)
+  if (typeof process.env.NEXT_PUBLIC_API_URL !== 'undefined') {
+    const url = process.env.NEXT_PUBLIC_API_URL
+    console.log('🔧 Using NEXT_PUBLIC_API_URL:', url === '' ? '(relative)' : url)
+    return url
   }
 
   // 2. Server-side development fallback
@@ -39,9 +41,9 @@ function getApiBaseUrl(): string {
     return 'http://localhost:3001'
   }
 
-  // 3. Production fallback (change to your actual production domain)
-  console.log('🔧 Using production fallback')
-  return 'https://your-production-domain.com'
+  // 3. Production fallback - Default to relative path to use Proxy
+  console.log('🔧 Using production fallback: relative path')
+  return ''
 }
 
 /**
