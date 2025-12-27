@@ -232,15 +232,44 @@ if (process.env.ALLOWED_ORIGINS) {
     const envOrigins = process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim());
     allowedOrigins = [...allowedOrigins, ...envOrigins];
 }
+// Remove trailing slashes for consistency
+allowedOrigins = allowedOrigins.map(o => o.replace(/\/$/, ""));
 
 // Ensure uniqueness
 allowedOrigins = [...new Set(allowedOrigins)];
-app.use(cors({
-    origin: allowedOrigins,
+
+const corsOptions = {
+    origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+
+        // Check against static whitelist
+        if (allowedOrigins.indexOf(origin) !== -1) {
+            return callback(null, true);
+        }
+
+        // Check against Regex for Local Network IPs (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
+        const isLocalNetwork = /^(http|https):\/\/(192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})(:\d+)?$/.test(origin);
+        if (isLocalNetwork) {
+            return callback(null, true);
+        }
+
+        // Allow localhost regex (dynamic ports)
+        const isLocalhost = /^(http|https):\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+        if (isLocalhost) {
+            return callback(null, true);
+        }
+
+        // Default: Block
+        const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+        return callback(new Error(msg), false);
+    },
     credentials: true, // Enable credentials for cookie/session support
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'x-customer-phone', 'X-Customer-Phone']
-}));
+};
+
+app.use(cors(corsOptions));
 
 // Rate limiting
 const apiLimiter = rateLimit({
