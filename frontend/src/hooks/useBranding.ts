@@ -25,23 +25,23 @@ async function fetchBrandingFromServer(): Promise<BrandingSettings> {
   if (cachedBranding) {
     return cachedBranding
   }
-  
+
   // Return existing promise if fetch is in progress
   if (fetchPromise) {
     return fetchPromise
   }
-  
+
   // Start new fetch
   fetchPromise = (async () => {
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
       const response = await fetch(`${apiUrl}/api/v1/branding-public`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
         },
       })
-      
+
       if (response.ok) {
         const data = await response.json()
         if (data.success && data.data?.branding) {
@@ -53,11 +53,11 @@ async function fetchBrandingFromServer(): Promise<BrandingSettings> {
       // Silently fail - use defaults
       console.log('Branding: using defaults')
     }
-    
+
     cachedBranding = defaultBranding
     return defaultBranding
   })()
-  
+
   return fetchPromise
 }
 
@@ -70,7 +70,7 @@ export function useBranding() {
     // Only fetch once per component mount
     if (hasFetched.current) return
     hasFetched.current = true
-    
+
     // If already cached, use it
     if (cachedBranding) {
       setBranding(cachedBranding)

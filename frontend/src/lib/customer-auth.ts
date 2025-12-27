@@ -34,7 +34,7 @@ export interface TokenValidation {
 class CustomerAuth {
   private static readonly TOKEN_KEY = 'customer_token'
   private static readonly CUSTOMER_KEY = 'customer_data'
-  private static readonly API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
+  private static readonly API_BASE = process.env.NEXT_PUBLIC_API_URL || ''
 
   /**
    * Validate token and authenticate customer
@@ -112,7 +112,7 @@ class CustomerAuth {
         console.error('💥 Auth Library: Login token validation error:', fetchError)
 
         // Check if it's a timeout error
-        if (fetchError.name === 'AbortError') {
+        if ((fetchError as Error).name === 'AbortError') {
           console.error('💥 Auth Library: Token validation timed out after 8 seconds')
           return {
             valid: false,
@@ -514,7 +514,7 @@ class CustomerAuth {
       clearTimeout(timeoutId)
 
       // Check if it's a timeout error
-      if (error.name === 'AbortError') {
+      if ((error as Error).name === 'AbortError') {
         console.error('💥 API request timed out after 10 seconds:', endpoint)
         throw new Error('API request timeout - server tidak merespon')
       }

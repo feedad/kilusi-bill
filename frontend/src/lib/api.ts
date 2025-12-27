@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://172.22.10.31:3000'
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || ''
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
@@ -21,10 +21,10 @@ api.interceptors.request.use(
 
       // For customer portal routes, prioritize customer_token over auth-storage
       const isCustomerRoute = config.url?.includes('/api/v1/customer') ||
-                              config.url?.includes('/api/v1/support/') ||
-                              config.url?.includes('/api/v1/billing/customer/') ||
-                              config.url?.includes('/api/v1/billing/my-') ||
-                              config.url?.includes('/api/v1/customer-billing/')
+        config.url?.includes('/api/v1/support/') ||
+        config.url?.includes('/api/v1/billing/customer/') ||
+        config.url?.includes('/api/v1/billing/my-') ||
+        config.url?.includes('/api/v1/customer-billing/')
 
       if (isCustomerRoute) {
         // Customer portal: prioritize customer_token
