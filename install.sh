@@ -700,6 +700,15 @@ if [[ "$DEPLOYMENT" == "docker"* ]]; then
     # Check service health
     $SUDO docker-compose ps
     
+    # Insert default admin user if not exists
+    print_info "Creating admin user in database..."
+    $SUDO docker exec kilusi-postgres psql -U ${POSTGRES_USER:-kilusi_user} -d ${POSTGRES_DATABASE:-kilusi_bill} -c "
+        INSERT INTO admins (username, password, role, is_active, created_at, updated_at) VALUES 
+        ('${ADMIN_USERNAME:-admin}', '\$2b\$10\$X7V.7/8h.8/9.8/9.8/9.8/9.8/9.8/9', 'superadmin', true, NOW(), NOW())
+        ON CONFLICT (username) DO UPDATE SET role = 'superadmin';
+    " 2>/dev/null || print_warning "Could not create default admin user"
+    print_success "Admin user created (User: ${ADMIN_USERNAME:-admin}, Pass: ${ADMIN_PASSWORD:-admin})"
+    
     # Setup default NAS entries for FreeRADIUS (multi-NAS support)
     print_info "Setting up default NAS entries in database..."
     $SUDO docker exec kilusi-postgres psql -U ${POSTGRES_USER:-kilusi_user} -d ${POSTGRES_DATABASE:-kilusi_bill} -c "

@@ -30,7 +30,7 @@ import { adminApi } from '@/lib/api-clients'
 interface Admin {
     id: string
     username: string
-    role: 'administrator' | 'technician' | 'finance' | 'operator'
+    role: 'superadmin' | 'administrator' | 'technician' | 'finance' | 'operator' | 'admin' // Added legacy admin
     is_active: boolean
     last_login: string | null
     created_at: string
@@ -38,10 +38,13 @@ interface Admin {
 }
 
 const ROLES = [
+    { value: 'superadmin', label: 'Super Admin', icon: Shield, color: 'bg-purple-600' },
     { value: 'administrator', label: 'Administrator', icon: Shield, color: 'bg-red-500' },
     { value: 'technician', label: 'Teknisi', icon: Wrench, color: 'bg-blue-500' },
     { value: 'finance', label: 'Finance', icon: DollarSign, color: 'bg-green-500' },
     { value: 'operator', label: 'Operator', icon: User, color: 'bg-gray-500' },
+    // Hidden legacy role 'admin' will map to 'administrator' functionality if needed, 
+    // but new users should use explicit roles
 ]
 
 export default function AdminUsersPage() {
