@@ -741,9 +741,9 @@ if [[ "$DEPLOYMENT" == "docker"* ]]; then
     print_info "Creating admin user in database..."
     sleep 5 # Give a little extra time for schema initialization if it just started
     $SUDO docker exec kilusi-postgres psql -U ${POSTGRES_USER:-kilusi_user} -d ${POSTGRES_DATABASE:-kilusi_bill} -c "
-        INSERT INTO admins (username, password, role, is_active, created_at, updated_at) VALUES 
-        ('${ADMIN_USERNAME:-admin}', '\$2b\$10\$X7V.7/8h.8/9.8/9.8/9.8/9.8/9.8/9', 'superadmin', true, NOW(), NOW())
-        ON CONFLICT (username) DO UPDATE SET role = 'superadmin';
+        INSERT INTO users (username, password, role, email, is_active, created_at, updated_at) VALUES 
+        ('${ADMIN_USERNAME:-admin}', '\$2b\$10\$X7V.7/8h.8/9.8/9.8/9.8/9.8/9.8/9', 'superadmin', 'admin@kilusi.id', true, NOW(), NOW())
+        ON CONFLICT (username) DO UPDATE SET role = 'superadmin', password = CASE WHEN '${ADMIN_PASSWORD:-admin}' != 'admin' THEN '\$2b\$10\$X7V.7/8h.8/9.8/9.8/9.8/9.8/9.8/9' ELSE users.password END;
     " || print_warning "Could not create default admin user. Check logs above."
     print_success "Admin user created (User: ${ADMIN_USERNAME:-admin}, Pass: ${ADMIN_PASSWORD:-admin})"
     
