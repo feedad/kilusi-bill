@@ -34,7 +34,7 @@ export interface TokenValidation {
 class CustomerAuth {
   private static readonly TOKEN_KEY = 'customer_token'
   private static readonly CUSTOMER_KEY = 'customer_data'
-  private static readonly API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
+  private static readonly API_BASE = process.env.NEXT_PUBLIC_API_URL || ''
 
   /**
    * Validate token and authenticate customer

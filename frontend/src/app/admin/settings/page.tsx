@@ -292,11 +292,11 @@ export default function SettingsPage() {
           try {
             const formData = new FormData()
             formData.append('file', file)
-            
+
             const response = await adminApi.post(`/api/v1/branding/upload/${type}`, formData, {
               headers: { 'Content-Type': 'multipart/form-data' }
             })
-            
+
             if (response.data.success) {
               const url = response.data.data.url
               setSettings({
@@ -393,7 +393,7 @@ export default function SettingsPage() {
                       <Upload className="h-4 w-4" />
                       Upload Logo
                     </label>
-                    
+
                     <div className="flex items-center gap-4">
                       <label className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg cursor-pointer hover:bg-primary/90 transition-colors">
                         <Upload className="h-4 w-4" />
@@ -412,14 +412,14 @@ export default function SettingsPage() {
                         PNG, JPEG, SVG (Max 2MB)
                       </span>
                     </div>
-                    
+
                     {settings.branding.logoUrl && (
                       <div className="p-4 bg-muted/30 rounded-lg">
                         <p className="text-xs text-muted-foreground mb-2">Logo saat ini:</p>
                         <div className="flex items-center gap-4">
-                          <img 
-                            src={settings.branding.logoUrl.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${settings.branding.logoUrl}` : settings.branding.logoUrl} 
-                            alt="Logo Preview" 
+                          <img
+                            src={settings.branding.logoUrl.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL || ''}${settings.branding.logoUrl}` : settings.branding.logoUrl}
+                            alt="Logo Preview"
                             className="h-10 object-contain bg-white p-1 rounded"
                             onError={(e) => {
                               (e.target as HTMLImageElement).src = '/placeholder-logo.png'
@@ -429,7 +429,7 @@ export default function SettingsPage() {
                         </div>
                       </div>
                     )}
-                    
+
                     <p className="text-xs text-muted-foreground">
                       Rekomendasi: format PNG dengan tinggi 40px dan background transparan
                     </p>
@@ -442,7 +442,7 @@ export default function SettingsPage() {
                     <Image className="h-4 w-4" />
                     Favicon
                   </label>
-                  
+
                   <div className="flex items-center gap-4">
                     <label className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg cursor-pointer hover:bg-primary/90 transition-colors">
                       <Upload className="h-4 w-4" />
@@ -461,13 +461,13 @@ export default function SettingsPage() {
                       ICO, PNG, SVG (Max 2MB)
                     </span>
                   </div>
-                  
+
                   {settings.branding.faviconUrl && (
                     <div className="flex items-center gap-3 p-3 bg-muted/30 rounded-lg">
                       <span className="text-xs text-muted-foreground">Favicon saat ini:</span>
-                      <img 
-                        src={settings.branding.faviconUrl.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${settings.branding.faviconUrl}` : settings.branding.faviconUrl} 
-                        alt="Favicon Preview" 
+                      <img
+                        src={settings.branding.faviconUrl.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL || ''}${settings.branding.faviconUrl}` : settings.branding.faviconUrl}
+                        alt="Favicon Preview"
                         className="h-6 w-6 object-contain"
                         onError={(e) => {
                           (e.target as HTMLImageElement).style.display = 'none'
@@ -476,7 +476,7 @@ export default function SettingsPage() {
                       <span className="text-xs text-muted-foreground">{settings.branding.faviconUrl}</span>
                     </div>
                   )}
-                  
+
                   <p className="text-xs text-muted-foreground">
                     Rekomendasi: format ICO atau PNG 32x32 atau 64x64 pixels
                   </p>
