@@ -1,0 +1,135 @@
+# ===========================================
+# FreeRADIUS Default Site Configuration
+# For Kilusi Bill Multi-NAS with SQL Backend
+# ===========================================
+
+server default {
+    listen {
+        type = auth
+        ipaddr = *
+        port = 0
+        limit {
+            max_connections = 16
+            lifetime = 0
+            idle_timeout = 30
+        }
+    }
+
+    listen {
+        type = acct
+        ipaddr = *
+        port = 0
+        limit {
+            max_connections = 16
+            lifetime = 0
+            idle_timeout = 30
+        }
+    }
+
+    # IPv6 listeners
+    listen {
+        type = auth
+        ipv6addr = ::
+        port = 0
+        limit {
+            max_connections = 16
+            lifetime = 0
+            idle_timeout = 30
+        }
+    }
+
+    listen {
+        type = acct
+        ipv6addr = ::
+        port = 0
+        limit {
+            max_connections = 16
+            lifetime = 0
+            idle_timeout = 30
+        }
+    }
+
+    # ===========================================
+    # Authorize Section
+    # ===========================================
+    authorize {
+        filter_username
+        preprocess
+        chap
+        mschap
+        suffix
+        eap {
+            ok = return
+        }
+        files
+        sql
+        expiration
+        logintime
+        pap
+    }
+
+    # ===========================================
+    # Authenticate Section
+    # ===========================================
+    authenticate {
+        Auth-Type PAP {
+            pap
+        }
+        Auth-Type CHAP {
+            chap
+        }
+        Auth-Type MS-CHAP {
+            mschap
+        }
+        eap
+    }
+
+    # ===========================================
+    # Pre-Accounting Section
+    # ===========================================
+    preacct {
+        preprocess
+        acct_unique
+        suffix
+        files
+    }
+
+    # ===========================================
+    # Accounting Section
+    # ===========================================
+    accounting {
+        detail
+        unix
+        sql
+        exec
+        attr_filter.accounting_response
+    }
+
+    # ===========================================
+    # Session Section
+    # ===========================================
+    session {
+        sql
+    }
+
+    # ===========================================
+    # Post-Authentication Section
+    # ===========================================
+    post-auth {
+        update {
+            &reply: += &session-state:
+        }
+        sql
+        exec
+        remove_reply_message_if_eap
+    }
+
+    post-auth {
+        Post-Auth-Type REJECT {
+            sql
+            attr_filter.access_reject
+            eap
+            remove_reply_message_if_eap
+        }
+    }
+}

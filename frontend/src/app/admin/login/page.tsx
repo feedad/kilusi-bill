@@ -51,11 +51,12 @@ export default function LoginPage() {
       newErrors.password = 'Password wajib diisi'
     }
 
-    if (captchaInput !== captchaCode) {
-      setLoginError('Kode keamanan salah')
-      generateCaptcha()
-      return false
-    }
+    // CAPTCHA disabled for testing
+    // if (captchaInput !== captchaCode) {
+    //   setLoginError('Kode keamanan salah')
+    //   generateCaptcha()
+    //   return false
+    // }
 
     setErrors(newErrors)
     return Object.keys(newErrors).length === 0

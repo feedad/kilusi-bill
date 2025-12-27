@@ -1,26 +1,26 @@
 # =====================================================================
 # FreeRADIUS SQL Module Configuration for Kilusi Bill
 # =====================================================================
-# This configuration file sets up FreeRADIUS to use PostgreSQL database
-# with the Kilusi Bill billing system schema.
-#
-# Compatible with FreeRADIUS 3.x
+# PostgreSQL configuration with custom queries for multi-NAS support
 # =====================================================================
 
 sql {
-    # Database driver
-    driver = "rlm_sql_postgresql"
-    
-    # Database dialect
+    # Database dialect and driver
     dialect = "postgresql"
-    
-    # Connection info
-    server = "${DB_HOST}"
-    port = ${DB_PORT}
-    login = "${DB_USER}"
-    password = "${DB_PASSWORD}"
-    radius_db = "${DB_NAME}"
-    
+    driver = "rlm_sql_${dialect}"
+
+    # PostgreSQL-specific settings
+    postgresql {
+        send_application_name = yes
+    }
+
+    # Connection info - using environment variables
+    server = $ENV{DB_HOST}
+    port = $ENV{DB_PORT}
+    login = $ENV{DB_USER}
+    password = $ENV{DB_PASSWORD}
+    radius_db = $ENV{DB_NAME}
+
     # Connection pool settings
     pool {
         start = 5
@@ -30,63 +30,25 @@ sql {
         uses = 0
         lifetime = 0
         idle_timeout = 60
-        retry_delay = 1
-        spread = no
     }
-    
-    # Table names - IMPORTANT: Using nas table (not nas_servers)
-    nas_table = "nas"
-    
-    # Set to 'yes' to read clients from database
-    # FreeRADIUS will read from nas table for multi-NAS support
+
+    # Read clients (NAS) from database - MULTI-NAS SUPPORT
     read_clients = yes
     
-    # Client table for multi-NAS configuration
-    client_table = "nas"
-    
-    # Standard RADIUS tables
-    authorize_check_query = "SELECT id, username, attribute, value, op FROM ${authcheck_table} WHERE username = '%{SQL-User-Name}' ORDER BY id"
-    
-    authorize_reply_query = "SELECT id, username, attribute, value, op FROM ${authreply_table} WHERE username = '%{SQL-User-Name}' ORDER BY id"
-    
-    authorize_group_check_query = "SELECT id, groupname, attribute, value, op FROM ${groupcheck_table} WHERE groupname = '%{${group_attribute}}' ORDER BY id"
-    
-    authorize_group_reply_query = "SELECT id, groupname, attribute, value, op FROM ${groupreply_table} WHERE groupname = '%{${group_attribute}}' ORDER BY id"
-    
-    # Accounting queries
-    accounting {
-        reference = "%{tolower:type.%{Acct-Status-Type}}"
-        
-        type {
-            accounting-on {
-                query = "UPDATE ${....acct_table1} SET acctstoptime = TO_TIMESTAMP(${....event_timestamp_epoch}), acctsessiontime = (${....event_timestamp_epoch} - EXTRACT(EPOCH FROM(acctstarttime))), acctterminatecause = '%{Acct-Terminate-Cause}', connectinfo_stop = '%{Connect-Info}' WHERE acctstoptime IS NULL AND nasipaddress = '%{NAS-IP-Address}' AND acctstarttime <= TO_TIMESTAMP(${....event_timestamp_epoch})"
-            }
-            
-            accounting-off {
-                query = "${..accounting-on.query}"
-            }
-            
-            start {
-                query = "INSERT INTO ${....acct_table1} (acctsessionid, acctuniqueid, username, realm, nasipaddress, nasportid, nasporttype, acctstarttime, acctstoptime, acctsessiontime, acctauthentic, connectinfo_start, connectinfo_stop, acctinputoctets, acctoutputoctets, calledstationid, callingstationid, acctterminatecause, servicetype, framedprotocol, framedipaddress) VALUES ('%{Acct-Session-Id}', '%{Acct-Unique-Session-Id}', '%{SQL-User-Name}', '%{Realm}', '%{NAS-IP-Address}', '%{%{Acct-Session-Id}:-NULL}', '%{NAS-Port-Type}', TO_TIMESTAMP(${....event_timestamp_epoch}), NULL, 0, '%{Acct-Authentic}', '%{Connect-Info}', NULL, 0, 0, '%{Called-Station-Id}', '%{Calling-Station-Id}', '', '%{Service-Type}', '%{Framed-Protocol}', NULLIF('%{Framed-IP-Address}', '')::inet)"
-            }
-            
-            interim-update {
-                query = "UPDATE ${....acct_table1} SET acctstoptime = TO_TIMESTAMP(${....event_timestamp_epoch}), acctsessiontime = %{%{Acct-Session-Time}:-NULL}, acctinputoctets = (acctinputoctets + (%{%{Acct-Input-Gigawords}:-0}::bigint << 32) + %{%{Acct-Input-Octets}:-0}::bigint), acctoutputoctets = (acctoutputoctets + (%{%{Acct-Output-Gigawords}:-0}::bigint << 32) + %{%{Acct-Output-Octets}:-0}::bigint) WHERE acctsessionid = '%{Acct-Session-Id}' AND username = '%{SQL-User-Name}' AND nasipaddress = '%{NAS-IP-Address}'"
-            }
-            
-            stop {
-                query = "UPDATE ${....acct_table1} SET acctstoptime = TO_TIMESTAMP(${....event_timestamp_epoch}), acctsessiontime = %{%{Acct-Session-Time}:-NULL}, acctinputoctets = (acctinputoctets + (%{%{Acct-Input-Gigawords}:-0}::bigint << 32) + %{%{Acct-Input-Octets}:-0}::bigint), acctoutputoctets = (acctoutputoctets + (%{%{Acct-Output-Gigawords}:-0}::bigint << 32) + %{%{Acct-Output-Octets}:-0}::bigint), acctterminatecause = '%{Acct-Terminate-Cause}', connectinfo_stop = '%{Connect-Info}' WHERE acctsessionid = '%{Acct-Session-Id}' AND username = '%{SQL-User-Name}' AND nasipaddress = '%{NAS-IP-Address}'"
-            }
-        }
-    }
-    
-    # Post-authentication logging
-    post-auth {
-        reference = ".query"
-        query = "INSERT INTO ${..postauth_table} (username, pass, reply, authdate) VALUES ('%{User-Name}', '%{%{User-Password}:-Chap-Password}', '%{reply:Packet-Type}', CURRENT_TIMESTAMP)"
-    }
-    
-    # Table definitions
+    # Custom client query to match our nas table schema
+    # Our schema uses: id, nasname, shortname, type, secret, (no 'server' column)
+    client_query = "SELECT id, nasname, shortname, type, secret, NULL as server FROM nas WHERE is_active = true"
+
+    # Group membership attribute
+    group_attribute = "SQL-Group"
+
+    # Delete stale sessions on restart
+    delete_stale_sessions = yes
+
+    # SQL User-Name - for lookups
+    sql_user_name = "%{User-Name}"
+
+    # Table names (required by queries.conf)
     authcheck_table = "radcheck"
     authreply_table = "radreply"
     groupcheck_table = "radgroupcheck"
@@ -98,19 +60,9 @@ sql {
     
     postauth_table = "radpostauth"
     
-    # Group membership
-    group_attribute = "SQL-Group"
-    
-    # Read groups
-    read_groups = yes
-    
-    # Delete stale sessions
-    delete_stale_sessions = yes
-    
-    # SQL trace (for debugging - disable in production)
-    sqltrace = no
-    sqltracefile = ${logdir}/sqltrace.sql
-    
-    # Logging
-    logfile = ${logdir}/sqllog.sql
+    # Client/NAS table (for read_clients)
+    client_table = "nas"
+
+    # Include the default queries for this dialect
+    $INCLUDE ${modconfdir}/sql/main/${dialect}/queries.conf
 }

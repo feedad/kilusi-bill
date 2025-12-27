@@ -94,7 +94,7 @@ router.get('/tickets', asyncHandler(async (req, res) => {
     const countParams = [...params];
     const countResult = await query(`
         SELECT COUNT(*) as total FROM support_tickets st
-        LEFT JOIN customers_view c ON st.customer_id = c.id
+        LEFT JOIN customers_view c ON st.customer_id = c.customer_id
         ${whereClause}
     `, countParams);
 
@@ -110,12 +110,12 @@ router.get('/tickets', asyncHandler(async (req, res) => {
             st.*,
             c.name as customer_name,
             c.phone as customer_phone,
-            c.username as customer_code,
+            c.customer_id as customer_code,
             stm.sender_name as last_sender,
             stm.message as last_message,
             stm.created_at as last_message_at
         FROM support_tickets st
-        LEFT JOIN customers_view c ON st.customer_id = c.id
+        LEFT JOIN customers_view c ON st.customer_id = c.customer_id
         LEFT JOIN support_ticket_messages stm ON st.id = stm.ticket_id
         ${whereClause}
         ORDER BY st.id, stm.created_at DESC, st.updated_at DESC
@@ -155,12 +155,12 @@ router.get('/tickets/:id', asyncHandler(async (req, res) => {
             st.*,
             c.name as customer_name,
             c.phone as customer_phone,
-            c.username as customer_code,
+            c.customer_id as customer_code,
             c.email as customer_email,
             c.address as customer_address,
             c.package_id
         FROM support_tickets st
-        LEFT JOIN customers_view c ON st.customer_id = c.id
+        LEFT JOIN customers_view c ON st.customer_id = c.customer_id
         WHERE st.id = $1
     `, [ticketId]);
 
@@ -455,7 +455,9 @@ router.get('/stats', asyncHandler(async (req, res) => {
             COUNT(CASE WHEN status = 'in_progress' THEN 1 END) as in_progress_tickets,
             COUNT(CASE WHEN status = 'resolved' THEN 1 END) as resolved_tickets,
             COUNT(CASE WHEN status = 'closed' THEN 1 END) as closed_tickets,
-            AVG(CASE WHEN resolution_time IS NOT NULL THEN resolution_time END) as avg_resolution_time
+            AVG(CASE WHEN resolved_at IS NOT NULL AND created_at IS NOT NULL
+                THEN EXTRACT(EPOCH FROM (resolved_at - created_at))/3600
+                END) as avg_resolution_hours
         FROM support_tickets
     `);
 

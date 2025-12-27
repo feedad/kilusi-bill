@@ -1706,7 +1706,7 @@ export default function WhatsAppDashboard() {
               <div className="border-t pt-6">
                 <div className="flex items-center justify-between mb-4">
                   <div>
-                    <p className="text-sm text-gray-600">
+                    <div className="text-sm text-gray-600">
                       <strong>Total Penerima:</strong> {getRecipientCount().toLocaleString()} pelanggan
                       {customerStatus === 'active' && (
                         <Badge variant="secondary" className="ml-2">
@@ -1714,7 +1714,7 @@ export default function WhatsAppDashboard() {
                           Aktif
                         </Badge>
                       )}
-                    </p>
+                    </div>
                     <p className="text-xs text-gray-500">
                       {broadcastType === 'all'
                         ? `Semua ${customerStatus === 'active' ? 'wilayah' : 'pelanggan'}`

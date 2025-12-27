@@ -5,24 +5,9 @@
 
 const express = require('express');
 const router = express.Router();
-const { Pool } = require('pg');
 const { jwtAuth } = require('../../../middleware/jwtAuth');
-
-// Import settings
-const settings = require('../../../settings.json');
-
-// Database connection using settings.json
-const pool = new Pool({
-  user: settings.postgres_user,
-  host: settings.postgres_host,
-  database: settings.postgres_database,
-  password: settings.postgres_password,
-  port: settings.postgres_port,
-  ssl: false,
-  max: settings.postgres_pool_max || 20,
-  idleTimeoutMillis: settings.postgres_idle_timeout || 30000,
-  connectionTimeoutMillis: settings.postgres_connection_timeout || 5000
-});
+const { query } = require('../../../config/database');
+const { logger } = require('../../../config/logger');
 
 /**
  * GET /api/v1/cable-routes
@@ -40,7 +25,7 @@ router.get('/', jwtAuth, async (req, res) => {
       limit = 50
     } = req.query;
 
-    let query = `
+    let sql = `
       SELECT
         n.id,
         n.odp_code::integer as odp_id,
@@ -73,7 +58,7 @@ router.get('/', jwtAuth, async (req, res) => {
     let paramIndex = 1;
 
     if (search) {
-      query += ` AND (
+      sql += ` AND (
         cv.id ILIKE $${paramIndex} OR
         cv.name ILIKE $${paramIndex} OR
         o.name ILIKE $${paramIndex} OR
@@ -85,28 +70,28 @@ router.get('/', jwtAuth, async (req, res) => {
 
     if (status) {
       if (status === 'connected') {
-        query += ` AND cv.status = 'active'`;
+        sql += ` AND cv.status = 'active'`;
       } else if (status === 'disconnected') {
-        query += ` AND cv.status != 'active'`;
+        sql += ` AND cv.status != 'active'`;
       }
     }
 
     if (odp_id) {
-      query += ` AND n.odp_code = $${paramIndex}::text`;
+      sql += ` AND n.odp_code = $${paramIndex}::text`;
       params.push(odp_id);
       paramIndex++;
     }
 
     if (customer_id) {
-      query += ` AND cv.id = $${paramIndex}`;
+      sql += ` AND cv.id = $${paramIndex}`;
       params.push(customer_id);
       paramIndex++;
     }
 
     // Add pagination and ordering
-    query += ` ORDER BY n.created_at DESC`;
+    sql += ` ORDER BY n.created_at DESC`;
     const offset = (parseInt(page) - 1) * parseInt(limit);
-    query += ` LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+    sql += ` LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
     params.push(limit, offset);
 
     // Get total count
@@ -153,11 +138,11 @@ router.get('/', jwtAuth, async (req, res) => {
       countParamIndex++;
     }
 
-    const countResult = await pool.query(countQuery, countParams);
+    const countResult = await query(countQuery, countParams);
 
     const total = countResult.rows && countResult.rows[0] ? parseInt(countResult.rows[0].count) : 0;
 
-    const result = await pool.query(query, params);
+    const result = await query(sql, params);
 
     res.json({
       success: true,
@@ -187,14 +172,14 @@ router.get('/', jwtAuth, async (req, res) => {
 router.get('/stats', jwtAuth, async (req, res) => {
   try {
     const queries = await Promise.all([
-      pool.query("SELECT COUNT(*) FROM network_infrastructure WHERE odp_code IS NOT NULL AND odp_code != ''"),
-      pool.query("SELECT COUNT(*) FROM network_infrastructure n JOIN services s ON n.service_id = s.id JOIN customers_view cv ON s.customer_id = cv.id WHERE n.odp_code IS NOT NULL AND n.odp_code != '' AND cv.status = 'active'"),
-      pool.query("SELECT COUNT(*) FROM network_infrastructure n JOIN services s ON n.service_id = s.id JOIN customers_view cv ON s.customer_id = cv.id WHERE n.odp_code IS NOT NULL AND n.odp_code != '' AND cv.status != 'active'"),
-      pool.query('SELECT 0 as count'), // maintenance - not tracked
-      pool.query('SELECT 0 as count'), // damaged - not tracked
-      pool.query("SELECT COUNT(DISTINCT odp_code) FROM network_infrastructure WHERE odp_code IS NOT NULL AND odp_code != ''"),
-      pool.query("SELECT COUNT(DISTINCT s.customer_id) FROM network_infrastructure n JOIN services s ON n.service_id = s.id WHERE n.odp_code IS NOT NULL AND n.odp_code != ''"),
-      pool.query('SELECT AVG(cable_length_meters) FROM network_infrastructure WHERE cable_length_meters IS NOT NULL')
+      query("SELECT COUNT(*) FROM network_infrastructure WHERE odp_code IS NOT NULL AND odp_code != ''"),
+      query("SELECT COUNT(*) FROM network_infrastructure n JOIN services s ON n.service_id = s.id JOIN customers_view cv ON s.customer_id = cv.id WHERE n.odp_code IS NOT NULL AND n.odp_code != '' AND cv.status = 'active'"),
+      query("SELECT COUNT(*) FROM network_infrastructure n JOIN services s ON n.service_id = s.id JOIN customers_view cv ON s.customer_id = cv.id WHERE n.odp_code IS NOT NULL AND n.odp_code != '' AND cv.status != 'active'"),
+      query('SELECT 0 as count'), // maintenance - not tracked
+      query('SELECT 0 as count'), // damaged - not tracked
+      query("SELECT COUNT(DISTINCT odp_code) FROM network_infrastructure WHERE odp_code IS NOT NULL AND odp_code != ''"),
+      query("SELECT COUNT(DISTINCT s.customer_id) FROM network_infrastructure n JOIN services s ON n.service_id = s.id WHERE n.odp_code IS NOT NULL AND n.odp_code != ''"),
+      query('SELECT AVG(cable_length_meters) FROM network_infrastructure WHERE cable_length_meters IS NOT NULL')
     ]);
 
     const stats = {
@@ -259,7 +244,7 @@ router.get('/:id', jwtAuth, async (req, res) => {
       WHERE cr.id = $1
     `;
 
-    const result = await pool.query(query, [id]);
+    const result = await query(sql, [id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({
@@ -308,7 +293,7 @@ router.post('/', async (req, res) => {
     }
 
     // Check if ODP exists
-    const odpCheck = await pool.query('SELECT id, capacity, used_ports FROM odps WHERE id = $1', [odp_id]);
+    const odpCheck = await query('SELECT id, capacity, used_ports FROM odps WHERE id = $1', [odp_id]);
     if (odpCheck.rows.length === 0) {
       return res.status(404).json({
         success: false,
@@ -317,7 +302,7 @@ router.post('/', async (req, res) => {
     }
 
     // Check if customer exists
-    const customerCheck = await pool.query('SELECT customer_id FROM customers WHERE customer_id = $1', [customer_id]);
+    const customerCheck = await query('SELECT customer_id FROM customers WHERE customer_id = $1', [customer_id]);
     if (customerCheck.rows.length === 0) {
       return res.status(404).json({
         success: false,
@@ -326,7 +311,7 @@ router.post('/', async (req, res) => {
     }
 
     // Check for duplicate routes
-    const duplicateCheck = await pool.query(
+    const duplicateCheck = await query(
       'SELECT id FROM cable_routes WHERE odp_id = $1 AND customer_id = $2',
       [odp_id, customer_id]
     );
@@ -340,7 +325,7 @@ router.post('/', async (req, res) => {
 
     // Check port availability if port_number is specified
     if (port_number) {
-      const portCheck = await pool.query(
+      const portCheck = await query(
         'SELECT id FROM cable_routes WHERE odp_id = $1 AND port_number = $2 AND status != \'disconnected\'',
         [odp_id, port_number]
       );
@@ -364,7 +349,7 @@ router.post('/', async (req, res) => {
     }
 
     // Create cable route
-    const result = await pool.query(`
+    const result = await query(`
       INSERT INTO cable_routes (
         odp_id, customer_id, cable_length, port_number, status,
         installation_date, notes, created_at, updated_at
@@ -377,7 +362,7 @@ router.post('/', async (req, res) => {
 
     // Update ODP used_ports count if route is connected
     if (status === 'connected') {
-      await pool.query(
+      await query(
         'UPDATE odps SET used_ports = used_ports + 1 WHERE id = $1',
         [odp_id]
       );
@@ -412,7 +397,7 @@ router.post('/', async (req, res) => {
       WHERE cr.id = $1
     `;
 
-    const fullResult = await pool.query(fullQuery, [result.rows[0].id]);
+    const fullResult = await query(fullQuery, [result.rows[0].id]);
 
     res.status(201).json({
       success: true,
@@ -464,7 +449,7 @@ router.put('/:id', async (req, res) => {
     } = req.body;
 
     // Get current route to check status change
-    const currentRoute = await pool.query('SELECT * FROM cable_routes WHERE id = $1', [id]);
+    const currentRoute = await query('SELECT * FROM cable_routes WHERE id = $1', [id]);
 
     if (currentRoute.rows.length === 0) {
       return res.status(404).json({
@@ -479,7 +464,7 @@ router.put('/:id', async (req, res) => {
 
     // Validate ODP exists if changed
     if (odp_id) {
-      const odpCheck = await pool.query('SELECT id FROM odps WHERE id = $1', [odp_id]);
+      const odpCheck = await query('SELECT id FROM odps WHERE id = $1', [odp_id]);
       if (odpCheck.rows.length === 0) {
         return res.status(404).json({
           success: false,
@@ -490,7 +475,7 @@ router.put('/:id', async (req, res) => {
 
     // Validate customer exists if changed
     if (customer_id && customer_id !== current.customer_id) {
-      const customerCheck = await pool.query('SELECT customer_id FROM customers WHERE customer_id = $1', [customer_id]);
+      const customerCheck = await query('SELECT customer_id FROM customers WHERE customer_id = $1', [customer_id]);
       if (customerCheck.rows.length === 0) {
         return res.status(404).json({
           success: false,
@@ -499,7 +484,7 @@ router.put('/:id', async (req, res) => {
       }
 
       // Check for duplicate routes
-      const duplicateCheck = await pool.query(
+      const duplicateCheck = await query(
         'SELECT id FROM cable_routes WHERE odp_id = $1 AND customer_id = $2 AND id != $3',
         [odp_id || current.odp_id, customer_id, id]
       );
@@ -514,7 +499,7 @@ router.put('/:id', async (req, res) => {
 
     // Check port availability if port_number is changed
     if (port_number && port_number !== current.port_number) {
-      const portCheck = await pool.query(
+      const portCheck = await query(
         'SELECT id FROM cable_routes WHERE odp_id = $1 AND port_number = $2 AND id != $3 AND status != \'disconnected\'',
         [odp_id || current.odp_id, port_number, id]
       );
@@ -577,7 +562,7 @@ router.put('/:id', async (req, res) => {
     updateFields.push(`updated_at = NOW()`);
     updateValues.push(id);
 
-    const result = await pool.query(`
+    const result = await query(`
       UPDATE cable_routes
       SET ${updateFields.join(', ')}
       WHERE id = $${paramIndex}
@@ -592,13 +577,13 @@ router.put('/:id', async (req, res) => {
 
       if (oldStatus === 'connected' && newStatus !== 'connected') {
         // Disconnecting - decrement port count
-        await pool.query(
+        await query(
           'UPDATE odps SET used_ports = used_ports - 1 WHERE id = $1',
           [routeOdpId]
         );
       } else if (oldStatus !== 'connected' && newStatus === 'connected') {
         // Connecting - increment port count
-        await pool.query(
+        await query(
           'UPDATE odps SET used_ports = used_ports + 1 WHERE id = $1',
           [routeOdpId]
         );
@@ -608,13 +593,13 @@ router.put('/:id', async (req, res) => {
     // Handle ODP change - update port counts for old and new ODPs
     if (odpChanged && status !== 'disconnected') {
       // Decrement old ODP count
-      await pool.query(
+      await query(
         'UPDATE odps SET used_ports = used_ports - 1 WHERE id = $1',
         [current.odp_id]
       );
 
       // Increment new ODP count
-      await pool.query(
+      await query(
         'UPDATE odps SET used_ports = used_ports + 1 WHERE id = $1',
         [odp_id]
       );
@@ -649,7 +634,7 @@ router.put('/:id', async (req, res) => {
       WHERE cr.id = $1
     `;
 
-    const fullResult = await pool.query(fullQuery, [result.rows[0].id]);
+    const fullResult = await query(fullQuery, [result.rows[0].id]);
 
     res.json({
       success: true,
@@ -676,7 +661,7 @@ router.delete('/:id', async (req, res) => {
     const { id } = req.params;
 
     // Get route details before deletion
-    const routeQuery = await pool.query(
+    const routeQuery = await query(
       'SELECT * FROM cable_routes WHERE id = $1',
       [id]
     );
@@ -691,11 +676,11 @@ router.delete('/:id', async (req, res) => {
     const route = routeQuery.rows[0];
 
     // Delete cable route
-    await pool.query('DELETE FROM cable_routes WHERE id = $1', [id]);
+    await query('DELETE FROM cable_routes WHERE id = $1', [id]);
 
     // Update ODP used_ports count if route was connected
     if (route.status === 'connected') {
-      await pool.query(
+      await query(
         'UPDATE odps SET used_ports = used_ports - 1 WHERE id = $1',
         [route.odp_id]
       );

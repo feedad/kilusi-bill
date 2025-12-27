@@ -214,6 +214,8 @@ app.use(helmet({
 
 // CORS (allow configured origins or localhost default)
 const defaultOrigins = [
+    'http://localhost',             // Docker frontend on port 80
+    'http://localhost:80',          // Explicit port 80
     `http://localhost:${process.env.PORT || 3001}`,
     'http://localhost:3000',  // Next.js default port
     'http://localhost:3001',  // Next.js dev port
@@ -489,7 +491,7 @@ global.whatsappStatus = {
 // Variabel global untuk menyimpan semua pengaturan dari settings.json
 global.appSettings = {
     // Server
-    port: getSetting('server_port', 4555),
+    port: getSetting('server_port', 3001),
     host: getSetting('server_host', 'localhost'),
 
     // Admin

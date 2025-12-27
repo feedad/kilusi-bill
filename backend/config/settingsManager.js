@@ -12,16 +12,21 @@ let isInitialized = false;
 
 // Map settings keys to Environment Variables
 const ENV_MAPPING = {
-  'postgres_host': 'DB_HOST',
-  'postgres_port': 'DB_PORT',
-  'postgres_database': 'DB_NAME',
-  'postgres_user': 'DB_USER',
-  'postgres_password': 'DB_PASSWORD',
+  'postgres_host': 'POSTGRES_HOST',
+  'postgres_port': 'POSTGRES_PORT',
+  'postgres_database': 'POSTGRES_DATABASE',
+  'postgres_user': 'POSTGRES_USER',
+  'postgres_password': 'POSTGRES_PASSWORD',
+  'postgres_pool_max': 'POSTGRES_POOL_MAX',
+  'postgres_idle_timeout': 'POSTGRES_IDLE_TIMEOUT',
+  'postgres_connection_timeout': 'POSTGRES_CONNECTION_TIMEOUT',
+  'postgres_ssl': 'POSTGRES_SSL',
   'server_port': 'PORT',
   'server_host': 'HOST',
   'api_key': 'API_KEY',
-  'secret_key': 'JWT_SECRET',
-  'admin_password': 'ADMIN_PASSWORD', // Fallback if no DB admin
+  'secret_key': 'SESSION_SECRET',
+  'admin_username': 'ADMIN_USERNAME',
+  'admin_password': 'ADMIN_PASSWORD',
   'tripay.api_key': 'TRIPAY_API_KEY',
   'tripay.private_key': 'TRIPAY_PRIVATE_KEY',
   'tripay.merchant_code': 'TRIPAY_MERCHANT_CODE'

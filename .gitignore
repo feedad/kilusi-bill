@@ -224,7 +224,6 @@ frontend/_legacy*/
 
 # Keep installation scripts
 !install.sh
-!quick-start.sh
 
 # =====================================================================
 # Personal Notes & Temporary Markdown

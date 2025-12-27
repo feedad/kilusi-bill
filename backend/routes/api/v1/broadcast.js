@@ -12,7 +12,7 @@ router.get('/', async (req, res) => {
         bm.*,
         u.username as created_by_name
       FROM broadcast_messages bm
-      LEFT JOIN users u ON bm.created_by = u.id
+      LEFT JOIN users u ON bm.created_by::integer = u.id
       ORDER BY bm.priority ASC, bm.created_at DESC
     `;
 
@@ -57,7 +57,7 @@ router.get('/messages', async (req, res) => {
         bm.*,
         u.username as created_by_name
       FROM broadcast_messages bm
-      LEFT JOIN users u ON bm.created_by = u.id
+      LEFT JOIN users u ON bm.created_by::integer = u.id
       ORDER BY bm.created_at DESC
     `;
 

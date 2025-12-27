@@ -111,9 +111,10 @@ router.get('/stats', async (req, res) => {
     try {
       const { exec } = require('child_process');
 
-      // First check Docker container (with sudo for Linux)
+      // Check Docker container (try without sudo first, then with sudo)
       freeradiusStatus = await new Promise((resolve) => {
-        exec('sudo docker ps --filter name=kilusi-freeradius --format "{{.Status}}"', (error, stdout) => {
+        // Try without sudo first
+        exec('docker ps --filter name=kilusi-freeradius --format "{{.Status}}"', (error, stdout) => {
           if (!error && stdout.trim()) {
             const status = stdout.trim();
             if (status.includes('healthy') || status.includes('Up')) {
@@ -124,19 +125,31 @@ router.get('/stats', async (req, res) => {
               resolve({ status: 'connected', message: `Docker: ${status}` });
             }
           } else {
-            // Fall back to systemctl check
-            exec('systemctl is-active freeradius', (err, out) => {
-              const systemctlStatus = out.trim();
-              if (systemctlStatus === 'active') {
-                resolve({ status: 'connected', message: 'FreeRADIUS running (systemd)' });
-              } else if (systemctlStatus === 'activating') {
-                resolve({ status: 'warning', message: 'Restarting...' });
-              } else if (systemctlStatus === 'failed') {
-                resolve({ status: 'error', message: 'Service failed' });
-              } else if (systemctlStatus === 'inactive') {
-                resolve({ status: 'disconnected', message: 'Service stopped' });
+            // Try with sudo
+            exec('sudo docker ps --filter name=kilusi-freeradius --format "{{.Status}}"', (err2, stdout2) => {
+              if (!err2 && stdout2.trim()) {
+                const status = stdout2.trim();
+                if (status.includes('healthy') || status.includes('Up')) {
+                  resolve({ status: 'connected', message: 'Docker container running' });
+                } else if (status.includes('unhealthy')) {
+                  resolve({ status: 'warning', message: 'Docker container unhealthy' });
+                } else {
+                  resolve({ status: 'connected', message: `Docker: ${status}` });
+                }
               } else {
-                resolve({ status: 'disconnected', message: 'not running' });
+                // Fall back to systemctl check
+                exec('systemctl is-active freeradius', (err, out) => {
+                  const systemctlStatus = out ? out.trim() : '';
+                  if (systemctlStatus === 'active') {
+                    resolve({ status: 'connected', message: 'FreeRADIUS running (systemd)' });
+                  } else if (systemctlStatus === 'activating') {
+                    resolve({ status: 'warning', message: 'Restarting...' });
+                  } else if (systemctlStatus === 'failed') {
+                    resolve({ status: 'error', message: 'Service failed' });
+                  } else {
+                    resolve({ status: 'disconnected', message: 'Service stopped' });
+                  }
+                });
               }
             });
           }
@@ -649,30 +662,34 @@ router.get('/endpoints/:name', (req, res) => {
 });
 
 // Dashboard authentication endpoint
+// Only users with 'superadmin' role can access the API dashboard
+// Uses JWT tokens for persistence across backend restarts
 router.post('/dashboard-auth', async (req, res) => {
   try {
     const { username, password } = req.body;
     const bcrypt = require('bcrypt');
+    const jwt = require('jsonwebtoken');
     const { query: dbQuery, getOne } = require('../../../config/database');
 
-    // First, try to authenticate from admins table
+    if (!username || !password) {
+      return res.status(400).json({
+        success: false,
+        error: 'Username and password are required'
+      });
+    }
+
+    const JWT_SECRET = process.env.JWT_SECRET || 'kilusi-dashboard-secret-key';
+
+    // Authenticate from users table
     try {
-      const admin = await getOne(
-        'SELECT id, username, email, password_hash, role, is_active FROM admins WHERE username = $1',
+      const user = await getOne(
+        'SELECT id, username, email, password, role FROM users WHERE username = $1',
         [username]
       );
 
-      if (admin) {
-        // Check if account is active
-        if (!admin.is_active) {
-          return res.status(401).json({
-            success: false,
-            error: 'Account is not active'
-          });
-        }
-
+      if (user) {
         // Verify password
-        const validPassword = await bcrypt.compare(password, admin.password_hash);
+        const validPassword = await bcrypt.compare(password, user.password);
         if (!validPassword) {
           return res.status(401).json({
             success: false,
@@ -680,64 +697,65 @@ router.post('/dashboard-auth', async (req, res) => {
           });
         }
 
+        // Check if user has superadmin role (required for API dashboard)
+        if (user.role !== 'superadmin') {
+          return res.status(403).json({
+            success: false,
+            error: 'Access denied. Superadmin role required for API dashboard.'
+          });
+        }
+
         // Update last login
         await dbQuery(
-          'UPDATE admins SET last_login = CURRENT_TIMESTAMP WHERE id = $1',
-          [admin.id]
+          'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = $1',
+          [user.id]
         );
 
-        // Generate token
-        const crypto = require('crypto');
-        const token = crypto.randomBytes(32).toString('hex');
-        const expiry = Date.now() + (24 * 60 * 60 * 1000); // 24 hours
-
-        // Store token in memory
-        if (!global.dashboardTokens) {
-          global.dashboardTokens = new Map();
-        }
-        global.dashboardTokens.set(token, {
-          userId: admin.id,
-          username: admin.username,
-          email: admin.email,
-          role: admin.role,
-          expiry
-        });
+        // Generate JWT token (survives backend restarts)
+        const token = jwt.sign(
+          {
+            userId: user.id,
+            username: user.username,
+            email: user.email,
+            role: user.role,
+            type: 'dashboard'
+          },
+          JWT_SECRET,
+          { expiresIn: '24h' }
+        );
 
         return res.json({
           success: true,
           token,
           user: {
-            id: admin.id,
-            username: admin.username,
-            email: admin.email,
-            role: admin.role
-          },
-          expiresAt: new Date(expiry).toISOString()
+            id: user.id,
+            username: user.username,
+            email: user.email,
+            role: user.role
+          }
         });
       }
     } catch (dbError) {
-      // Database table might not exist, continue to fallback
-      logger.warn('admins table lookup failed, using fallback:', dbError.message);
+      logger.warn('users table lookup failed:', dbError.message);
     }
 
-    // Fallback: Check env variables (for backward compatibility)
+    // Fallback: Check env variables (for backward compatibility during setup)
     const DASHBOARD_USERNAME = process.env.DASHBOARD_USERNAME;
     const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD;
 
     if (DASHBOARD_USERNAME && DASHBOARD_PASSWORD &&
       username === DASHBOARD_USERNAME && password === DASHBOARD_PASSWORD) {
-      const crypto = require('crypto');
-      const token = crypto.randomBytes(32).toString('hex');
-      const expiry = Date.now() + (24 * 60 * 60 * 1000);
 
-      if (!global.dashboardTokens) {
-        global.dashboardTokens = new Map();
-      }
-      global.dashboardTokens.set(token, {
-        username,
-        role: 'superadmin',
-        expiry
-      });
+      const token = jwt.sign(
+        {
+          userId: 'env-admin',
+          username,
+          role: 'superadmin',
+          type: 'dashboard'
+        },
+        JWT_SECRET,
+        { expiresIn: '24h' }
+      );
 
       return res.json({
         success: true,
@@ -745,8 +763,7 @@ router.post('/dashboard-auth', async (req, res) => {
         user: {
           username,
           role: 'superadmin'
-        },
-        expiresAt: new Date(expiry).toISOString()
+        }
       });
     }
 
@@ -764,33 +781,42 @@ router.post('/dashboard-auth', async (req, res) => {
   }
 });
 
-// Verify dashboard token
+// Verify dashboard token (JWT based)
 router.get('/dashboard-auth/verify', (req, res) => {
   try {
+    const jwt = require('jsonwebtoken');
+    const JWT_SECRET = process.env.JWT_SECRET || 'kilusi-dashboard-secret-key';
+
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({ valid: false, error: 'No token provided' });
     }
 
     const token = authHeader.split(' ')[1];
-    const tokenData = global.dashboardTokens?.get(token);
 
-    if (!tokenData) {
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET);
+
+      // Check if it's a dashboard token
+      if (decoded.type !== 'dashboard') {
+        return res.status(401).json({ valid: false, error: 'Invalid token type' });
+      }
+
+      res.json({
+        valid: true,
+        user: {
+          id: decoded.userId,
+          username: decoded.username,
+          email: decoded.email,
+          role: decoded.role
+        }
+      });
+    } catch (jwtError) {
+      if (jwtError.name === 'TokenExpiredError') {
+        return res.status(401).json({ valid: false, error: 'Token expired' });
+      }
       return res.status(401).json({ valid: false, error: 'Invalid token' });
     }
-
-    if (Date.now() > tokenData.expiry) {
-      global.dashboardTokens.delete(token);
-      return res.status(401).json({ valid: false, error: 'Token expired' });
-    }
-
-    res.json({
-      valid: true,
-      user: {
-        username: tokenData.username,
-        role: tokenData.role
-      }
-    });
   } catch (error) {
     res.status(500).json({ valid: false, error: error.message });
   }

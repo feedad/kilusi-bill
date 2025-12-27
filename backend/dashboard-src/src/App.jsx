@@ -33,9 +33,11 @@ function App() {
 
             if (response.ok) {
                 const data = await response.json();
-                if (data.valid) {
+                // Handle wrapped response format: {success: true, data: {valid: true, user: {...}}}
+                const verifyData = data.data || data;
+                if (verifyData.valid) {
                     setIsAuthenticated(true);
-                    setUser(data.user);
+                    setUser(verifyData.user);
                 } else {
                     localStorage.removeItem('dashboard_token');
                 }

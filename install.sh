@@ -64,6 +64,14 @@ check_command() {
     fi
 }
 
+# Set SUDO variable - empty if running as root, otherwise use sudo
+# This allows the script to work correctly whether running as root or via sudo
+if [ "$(id -u)" -eq 0 ]; then
+    SUDO=""
+else
+    SUDO="sudo"
+fi
+
 # =====================================================================
 # Welcome and Mode Selection
 # =====================================================================
@@ -173,35 +181,35 @@ install_dependencies() {
     print_info "Installing missing dependencies..."
     
     if [[ "$OS" == "ubuntu" ]] || [[ "$OS" == "debian" ]]; then
-        sudo apt-get update
+        $SUDO apt-get update
         
         # Install basic tools
         if ! command -v curl &> /dev/null; then
-            sudo apt-get install -y curl
+            $SUDO apt-get install -y curl
         fi
         
         if ! command -v wget &> /dev/null; then
-            sudo apt-get install -y wget
+            $SUDO apt-get install -y wget
         fi
         
         if ! command -v git &> /dev/null; then
-            sudo apt-get install -y git
+            $SUDO apt-get install -y git
         fi
         
         # Install Node.js (if needed for native deployment)
         if [[ "$DEPLOYMENT" == "native" ]]; then
             if ! command -v node &> /dev/null; then
                 print_info "Installing Node.js..."
-                curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-                sudo apt-get install -y nodejs
+                curl -fsSL https://deb.nodesource.com/setup_18.x | $SUDO -E bash -
+                $SUDO apt-get install -y nodejs
             fi
         fi
         
         # Install PostgreSQL client (if needed)
-        if [[ "$DEPLOYMENT" == "native" ]] || [[ "$DEPLOYMENT" == "docker-external-db" ]]; then
+        if [[ "$DEPLOYMENT" == "native" ]] || [[ "$DEPLOYMENT" == "db-radius-only" ]]; then
             if ! command -v psql &> /dev/null; then
                 print_info "Installing PostgreSQL client..."
-                sudo apt-get install -y postgresql-client
+                $SUDO apt-get install -y postgresql-client
             fi
         fi
         
@@ -210,40 +218,40 @@ install_dependencies() {
             if ! command -v docker &> /dev/null; then
                 print_info "Installing Docker..."
                 curl -fsSL https://get.docker.com -o get-docker.sh
-                sudo sh get-docker.sh
-                sudo usermod -aG docker $USER
+                $SUDO sh get-docker.sh
+                $SUDO usermod -aG docker $USER
                 rm get-docker.sh
             fi
             
             if ! command -v docker-compose &> /dev/null; then
                 print_info "Installing Docker Compose..."
-                sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-                sudo chmod +x /usr/local/bin/docker-compose
+                $SUDO curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+                $SUDO chmod +x /usr/local/bin/docker-compose
             fi
         fi
         
     elif [[ "$OS" == "centos" ]] || [[ "$OS" == "rhel" ]] || [[ "$OS" == "fedora" ]]; then
-        sudo yum update -y
+        $SUDO yum update -y
         
         if ! command -v git &> /dev/null; then
-            sudo yum install -y git
+            $SUDO yum install -y git
         fi
         
         if [[ "$DEPLOYMENT" == "native" ]]; then
             if ! command -v node &> /dev/null; then
-                curl -fsSL https://rpm.nodesource.com/setup_18.x | sudo bash -
-                sudo yum install -y nodejs
+                curl -fsSL https://rpm.nodesource.com/setup_18.x | $SUDO bash -
+                $SUDO yum install -y nodejs
             fi
         fi
         
         if [[ "$DEPLOYMENT" == "docker"* ]]; then
             if ! command -v docker &> /dev/null; then
-                sudo yum install -y yum-utils
-                sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
-                sudo yum install -y docker-ce docker-ce-cli containerd.io
-                sudo systemctl start docker
-                sudo systemctl enable docker
-                sudo usermod -aG docker $USER
+                $SUDO yum install -y yum-utils
+                $SUDO yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+                $SUDO yum install -y docker-ce docker-ce-cli containerd.io
+                $SUDO systemctl start docker
+                $SUDO systemctl enable docker
+                $SUDO usermod -aG docker $USER
             fi
         fi
     else
@@ -448,9 +456,9 @@ if [[ "$DEPLOYMENT" == "native" ]]; then
         print_info "Creating database $DB_NAME..."
         PGPASSWORD=$DB_PASSWORD createdb -h $DB_HOST -p $DB_PORT -U $DB_USER $DB_NAME
         
-        print_info "Initializing database schema..."
+        print_info "Initializing database schema (includes views)..."
         PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -f scripts/master-schema.sql
-        print_success "Database schema initialized"
+        print_success "Database schema and views initialized"
     fi
     
 elif [[ "$DEPLOYMENT" == "db-radius-only" ]]; then
@@ -471,9 +479,9 @@ elif [[ "$DEPLOYMENT" == "db-radius-only" ]]; then
             print_info "Creating database $DB_NAME..."
             PGPASSWORD=$DB_PASSWORD createdb -h $DB_HOST -p $DB_PORT -U $DB_USER $DB_NAME
             
-            print_info "Initializing database schema..."
+            print_info "Initializing database schema (includes views)..."
             PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -f scripts/master-schema.sql
-            print_success "Database schema initialized"
+            print_success "Database schema and views initialized"
         fi
     else
         print_info "Skipping database installation (RADIUS only mode)"
@@ -552,21 +560,44 @@ if [[ "$DEPLOYMENT" == "docker"* ]]; then
     if [ ! -f .env ]; then
         cp .env.docker.example .env
     fi
+
+    # Determine which services to start based on deployment mode
+    DOCKER_SERVICES=""
+    case "$DEPLOYMENT" in
+        "docker-db-radius")
+            # Only postgres and freeradius
+            DOCKER_SERVICES="postgres freeradius"
+            ;;
+        "docker-backend")
+            # postgres, freeradius, backend
+            DOCKER_SERVICES="postgres freeradius backend"
+            ;;
+        "docker")
+            # All services
+            DOCKER_SERVICES=""
+            ;;
+    esac
+
+    # Setup FreeRADIUS configuration files
+    print_info "Setting up FreeRADIUS configuration..."
     
-    # Modify docker-compose.yml based on deployment mode
-    if [[ "$DEPLOYMENT" == "docker-external-db" ]]; then
-        print_info "Configuring for external PostgreSQL..."
-        # Comment out postgres service (this is just informational, user should do manually or we use sed)
-        print_warning "Please comment out 'postgres' service in docker-compose.yml"
+    # Ensure FreeRADIUS config files are ready
+    if [ -f "freeradius/config/mods-available/sql" ]; then
+        cp freeradius/config/mods-available/sql freeradius/config/sql-symlink
+        print_success "FreeRADIUS SQL module configured"
     fi
     
-    if [[ "$DEPLOYMENT" == "docker-external-radius" ]]; then
-        print_info "Configuring for native FreeRADIUS..."
-        print_warning "Please comment out 'freeradius' service in docker-compose.yml"
+    if [ -f "freeradius/config/sites-available/default" ]; then
+        cp freeradius/config/sites-available/default freeradius/config/default
+        print_success "FreeRADIUS site configuration ready"
     fi
     
     print_info "Starting Docker containers..."
-    docker-compose up -d
+    if [ -n "$DOCKER_SERVICES" ]; then
+        $SUDO docker-compose up -d $DOCKER_SERVICES
+    else
+        $SUDO docker-compose up -d
+    fi
     
     print_success "Docker containers started"
     
@@ -575,14 +606,30 @@ if [[ "$DEPLOYMENT" == "docker"* ]]; then
     sleep 10
     
     # Check service health
-    docker-compose ps
+    $SUDO docker-compose ps
+    
+    # Setup default NAS entries for FreeRADIUS (multi-NAS support)
+    print_info "Setting up default NAS entries in database..."
+    $SUDO docker exec kilusi-postgres psql -U ${POSTGRES_USER:-kilusi_user} -d ${POSTGRES_DATABASE:-kilusi_bill} -c "
+        INSERT INTO nas (nasname, shortname, ip_address, secret, ports, type, description, is_active) VALUES 
+        ('172.20.0.0/16', 'docker-net', '172.20.0.1', '${RADIUS_SECRET:-testing123}', 1812, 'other', 'Docker network', true),
+        ('10.0.0.0/8', 'private-10', '10.0.0.1', '${RADIUS_SECRET:-testing123}', 1812, 'other', 'Private network 10.x', true),
+        ('192.168.0.0/16', 'private-192', '192.168.0.1', '${RADIUS_SECRET:-testing123}', 1812, 'other', 'Private network 192.x', true)
+        ON CONFLICT DO NOTHING;
+    " 2>/dev/null || print_warning "Could not add default NAS entries (may already exist)"
+    print_success "FreeRADIUS NAS configuration complete"
+    
+    # Note: FreeRADIUS needs restart to load new NAS from database
+    print_info "Restarting FreeRADIUS to load NAS from database..."
+    $SUDO docker-compose restart freeradius 2>/dev/null || true
+    print_success "FreeRADIUS restarted"
 fi
 
 # =====================================================================
 # Backend Setup
 # =====================================================================
 
-if [[ "$DEPLOYMENT" == "native" ]]; then
+if [[ "$DEPLOYMENT" == "native" ]] || [[ "$DEPLOYMENT" == "docker-db-radius" ]]; then
     print_header "Backend Setup"
     
     cd backend
@@ -595,8 +642,16 @@ if [[ "$DEPLOYMENT" == "native" ]]; then
     
     # Create systemd service
     print_info "Creating systemd service..."
-    
-    sudo tee /etc/systemd/system/kilusi-backend.service > /dev/null <<EOF
+
+    # Get the actual node path
+    NODE_PATH=$(which node)
+
+    # Check if node is in NVM directory and setup environment accordingly
+    if [[ "$NODE_PATH" == *".nvm"* ]]; then
+        NVM_DIR=$(dirname "$(dirname "$(dirname "$NODE_PATH")")")
+        print_info "Node.js detected in NVM, configuring environment..."
+
+        $SUDO tee /etc/systemd/system/kilusi-backend.service > /dev/null <<EOF
 [Unit]
 Description=Kilusi Bill Backend Service
 After=network.target postgresql.service
@@ -606,20 +661,121 @@ Type=simple
 User=$USER
 WorkingDirectory=$SCRIPT_DIR/backend
 Environment="NODE_ENV=production"
-ExecStart=/usr/bin/node app.js
+Environment="PATH=$NVM_DIR/versions/node/$(node -v)/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="NVM_DIR=$NVM_DIR"
+ExecStart=$NODE_PATH $SCRIPT_DIR/backend/app.js
 Restart=always
 RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
 EOF
-    
-    sudo systemctl daemon-reload
-    sudo systemctl enable kilusi-backend
-    sudo systemctl start kilusi-backend
-    
+    else
+        $SUDO tee /etc/systemd/system/kilusi-backend.service > /dev/null <<EOF
+[Unit]
+Description=Kilusi Bill Backend Service
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$SCRIPT_DIR/backend
+Environment="NODE_ENV=production"
+ExecStart=$NODE_PATH $SCRIPT_DIR/backend/app.js
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    fi
+
+    $SUDO systemctl daemon-reload
+    $SUDO systemctl enable kilusi-backend
+    $SUDO systemctl start kilusi-backend
+
     print_success "Backend service started"
-    
+
+    cd ..
+fi
+
+# =====================================================================
+# Frontend Setup
+# =====================================================================
+
+if [[ "$DEPLOYMENT" == "native" ]] || [[ "$DEPLOYMENT" == "docker-db-radius" ]] || [[ "$DEPLOYMENT" == "docker-backend" ]]; then
+    print_header "Frontend Setup"
+
+    cd frontend
+
+    # Install dependencies if needed
+    if [ ! -d "node_modules" ]; then
+        print_info "Installing Node.js dependencies..."
+        npm install --silent
+        print_success "Dependencies installed"
+    fi
+
+    # Build frontend
+    print_info "Building frontend..."
+    npm run build
+    print_success "Frontend built successfully"
+
+    # Create systemd service for frontend
+    print_info "Creating systemd service for frontend..."
+
+    # Get the actual node path
+    NODE_PATH=$(which node)
+
+    # Check if node is in NVM directory and setup environment accordingly
+    if [[ "$NODE_PATH" == *".nvm"* ]]; then
+        NVM_DIR=$(dirname "$(dirname "$(dirname "$NODE_PATH")")")
+        print_info "Node.js detected in NVM, configuring environment..."
+
+        $SUDO tee /etc/systemd/system/kilusi-frontend.service > /dev/null <<EOF
+[Unit]
+Description=Kilusi Bill Frontend Service
+After=network.target kilusi-backend.service
+
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$SCRIPT_DIR/frontend
+Environment="NODE_ENV=production"
+Environment="PATH=$NVM_DIR/versions/node/$(node -v)/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="NVM_DIR=$NVM_DIR"
+ExecStart=$NODE_PATH $SCRIPT_DIR/frontend/node_modules/.bin/next start -p 8080
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    else
+        $SUDO tee /etc/systemd/system/kilusi-frontend.service > /dev/null <<EOF
+[Unit]
+Description=Kilusi Bill Frontend Service
+After=network.target kilusi-backend.service
+
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$SCRIPT_DIR/frontend
+Environment="NODE_ENV=production"
+ExecStart=$NODE_PATH $SCRIPT_DIR/frontend/node_modules/.bin/next start -p 8080
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    fi
+
+    $SUDO systemctl daemon-reload
+    $SUDO systemctl enable kilusi-frontend
+    $SUDO systemctl start kilusi-frontend
+
+    print_success "Frontend service started on port 8080"
+
     cd ..
 fi
 
@@ -629,26 +785,47 @@ fi
 
 print_header "Post-Installation"
 
-# Create admin user (if database was just created)
-print_info "Creating admin user in database..."
+# Create admin user (only if backend is being installed)
+# Skip for radius-only mode (no backend, no admin needed)
+if [[ "$DEPLOYMENT" != "db-radius-only" ]] || [[ "$INSTALL_COMPONENT" == "db-only" ]] || [[ "$INSTALL_COMPONENT" == "both" ]]; then
+    # Create admin user (if database was just created)
+    print_info "Creating admin user in database..."
 
-ADMIN_PASS_HASH=$(node -e "const bcrypt = require('bcrypt'); bcrypt.hash('$ADMIN_PASS', 10).then(hash => console.log(hash));")
+    # For Docker mode, install dependencies temporarily to create admin user
+    if [[ "$DEPLOYMENT" == "docker" ]]; then
+        cd backend
+        if [ ! -d "node_modules" ]; then
+            print_info "Installing Node.js dependencies temporarily for admin creation..."
+            npm install --silent > /dev/null 2>&1
+        fi
+        ADMIN_PASS_HASH=$(node -e "const bcrypt = require('bcrypt'); bcrypt.hash('$ADMIN_PASS', 10).then(hash => console.log(hash));")
+        cd ..
+    else
+        # For native modes, dependencies are already installed
+        cd backend
+        ADMIN_PASS_HASH=$(node -e "const bcrypt = require('bcrypt'); bcrypt.hash('$ADMIN_PASS', 10).then(hash => console.log(hash));")
+        cd ..
+    fi
 
-if [[ "$DEPLOYMENT" == "docker" ]]; then
-    docker-compose exec -T postgres psql -U $DB_USER -d $DB_NAME << EOF
+    # Use docker-compose exec for modes where database is in Docker
+    if [[ "$DEPLOYMENT" == "docker" ]] || [[ "$DEPLOYMENT" == "docker-backend" ]] || [[ "$DEPLOYMENT" == "docker-db-radius" ]]; then
+        $SUDO docker-compose exec -T postgres psql -U $DB_USER -d $DB_NAME << EOF
 INSERT INTO users (username, password, role, email)
 VALUES ('$ADMIN_USER', '$ADMIN_PASS_HASH', 'admin', 'admin@localhost')
 ON CONFLICT (username) DO NOTHING;
 EOF
+    else
+        PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME << EOF
+INSERT INTO users (username, password, role, email)
+VALUES ('$ADMIN_USER', '$ADMIN_PASS_HASH', 'admin', 'admin@localhost')
+ON CONFLICT (username) DO NOTHING;
+EOF
+    fi
+
+    print_success "Admin user created"
 else
-    PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME << EOF
-INSERT INTO users (username, password, role, email)
-VALUES ('$ADMIN_USER', '$ADMIN_PASS_HASH', 'admin', 'admin@localhost')
-ON CONFLICT (username) DO NOTHING;
-EOF
+    print_info "Skipping admin user creation (radius-only mode)"
 fi
-
-print_success "Admin user created"
 
 # =====================================================================
 # Installation Complete
@@ -656,69 +833,142 @@ print_success "Admin user created"
 
 print_header "Installation Complete!"
 
-cat << EOF
-${GREEN}✓ Kilusi Bill has been successfully installed!${NC}
+echo -e "${GREEN}✓ Kilusi Bill has been successfully installed!${NC}"
+echo ""
+echo -e "${BLUE}Configuration Summary:${NC}"
+echo "  Deployment Mode: $DEPLOYMENT"
+echo "  Database: ${DB_HOST}:${DB_PORT}/${DB_NAME}"
+echo "  FreeRADIUS: ${RADIUS_HOST}:1812"
+echo "  Admin User: $ADMIN_USER"
+echo ""
+echo -e "${BLUE}Access Information:${NC}"
 
-${BLUE}Configuration Summary:${NC}
+if [[ "$DEPLOYMENT" == "docker" ]]; then
+    echo "  Backend API: http://localhost:3001"
+    echo "  Frontend: http://localhost:80"
+    echo ""
+    echo "  View logs: ${SUDO}docker-compose logs -f"
+    echo "  Stop services: ${SUDO}docker-compose down"
+    echo "  Restart: ${SUDO}docker-compose restart"
+elif [[ "$DEPLOYMENT" == "docker-backend" ]]; then
+    echo "  Backend API: http://localhost:3001 (Docker)"
+    echo "  Frontend: http://localhost:8080 (Native)"
+    echo ""
+    echo "  Docker logs: ${SUDO}docker-compose logs -f"
+    echo "  Frontend logs: ${SUDO}journalctl -u kilusi-frontend -f"
+    echo "  Restart frontend: ${SUDO}systemctl restart kilusi-frontend"
+elif [[ "$DEPLOYMENT" == "docker-db-radius" ]]; then
+    echo "  Backend API: http://localhost:3001 (Native)"
+    echo "  Frontend: http://localhost:8080 (Native)"
+    echo ""
+    echo "  Docker logs: ${SUDO}docker-compose logs -f"
+    echo "  Backend logs: ${SUDO}journalctl -u kilusi-backend -f"
+    echo "  Frontend logs: ${SUDO}journalctl -u kilusi-frontend -f"
+    echo "  Restart backend: ${SUDO}systemctl restart kilusi-backend"
+    echo "  Restart frontend: ${SUDO}systemctl restart kilusi-frontend"
+else
+    echo "  Backend API: http://localhost:3001"
+    echo "  Frontend: http://localhost:8080"
+    echo ""
+    echo "  Backend logs: ${SUDO}journalctl -u kilusi-backend -f"
+    echo "  Frontend logs: ${SUDO}journalctl -u kilusi-frontend -f"
+    echo "  Restart backend: ${SUDO}systemctl restart kilusi-backend"
+    echo "  Restart frontend: ${SUDO}systemctl restart kilusi-frontend"
+fi
+
+echo ""
+echo -e "${YELLOW}Important Next Steps:${NC}"
+echo "  1. Test database connection"
+echo "  2. Add your NAS servers to the 'nas' table"
+echo "  3. Configure FreeRADIUS clients (if not using Docker)"
+echo "  4. Update firewall rules to allow RADIUS ports (1812, 1813)"
+echo "  5. Configure WhatsApp and payment gateway (optional)"
+echo ""
+echo -e "${BLUE}Documentation:${NC}"
+echo "  - Setup Guide: README-SETUP.md"
+echo "  - FreeRADIUS Integration: docs/FREERADIUS-INTEGRATION.md"
+echo "  - Database Schema: docs/DATABASE-SCHEMA.md"
+echo ""
+echo -e "${GREEN}Happy billing!${NC}"
+echo ""
+
+# Save installation summary (plain text, no colors)
+cat > installation-summary.txt << EOF
+================================================================================
+Kilusi Bill - Installation Summary
+================================================================================
+Generated: $(date)
+
+Configuration Summary:
   Deployment Mode: $DEPLOYMENT
   Database: ${DB_HOST}:${DB_PORT}/${DB_NAME}
   FreeRADIUS: ${RADIUS_HOST}:1812
   Admin User: $ADMIN_USER
 
-${BLUE}Access Information:${NC}
+Access Information:
 EOF
 
-if [[ "$DEPLOYMENT" == "docker"* ]]; then
-    cat << EOF
+if [[ "$DEPLOYMENT" == "docker" ]]; then
+    cat >> installation-summary.txt << EOF
   Backend API: http://localhost:3001
   Frontend: http://localhost:80
-  
-  View logs: docker-compose logs -f
-  Stop services: docker-compose down
-  Restart: docker-compose restart
+
+  View logs: ${SUDO}docker-compose logs -f
+  Stop services: ${SUDO}docker-compose down
+  Restart: ${SUDO}docker-compose restart
+EOF
+elif [[ "$DEPLOYMENT" == "docker-backend" ]]; then
+    cat >> installation-summary.txt << EOF
+  Backend API: http://localhost:3001 (Docker)
+  Frontend: http://localhost:8080 (Native)
+
+  Docker logs: ${SUDO}docker-compose logs -f
+  Frontend logs: ${SUDO}journalctl -u kilusi-frontend -f
+  Restart frontend: ${SUDO}systemctl restart kilusi-frontend
+EOF
+elif [[ "$DEPLOYMENT" == "docker-db-radius" ]]; then
+    cat >> installation-summary.txt << EOF
+  Backend API: http://localhost:3001 (Native)
+  Frontend: http://localhost:8080 (Native)
+
+  Docker logs: ${SUDO}docker-compose logs -f
+  Backend logs: ${SUDO}journalctl -u kilusi-backend -f
+  Frontend logs: ${SUDO}journalctl -u kilusi-frontend -f
+  Restart backend: ${SUDO}systemctl restart kilusi-backend
+  Restart frontend: ${SUDO}systemctl restart kilusi-frontend
 EOF
 else
-    cat << EOF
+    cat >> installation-summary.txt << EOF
   Backend API: http://localhost:3001
-  
-  View logs: sudo journalctl -u kilusi-backend -f
-  Stop service: sudo systemctl stop kilusi-backend
-  Restart: sudo systemctl restart kilusi-backend
+  Frontend: http://localhost:8080
+
+  Backend logs: ${SUDO}journalctl -u kilusi-backend -f
+  Frontend logs: ${SUDO}journalctl -u kilusi-frontend -f
+  Restart backend: ${SUDO}systemctl restart kilusi-backend
+  Restart frontend: ${SUDO}systemctl restart kilusi-frontend
 EOF
 fi
 
-cat << EOF
+cat >> installation-summary.txt << EOF
 
-${YELLOW}Important Next Steps:${NC}
-  1. Test database connection: psql -h $DB_HOST -U $DB_USER -d $DB_NAME
+Important Next Steps:
+  1. Test database connection
   2. Add your NAS servers to the 'nas' table
   3. Configure FreeRADIUS clients (if not using Docker)
   4. Update firewall rules to allow RADIUS ports (1812, 1813)
   5. Configure WhatsApp and payment gateway (optional)
 
-${BLUE}Documentation:${NC}
+Documentation:
   - Setup Guide: README-SETUP.md
   - FreeRADIUS Integration: docs/FREERADIUS-INTEGRATION.md
   - Database Schema: docs/DATABASE-SCHEMA.md
 
-${GREEN}Happy billing!${NC}
-
-EOF
-
-# Save installation summary
-cat > installation-summary.txt << EOF
-Kilusi Bill Installation Summary
-Generated: $(date)
-
-Deployment Mode: $DEPLOYMENT
-Database Host: $DB_HOST:$DB_PORT
-Database Name: $DB_NAME
-Database User: $DB_USER
-FreeRADIUS Host: $RADIUS_HOST
-Admin Username: $ADMIN_USER
-
 Installation Directory: $SCRIPT_DIR
-Environment File: .env
+Environment File: backend/.env
+
+================================================================================
+Happy billing!
+================================================================================
 EOF
 
 print_success "Installation summary saved to installation-summary.txt"

@@ -26,40 +26,35 @@ router.post('/login', asyncHandler(async (req, res) => {
         ]);
     }
 
-    // First, check admins table for admin/superadmin users
+    // Authenticate from users table
     try {
-        const adminQuery = await pool.query(
-            'SELECT id, username, email, password_hash, role, is_active FROM admins WHERE username = $1',
+        const userQuery = await pool.query(
+            'SELECT id, username, email, password, role FROM users WHERE username = $1',
             [username]
         );
 
-        if (adminQuery.rows.length > 0) {
-            const admin = adminQuery.rows[0];
-
-            // Check if account is active
-            if (!admin.is_active) {
-                return res.sendUnauthorized('Akun tidak aktif');
-            }
+        if (userQuery.rows.length > 0) {
+            const user = userQuery.rows[0];
 
             // Verify password
-            const validPassword = await bcrypt.compare(password, admin.password_hash);
+            const validPassword = await bcrypt.compare(password, user.password);
             if (!validPassword) {
                 return res.sendUnauthorized('Username atau password salah');
             }
 
             // Update last login
             await pool.query(
-                'UPDATE admins SET last_login = CURRENT_TIMESTAMP WHERE id = $1',
-                [admin.id]
+                'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = $1',
+                [user.id]
             );
 
-            // Create JWT token for admin
+            // Create JWT token
             const token = jwt.sign(
                 {
-                    userId: admin.id,
-                    username: admin.username,
-                    email: admin.email,
-                    role: admin.role
+                    userId: user.id,
+                    username: user.username,
+                    email: user.email,
+                    role: user.role
                 },
                 process.env.JWT_SECRET || 'your-secret-key',
                 { expiresIn: '24h' }
@@ -67,20 +62,19 @@ router.post('/login', asyncHandler(async (req, res) => {
 
             return res.sendSuccess({
                 user: {
-                    id: admin.id,
-                    username: admin.username,
-                    email: admin.email,
-                    role: admin.role
+                    id: user.id,
+                    username: user.username,
+                    email: user.email,
+                    role: user.role
                 },
                 token: token
-            }, { action: 'admin_login' });
+            }, { action: 'user_login' });
         }
-    } catch (adminError) {
-        // admin_users table might not exist yet, continue to fallback
-        console.log('admin_users check failed, trying fallback:', adminError.message);
+    } catch (dbError) {
+        console.log('users table check failed:', dbError.message);
     }
 
-    // Fallback: Check env variables (for backward compatibility)
+    // Fallback: Check env variables (for backward compatibility during setup)
     const envAdminUsername = process.env.ADMIN_USERNAME;
     const envAdminPassword = process.env.ADMIN_PASSWORD;
 
@@ -91,7 +85,7 @@ router.post('/login', asyncHandler(async (req, res) => {
                 userId: 'admin-env',
                 username: username,
                 email: 'admin@example.com',
-                role: 'admin'
+                role: 'superadmin' // Changed to superadmin for env fallback
             },
             process.env.JWT_SECRET || 'your-secret-key',
             { expiresIn: '24h' }
@@ -102,56 +96,14 @@ router.post('/login', asyncHandler(async (req, res) => {
                 id: 'admin-env',
                 username: username,
                 email: 'admin@example.com',
-                role: 'admin'
+                role: 'superadmin'
             },
             token: token
         }, { action: 'admin_login' });
     }
 
-    // Get user from database
-    const userQuery = await pool.query(
-        'SELECT id, username, password, role, created_at FROM users WHERE username = $1',
-        [username]
-    );
-
-    if (userQuery.rows.length === 0) {
-        return res.sendUnauthorized('Username atau password salah');
-    }
-
-    const user = userQuery.rows[0];
-
-    // Verify password
-    const validPassword = await bcrypt.compare(password, user.password);
-    if (!validPassword) {
-        return res.sendUnauthorized('Username atau password salah');
-    }
-
-    // Generate JWT token
-    const token = jwt.sign(
-        {
-            userId: user.id,
-            username: user.username,
-            role: user.role
-        },
-        process.env.JWT_SECRET || 'your-secret-key',
-        { expiresIn: '24h' }
-    );
-
-    // Update last login
-    await pool.query(
-        'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = $1',
-        [user.id]
-    );
-
-    return res.sendSuccess({
-        user: {
-            id: user.id,
-            username: user.username,
-            role: user.role,
-            createdAt: user.created_at
-        },
-        token
-    }, { action: 'user_login', lastLogin: new Date().toISOString() });
+    // No valid credentials found
+    return res.sendUnauthorized('Username atau password salah');
 }));
 
 // Logout endpoint
