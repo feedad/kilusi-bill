@@ -804,6 +804,24 @@ if [[ "$DEPLOYMENT" == "native" ]] || [[ "$DEPLOYMENT" == "docker-db-radius" ]];
     echo "ALLOWED_ORIGINS=$CORS_ORIGINS" >> .env.tmp
     mv .env.tmp .env
     
+    # Update Database Credentials in backend/.env
+    print_info "Updating backend database configuration..."
+    # Remove existing entries
+    sed -i '/^POSTGRES_HOST=/d' .env
+    sed -i '/^POSTGRES_PORT=/d' .env
+    sed -i '/^POSTGRES_DATABASE=/d' .env
+    sed -i '/^POSTGRES_USER=/d' .env
+    sed -i '/^POSTGRES_PASSWORD=/d' .env
+    
+    # Append new values
+    cat <<EOT >> .env
+POSTGRES_HOST=$DB_HOST
+POSTGRES_PORT=$DB_PORT
+POSTGRES_DATABASE=$DB_NAME
+POSTGRES_USER=$DB_USER
+POSTGRES_PASSWORD=$DB_PASSWORD
+EOT
+    
     if [ ! -d "node_modules" ]; then
         print_info "Installing Node.js dependencies..."
         npm install
