@@ -811,13 +811,13 @@ if [[ "$DEPLOYMENT" != "db-radius-only" ]] || [[ "$INSTALL_COMPONENT" == "db-onl
     if [[ "$DEPLOYMENT" == "docker" ]] || [[ "$DEPLOYMENT" == "docker-backend" ]] || [[ "$DEPLOYMENT" == "docker-db-radius" ]]; then
         $SUDO docker-compose exec -T postgres psql -U $DB_USER -d $DB_NAME << EOF
 INSERT INTO users (username, password, role, email)
-VALUES ('$ADMIN_USER', '$ADMIN_PASS_HASH', 'admin', 'admin@localhost')
+VALUES ('$ADMIN_USER', '$ADMIN_PASS_HASH', 'superadmin', 'admin@localhost')
 ON CONFLICT (username) DO NOTHING;
 EOF
     else
         PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME << EOF
 INSERT INTO users (username, password, role, email)
-VALUES ('$ADMIN_USER', '$ADMIN_PASS_HASH', 'admin', 'admin@localhost')
+VALUES ('$ADMIN_USER', '$ADMIN_PASS_HASH', 'superadmin', 'admin@localhost')
 ON CONFLICT (username) DO NOTHING;
 EOF
     fi
