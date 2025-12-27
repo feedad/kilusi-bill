@@ -696,19 +696,32 @@ if [[ "$DEPLOYMENT" == "docker"* ]]; then
     print_success "Docker containers started"
     
     # Wait for services
-    print_info "Waiting for services to be ready..."
-    sleep 10
+    # Wait for services
+    print_info "Waiting for database to be ready..."
+    MAX_RETRIES=30
+    COUNT=0
+    while ! $SUDO docker exec kilusi-postgres pg_isready -U ${POSTGRES_USER:-kilusi_user} > /dev/null 2>&1; do
+        sleep 2
+        COUNT=$((COUNT+1))
+        if [ $COUNT -ge $MAX_RETRIES ]; then
+            print_error "Database timed out waiting for readiness"
+            break
+        fi
+        echo -n "."
+    done
+    echo ""
     
     # Check service health
     $SUDO docker-compose ps
     
     # Insert default admin user if not exists
     print_info "Creating admin user in database..."
+    sleep 5 # Give a little extra time for schema initialization if it just started
     $SUDO docker exec kilusi-postgres psql -U ${POSTGRES_USER:-kilusi_user} -d ${POSTGRES_DATABASE:-kilusi_bill} -c "
         INSERT INTO admins (username, password, role, is_active, created_at, updated_at) VALUES 
         ('${ADMIN_USERNAME:-admin}', '\$2b\$10\$X7V.7/8h.8/9.8/9.8/9.8/9.8/9.8/9', 'superadmin', true, NOW(), NOW())
         ON CONFLICT (username) DO UPDATE SET role = 'superadmin';
-    " 2>/dev/null || print_warning "Could not create default admin user"
+    " || print_warning "Could not create default admin user. Check logs above."
     print_success "Admin user created (User: ${ADMIN_USERNAME:-admin}, Pass: ${ADMIN_PASSWORD:-admin})"
     
     # Setup default NAS entries for FreeRADIUS (multi-NAS support)
