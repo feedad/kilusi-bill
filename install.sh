@@ -770,6 +770,18 @@ if [[ "$DEPLOYMENT" == "native" ]] || [[ "$DEPLOYMENT" == "docker-db-radius" ]];
         print_success "Dependencies installed"
     fi
     
+    # Build legacy dashboard (dashboard-src)
+    if [ -d "dashboard-src" ]; then
+        print_info "Building legacy dashboard..."
+        cd dashboard-src
+        if [ ! -d "node_modules" ]; then
+            npm install --silent
+        fi
+        npm run build
+        cd ..
+        print_success "Legacy dashboard built"
+    fi
+    
     # Create systemd service
     print_info "Creating systemd service..."
 

@@ -1242,6 +1242,22 @@ app.use((err, req, res, next) => {
         next();
     }
 });
+});
+
+// Serve legacy dashboard (Vite Build)
+const dashboardPath = path.join(__dirname, 'public', 'dashboard');
+if (fs.existsSync(dashboardPath)) {
+    // Serve static files
+    app.use('/dashboard', express.static(dashboardPath));
+
+    // Handle SPA routing for dashboard
+    app.get('/dashboard/*', (req, res) => {
+        res.sendFile(path.join(dashboardPath, 'index.html'));
+    });
+    logger.info('✅ Legacy dashboard served at /dashboard');
+} else {
+    logger.warn(`⚠️ Legacy dashboard build not found at ${dashboardPath}. Run "npm run build" in dashboard-src to enable it.`);
+}
 
 // Export app untuk testing
 module.exports = app;
