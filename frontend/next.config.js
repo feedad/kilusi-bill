@@ -21,13 +21,22 @@ const nextConfig = {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000',
     NEXT_PUBLIC_PORTAL_URL: process.env.NEXT_PUBLIC_PORTAL_URL || 'https://portal.kilusi.id'
   },
-    // Remove console.log in production builds
+  // Remove console.log in production builds
   compiler: {
     // Remove console.log, console.warn, console.info in production
     // Keep console.error for debugging critical issues
     removeConsole: process.env.NODE_ENV === 'production'
       ? { exclude: ['error'] }  // Keep console.error only
       : false  // Keep all console in development
+  }
+},
+  async rewrites() {
+    return [
+      {
+        source: '/api/:path*',
+        destination: 'http://backend:3001/api/:path*',
+      },
+    ]
   }
 }
 

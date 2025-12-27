@@ -152,7 +152,8 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: http://localhost:3001
+        NEXT_PUBLIC_API_URL: ""
+
     container_name: kilusi-frontend
     restart: unless-stopped
     depends_on:
