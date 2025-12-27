@@ -259,8 +259,8 @@ install_dependencies() {
             $SUDO apt-get install -y git
         fi
         
-        # Install Node.js (if needed for native deployment)
-        if [[ "$DEPLOYMENT" == "native" ]]; then
+        # Install Node.js (if needed for native/hybrid deployment)
+        if [[ "$DEPLOYMENT" == "native" ]] || [[ "$DEPLOYMENT" == "docker-db-radius" ]] || [[ "$DEPLOYMENT" == "docker-backend" ]]; then
             if ! command -v node &> /dev/null; then
                 print_info "Installing Node.js..."
                 curl -fsSL https://deb.nodesource.com/setup_18.x | $SUDO -E bash -
@@ -300,7 +300,7 @@ install_dependencies() {
             $SUDO yum install -y git
         fi
         
-        if [[ "$DEPLOYMENT" == "native" ]]; then
+        if [[ "$DEPLOYMENT" == "native" ]] || [[ "$DEPLOYMENT" == "docker-db-radius" ]] || [[ "$DEPLOYMENT" == "docker-backend" ]]; then
             if ! command -v node &> /dev/null; then
                 curl -fsSL https://rpm.nodesource.com/setup_18.x | $SUDO bash -
                 $SUDO yum install -y nodejs
