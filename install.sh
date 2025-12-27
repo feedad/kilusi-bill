@@ -729,10 +729,10 @@ if [[ "$DEPLOYMENT" == "docker"* ]]; then
     echo ""
     echo ""
 
-    # Check if schema is loaded (by checking admins table)
+    # Check if schema is loaded (by checking users table)
     print_info "Verifying database schema..."
-    if ! $SUDO docker exec kilusi-postgres psql -U ${POSTGRES_USER:-kilusi_user} -d ${POSTGRES_DATABASE:-kilusi_bill} -c "SELECT count(*) FROM admins;" > /dev/null 2>&1; then
-        print_warning "Schema not found (admins table missing). Loading schema manually..."
+    if ! $SUDO docker exec kilusi-postgres psql -U ${POSTGRES_USER:-kilusi_user} -d ${POSTGRES_DATABASE:-kilusi_bill} -c "SELECT count(*) FROM users;" > /dev/null 2>&1; then
+        print_warning "Schema not found (users table missing). Loading schema manually..."
         
         # Load Master Schema
         if [ -f "scripts/master-schema.sql" ]; then
