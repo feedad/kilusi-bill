@@ -35,8 +35,8 @@ function getApiBaseUrl(): string {
 
   // 2. Server-side development fallback
   if (process.env.NODE_ENV === 'development') {
-    console.log('🔧 Using development fallback: localhost:3001')
-    return 'http://localhost:3001'
+    console.log('🔧 Using development fallback: relative path')
+    return ''
   }
 
   // 3. Production fallback (change to your actual production domain)
