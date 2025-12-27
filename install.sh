@@ -351,9 +351,15 @@ if [ $MISSING_DEPS -eq 1 ]; then
     if [[ "$AUTO_INSTALL" == "y" ]] || [[ "$AUTO_INSTALL" == "Y" ]]; then
         install_dependencies
         print_success "Dependencies installed successfully"
-        print_warning "Please logout and login again for Docker group changes to take effect"
-        print_info "After re-login, run this script again"
-        exit 0
+        if [[ "$DEPLOYMENT" == "docker"* ]] && ! docker info > /dev/null 2>&1; then
+            print_warning "Docker group changes might need a re-login to take effect."
+            read -p "Have you already re-logged in or want to try forcing continuation? (y/n): " FORCE_CONTINUE
+            if [[ "$FORCE_CONTINUE" != "y" ]] && [[ "$FORCE_CONTINUE" != "Y" ]]; then
+                 print_info "Please logout and login again, then run this script again."
+                 exit 0
+            fi
+        fi
+        print_success "Dependencies ready. Proceeding..."
     else
         print_error "Please install missing dependencies manually and run this script again"
         print_info ""
