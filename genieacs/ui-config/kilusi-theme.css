@@ -1,0 +1,45 @@
+/* Kilusi Bill Theme for GenieACS */
+:root {
+  --kilusi-bg: #1C2536;
+  --kilusi-card: #212B3E;
+  --kilusi-text: #F2F4F7;
+  --kilusi-primary: #5D87FF;
+  --kilusi-border: #2F3A4D;
+}
+
+body {
+  background-color: var(--kilusi-bg) !important;
+  color: var(--kilusi-text) !important;
+  font-family: 'Inter', sans-serif;
+}
+
+/* Card/Table Backgrounds */
+.container, .card, .table {
+  background-color: var(--kilusi-card) !important;
+  color: var(--kilusi-text) !important;
+  border: 1px solid var(--kilusi-border) !important;
+}
+
+/* Links & Buttons */
+a, .btn-primary {
+  color: var(--kilusi-primary) !important;
+}
+
+.btn-primary {
+  background-color: var(--kilusi-primary) !important;
+  border-color: var(--kilusi-primary) !important;
+  color: white !important;
+}
+
+/* Navbar */
+.navbar {
+  background-color: var(--kilusi-card) !important;
+  border-bottom: 1px solid var(--kilusi-border) !important;
+}
+
+/* Form Inputs */
+input, select, textarea {
+  background-color: var(--kilusi-bg) !important;
+  color: var(--kilusi-text) !important;
+  border: 1px solid var(--kilusi-border) !important;
+}

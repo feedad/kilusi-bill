@@ -287,3 +287,4 @@ CLAUDE_REMINDERS.md
 *.pid.lock
 .eslintcache
 .stylelintcache
+!genieacs/genieacs.env

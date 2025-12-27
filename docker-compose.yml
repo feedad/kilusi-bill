@@ -89,6 +89,76 @@ services:
       retries: 3
 
   # ===================================================================
+  # GenieACS Services
+  # ===================================================================
+  mongo:
+    image: mongo:4.4
+    container_name: genieacs-mongo
+    restart: always
+    volumes:
+      - genieacs-mongo-data:/data/db
+    networks:
+      - kilusi-network
+
+  genieacs-cwmp:
+    image: genieacs/genieacs:1.2.9
+    container_name: genieacs-cwmp
+    restart: always
+    command: "cwmp"
+    env_file:
+      - ./genieacs/genieacs.env
+    ports:
+      - "7547:7547"
+    depends_on:
+      - mongo
+    networks:
+      - kilusi-network
+
+  genieacs-nbi:
+    image: genieacs/genieacs:1.2.9
+    container_name: genieacs-nbi
+    restart: always
+    command: "nbi"
+    env_file:
+      - ./genieacs/genieacs.env
+    ports:
+      - "7557:7557"
+    depends_on:
+      - mongo
+    networks:
+      - kilusi-network
+
+  genieacs-fs:
+    image: genieacs/genieacs:1.2.9
+    container_name: genieacs-fs
+    restart: always
+    command: "fs"
+    env_file:
+      - ./genieacs/genieacs.env
+    ports:
+      - "7567:7567"
+    depends_on:
+      - mongo
+    networks:
+      - kilusi-network
+
+  genieacs-ui:
+    image: genieacs/genieacs:1.2.9
+    container_name: genieacs-ui
+    restart: always
+    command: "ui"
+    env_file:
+      - ./genieacs/genieacs.env
+    ports:
+      - "3002:3000"
+    volumes:
+      - ./genieacs/ui-config/kilusi-theme.css:/opt/genieacs/public/kilusi-theme.css
+    depends_on:
+      - mongo
+    networks:
+      - kilusi-network
+
+  # ===================================================================
   # Backend API Service
   # ===================================================================
   backend:
@@ -226,3 +296,4 @@ volumes:
 #    docker-compose down -v
 #
 # =====================================================================
+  genieacs-mongo-data:
