@@ -90,6 +90,12 @@ configure_connectivity() {
         read -p "Enter Domain or IP for this server: " SERVER_HOST
     fi
     
+    # Detect Public IP (optional)
+    PUBLIC_IP=$(curl -s --max-time 2 ifconfig.me) || PUBLIC_IP=""
+    if [ -n "$PUBLIC_IP" ]; then
+        print_info "Detected Public IP: $PUBLIC_IP"
+    fi
+
     # Determine topology
     echo ""
     echo "Select Domain Topology:"
@@ -106,6 +112,17 @@ configure_connectivity() {
         # Construct CORS Allowed Origins (Localhost + Server IP)
         CORS_ORIGINS="http://localhost,http://localhost:3000,http://localhost:3001,http://localhost:8080,http://127.0.0.1,http://127.0.0.1:3000,http://127.0.0.1:3001,http://127.0.0.1:8080"
         CORS_ORIGINS="$CORS_ORIGINS,http://$SERVER_HOST,http://$SERVER_HOST:3000,http://$SERVER_HOST:3001,http://$SERVER_HOST:8080"
+        
+        # Add Public IP if detected and different
+        if [ -n "$PUBLIC_IP" ] && [ "$PUBLIC_IP" != "$SERVER_HOST" ]; then
+             CORS_ORIGINS="$CORS_ORIGINS,http://$PUBLIC_IP,http://$PUBLIC_IP:3000,http://$PUBLIC_IP:3001,http://$PUBLIC_IP:8080"
+        fi
+        
+        # Prompt for any extra domains
+        read -p "Any other domains/IPs to whitelist? (comma separated, e.g. http://mypublic.com): " EXTRA_ORIGINS
+        if [ -n "$EXTRA_ORIGINS" ]; then
+            CORS_ORIGINS="$CORS_ORIGINS,$EXTRA_ORIGINS"
+        fi
         
         # Frontend API URL (Empty for Proxy Mode is best for single host, but let's be explicit if requested)
         # However, to avoid CORS completely on single host, internal proxy is best.
