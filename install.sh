@@ -712,6 +712,16 @@ if [[ "$DEPLOYMENT" == "docker"* ]]; then
     
     print_success "Docker containers started"
     
+    # Init GenieACS Theme (if GenieACS is part of the deployment)
+    if [[ "$DOCKER_SERVICES" == *"genieacs"* ]]; then
+      print_info "Waiting for GenieACS to initialize before applying theme..."
+      sleep 10
+      if [ -f "genieacs/apply-theme.sh" ]; then
+        chmod +x genieacs/apply-theme.sh
+        ./genieacs/apply-theme.sh || print_warning "Theme injection failed"
+      fi
+    fi
+    
     # Wait for services
     # Wait for services
     print_info "Waiting for database to be ready..."

@@ -3,7 +3,7 @@
 
 CONTAINER_NAME="genieacs-ui"
 THEME_FILE="/opt/genieacs/public/kilusi-theme.css"
-TARGET_CSS_DIR="/opt/genieacs/public"
+TARGET_CSS_DIR="/opt/genieacs/dist/public"
 
 echo "Injecting Kilusi Theme into GenieACS..."
 
@@ -12,7 +12,7 @@ echo "Injecting Kilusi Theme into GenieACS..."
 
 docker exec -u root $CONTAINER_NAME sh -c "
   # Find the main app css file
-  APP_CSS=\$(find /opt/genieacs/public -name 'app*.css' | head -n 1)
+  APP_CSS=\$(find /opt/genieacs/dist/public -name 'app*.css' | head -n 1)
   
   if [ -f \"\$APP_CSS\" ]; then
     echo \"Found app CSS: \$APP_CSS\"
