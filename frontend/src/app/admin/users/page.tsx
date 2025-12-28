@@ -252,7 +252,11 @@ export default function AdminUsersPage() {
     }
 
     const getRoleInfo = (role: string) => {
-        return ROLES.find(r => r.value === role) || ROLES[3]
+        const found = ROLES.find(r => r.value === role || r.value === role?.toLowerCase()?.trim())
+        if (!found) {
+            console.warn(`Unknown role: "${role}", defaulting to first role`)
+        }
+        return found || ROLES[0] // Fallback to superadmin instead of operator
     }
 
     const formatDate = (dateString: string | null) => {
