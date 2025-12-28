@@ -171,6 +171,30 @@ router.get('/stats', async (req, res) => {
       radiusDbStatus = { status: 'disconnected', message: 'Tables not found' };
     }
 
+    // Get GenieACS status
+    let genieacsStatus = { status: 'unknown', message: 'Unable to check' };
+    try {
+      const http = require('http');
+      genieacsStatus = await new Promise((resolve) => {
+        const req = http.get('http://localhost:7557/devices?projection=_id&limit=1', { timeout: 3000 }, (res) => {
+          if (res.statusCode === 200) {
+            resolve({ status: 'connected', message: 'NBI API running' });
+          } else {
+            resolve({ status: 'warning', message: `HTTP ${res.statusCode}` });
+          }
+        });
+        req.on('error', () => {
+          resolve({ status: 'disconnected', message: 'NBI not reachable' });
+        });
+        req.on('timeout', () => {
+          req.destroy();
+          resolve({ status: 'disconnected', message: 'Timeout' });
+        });
+      });
+    } catch (error) {
+      genieacsStatus = { status: 'disconnected', message: 'Check failed' };
+    }
+
     // Get system info
     const memUsage = process.memoryUsage();
     const cpuUsage = process.cpuUsage();
@@ -202,6 +226,7 @@ router.get('/stats', async (req, res) => {
         database: { status: dbStatus, message: dbStatus === 'connected' ? 'PostgreSQL OK' : 'Connection failed' },
         freeradius: freeradiusStatus,
         radiusDb: radiusDbStatus,
+        genieacs: genieacsStatus,
         websocket: { status: 'active', message: 'Socket.io running' }
       }
     });
@@ -483,12 +508,39 @@ router.get('/services', async (req, res) => {
       const radResult = await query("SELECT COUNT(*) as count FROM radcheck");
       services.radiusDb = {
         status: 'connected',
-        message: `RADIUS DB connected (${radResult.rows[0]?.count || 0} users)`
+        message: `${radResult.rows[0]?.count || 0} users`
       };
     } catch (error) {
       services.radiusDb = {
         status: 'disconnected',
         message: 'RADIUS tables not accessible'
+      };
+    }
+
+    // Check GenieACS status (via NBI API)
+    try {
+      const http = require('http');
+      const genieacsStatus = await new Promise((resolve) => {
+        const req = http.get('http://localhost:7557/devices?projection=_id&limit=1', { timeout: 3000 }, (res) => {
+          if (res.statusCode === 200) {
+            resolve({ status: 'connected', message: 'GenieACS NBI API running' });
+          } else {
+            resolve({ status: 'warning', message: `HTTP ${res.statusCode}` });
+          }
+        });
+        req.on('error', () => {
+          resolve({ status: 'disconnected', message: 'NBI API not reachable' });
+        });
+        req.on('timeout', () => {
+          req.destroy();
+          resolve({ status: 'disconnected', message: 'Connection timeout' });
+        });
+      });
+      services.genieacs = genieacsStatus;
+    } catch (error) {
+      services.genieacs = {
+        status: 'disconnected',
+        message: 'Unable to check GenieACS'
       };
     }
 
