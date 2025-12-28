@@ -678,6 +678,28 @@ if [[ "$DEPLOYMENT" == "docker"* ]]; then
             DOCKER_SERVICES="$DOCKER_SERVICES mongo genieacs-cwmp genieacs-nbi genieacs-fs genieacs-ui"
         fi
         print_success "GenieACS akan diinstall pada port 3002 (UI) dan 7547 (CWMP)"
+        
+        # Configure GenieACS settings in backend/settings.json
+        if [ -f "backend/settings.json" ]; then
+            print_info "Updating GenieACS configuration in backend/settings.json..."
+            
+            # Get server IP for GenieACS URL
+            SERVER_IP=$(hostname -I | awk '{print $1}')
+            GENIEACS_NBI_URL="http://${SERVER_IP}:7557"
+            
+            # Update settings.json with GenieACS config
+            if command -v jq &> /dev/null; then
+                jq --arg url "$GENIEACS_NBI_URL" \
+                   --arg user "kilusi" \
+                   --arg pass "kilusiadmin17!" \
+                   '.genieacs_url = $url | .genieacs_username = $user | .genieacs_password = $pass' \
+                   backend/settings.json > backend/settings.json.tmp && \
+                mv backend/settings.json.tmp backend/settings.json
+                print_success "GenieACS configuration updated in settings.json"
+            else
+                print_warning "jq not found, please update GenieACS settings manually in backend/settings.json"
+            fi
+        fi
     else
         print_info "GenieACS tidak akan diinstall. Anda bisa menginstallnya nanti dengan menjalankan:"
         print_info "  docker-compose up -d mongo genieacs-cwmp genieacs-nbi genieacs-fs genieacs-ui"
