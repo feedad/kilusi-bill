@@ -714,19 +714,25 @@ if [[ "$DEPLOYMENT" == "docker"* ]]; then
     
     # Init GenieACS Theme (if GenieACS is part of the deployment)
     if [[ "$DOCKER_SERVICES" == *"genieacs"* ]]; then
-      print_info "Waiting for GenieACS to initialize before applying theme..."
-      sleep 10
+      print_info "Waiting for GenieACS to initialize..."
+      sleep 15
+      
+      # Import GenieACS database from BSON dump
+      if [ -d "genieacs/db" ]; then
+        print_info "Importing GenieACS configuration from BSON..."
+        $SUDO docker cp genieacs/db genieacs-mongo:/tmp/kilusi-db
+        $SUDO docker exec genieacs-mongo mongorestore --db genieacs --drop /tmp/kilusi-db || print_warning "Database restore failed"
+        print_success "GenieACS configuration imported"
+      fi
+      
+      # Apply Kilusi Theme
       if [ -f "genieacs/apply-theme.sh" ]; then
+        print_info "Applying Kilusi theme..."
         chmod +x genieacs/apply-theme.sh
         ./genieacs/apply-theme.sh || print_warning "Theme injection failed"
       fi
-      
-      print_info "Uploading default provisions..."
-      if [ -f "genieacs/upload-provisions.sh" ]; then
-        chmod +x genieacs/upload-provisions.sh
-        ./genieacs/upload-provisions.sh || print_warning "Provision upload failed (API might not be ready yet)"
-      fi
     fi
+
     
     # Wait for services
     # Wait for services

@@ -18,14 +18,46 @@ body {
   font-family: 'Inter', sans-serif !important;
 }
 
-/* Headers & Navigation */
+/* Headers & Navigation - NUCLEAR OPTION */
 header,
+nav,
 .navbar,
-.top-bar {
+.navbar-static-top,
+.top-bar,
+div[class*="header"],
+div[class*="navbar"] {
   background-color: var(--kilusi-header-bg) !important;
+  background-image: none !important;
   border-bottom: 1px solid var(--kilusi-border) !important;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2) !important;
+  box-shadow: none !important;
 }
+
+/* Specific fix for GenieACS 'beige' background */
+body,
+.container,
+.wrapper,
+div[role="main"],
+div[class*="content"] {
+  background-color: var(--kilusi-bg) !important;
+}
+
+/* Sidebar - Aggressive */
+aside,
+.sidebar,
+.left-sidebar,
+div[class*="sidebar"],
+ul[class*="nav-list"] {
+  background-color: var(--kilusi-card) !important;
+  border-right: 1px solid var(--kilusi-border) !important;
+}
+
+/* Fix active links in sidebar which might be retaining light colors */
+li.active>a,
+a.active {
+  background-color: var(--kilusi-primary) !important;
+  color: #ffffff !important;
+}
+
 
 /* Cards / Containers */
 .card,
@@ -97,6 +129,60 @@ button {
   border-color: var(--kilusi-primary-hover) !important;
 }
 
+/* Sidebar Navigation Fixes */
+.sidebar,
+.left-sidebar,
+.nav-pills>li>a {
+  background-color: var(--kilusi-card) !important;
+  color: var(--kilusi-text) !important;
+  border: none !important;
+}
+
+.nav-pills>li.active>a,
+.nav-pills>li.active>a:hover,
+.nav-pills>li>a:hover {
+  background-color: var(--kilusi-primary) !important;
+  color: white !important;
+}
+
+/* Fix specific 'beige' background on sidebar items if they use different classes */
+.list-group-item {
+  background-color: var(--kilusi-card) !important;
+  border-color: var(--kilusi-border) !important;
+  color: var(--kilusi-text) !important;
+}
+
+/* Header & Logo Deep Fixes */
+.navbar,
+.navbar-default,
+.navbar-inverse {
+  background-color: var(--kilusi-header-bg) !important;
+  border-bottom: 1px solid var(--kilusi-border) !important;
+}
+
+/* Remove white box around logo if present */
+a.navbar-brand {
+  background: transparent !important;
+  padding: 10px !important;
+}
+
+/* Fix main content background to match */
+#main-content,
+.main-view {
+  background-color: var(--kilusi-bg) !important;
+}
+
+/* Force all links in sidebar to be consistent */
+div[class*="sidebar"] a {
+  color: var(--kilusi-text) !important;
+  background-color: transparent !important;
+}
+
+div[class*="sidebar"] li.active>a {
+  background-color: var(--kilusi-primary) !important;
+  color: white !important;
+}
+
 /* Form Elements */
 input,
 select,
@@ -126,6 +212,65 @@ textarea:focus {
   border-bottom: 1px solid var(--kilusi-border) !important;
   padding-bottom: 10px !important;
   margin-bottom: 10px !important;
+}
+
+/* Navigation Tabs (Overview, Devices, etc) */
+.nav-tabs {
+  border-bottom: 1px solid var(--kilusi-border) !important;
+}
+
+.nav-tabs>li>a {
+  background-color: var(--kilusi-bg) !important;
+  color: var(--kilusi-text-muted) !important;
+  border: 1px solid transparent !important;
+  border-bottom: none !important;
+}
+
+.nav-tabs>li.active>a,
+.nav-tabs>li.active>a:hover,
+.nav-tabs>li.active>a:focus {
+  background-color: var(--kilusi-card) !important;
+  color: var(--kilusi-primary) !important;
+  border: 1px solid var(--kilusi-border) !important;
+  border-bottom-color: var(--kilusi-card) !important;
+  font-weight: bold !important;
+}
+
+.nav-tabs>li>a:hover {
+  background-color: rgba(93, 135, 255, 0.1) !important;
+  color: var(--kilusi-primary) !important;
+}
+
+/* Secondary Navigation / Breadcrumbs */
+.breadcrumb,
+.secondary-nav {
+  background-color: var(--kilusi-header-bg) !important;
+  color: var(--kilusi-text) !important;
+}
+
+/* Logo Area Override */
+.navbar-brand,
+.logo-container {
+  background-color: transparent !important;
+}
+
+/* Fix "Error" message visibility */
+.alert-danger,
+.error-message {
+  background-color: rgba(220, 53, 69, 0.1) !important;
+  color: #ff6b6b !important;
+  border: 1px solid #ff6b6b !important;
+}
+
+/* Table Header/Rows Fixes from Screenshot */
+.table-striped>tbody>tr:nth-of-type(odd) {
+  background-color: rgba(255, 255, 255, 0.02) !important;
+}
+
+/* Search Filters input */
+.filters input {
+  background-color: var(--kilusi-card) !important;
+  color: var(--kilusi-text) !important;
 }
 
 /* Text Colors */

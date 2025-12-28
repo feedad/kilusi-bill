@@ -101,10 +101,10 @@ services:
       - kilusi-network
 
   genieacs-cwmp:
-    image: genieacs/genieacs:1.2.9
+    image: drumsergio/genieacs:latest
     container_name: genieacs-cwmp
     restart: always
-    command: "cwmp"
+    command: "dist/bin/genieacs-cwmp"
     env_file:
       - ./genieacs/genieacs.env
     ports:
@@ -115,10 +115,10 @@ services:
       - kilusi-network
 
   genieacs-nbi:
-    image: genieacs/genieacs:1.2.9
+    image: drumsergio/genieacs:latest
     container_name: genieacs-nbi
     restart: always
-    command: "nbi"
+    command: "dist/bin/genieacs-nbi"
     env_file:
       - ./genieacs/genieacs.env
     ports:
@@ -129,10 +129,10 @@ services:
       - kilusi-network
 
   genieacs-fs:
-    image: genieacs/genieacs:1.2.9
+    image: drumsergio/genieacs:latest
     container_name: genieacs-fs
     restart: always
-    command: "fs"
+    command: "dist/bin/genieacs-fs"
     env_file:
       - ./genieacs/genieacs.env
     ports:
@@ -143,16 +143,18 @@ services:
       - kilusi-network
 
   genieacs-ui:
-    image: genieacs/genieacs:1.2.9
+    image: drumsergio/genieacs:latest
     container_name: genieacs-ui
     restart: always
-    command: "ui"
+    command: "dist/bin/genieacs-ui"
     env_file:
       - ./genieacs/genieacs.env
     ports:
       - "3002:3000"
     volumes:
-      - ./genieacs/ui-config/kilusi-theme.css:/opt/genieacs/public/kilusi-theme.css
+      - ./genieacs/ui-config/kilusi-theme-native.css:/opt/genieacs/public/kilusi-theme-native.css
+      - ./genieacs/ui-config/logo.svg:/opt/genieacs/public/logo.svg
+      - ./genieacs/provisions:/opt/genieacs/provisions
     depends_on:
       - mongo
     networks:
@@ -263,37 +265,37 @@ volumes:
   backend_logs:
     driver: local
 
-# =====================================================================
-# Usage Instructions
-# =====================================================================
-#
-# 1. FULL DOCKER DEPLOYMENT (All services in Docker):
-#    docker-compose up -d
-#
-# 2. EXTERNAL POSTGRESQL (Use existing PostgreSQL server):
-#    - Comment out 'postgres' service above
-#    - Set POSTGRES_HOST in .env to your PostgreSQL server IP
-#    - Run: docker-compose up -d freeradius backend frontend
-#
-# 3. EXTERNAL FREERADIUS (Use native FreeRADIUS installation):
-#    - Comment out 'freeradius' service above
-#    - Configure native FreeRADIUS to use the nas table
-#    - Run: docker-compose up -d postgres backend frontend
-#
-# 4. SEPARATE SERVERS (PostgreSQL and FreeRADIUS on different machines):
-#    - Comment out both 'postgres' and 'freeradius' services
-#    - Set POSTGRES_HOST and RADIUS_HOST in .env
-#    - Run: docker-compose up -d backend frontend
-#
-# 5. MONITORING:
-#    docker-compose logs -f
-#    docker-compose ps
-#
-# 6. STOP:
-#    docker-compose down
-#
-# 7. RESET (WARNING: Deletes all data):
-#    docker-compose down -v
-#
-# =====================================================================
+  # =====================================================================
+  # Usage Instructions
+  # =====================================================================
+  #
+  # 1. FULL DOCKER DEPLOYMENT (All services in Docker):
+  #    docker-compose up -d
+  #
+  # 2. EXTERNAL POSTGRESQL (Use existing PostgreSQL server):
+  #    - Comment out 'postgres' service above
+  #    - Set POSTGRES_HOST in .env to your PostgreSQL server IP
+  #    - Run: docker-compose up -d freeradius backend frontend
+  #
+  # 3. EXTERNAL FREERADIUS (Use native FreeRADIUS installation):
+  #    - Comment out 'freeradius' service above
+  #    - Configure native FreeRADIUS to use the nas table
+  #    - Run: docker-compose up -d postgres backend frontend
+  #
+  # 4. SEPARATE SERVERS (PostgreSQL and FreeRADIUS on different machines):
+  #    - Comment out both 'postgres' and 'freeradius' services
+  #    - Set POSTGRES_HOST and RADIUS_HOST in .env
+  #    - Run: docker-compose up -d backend frontend
+  #
+  # 5. MONITORING:
+  #    docker-compose logs -f
+  #    docker-compose ps
+  #
+  # 6. STOP:
+  #    docker-compose down
+  #
+  # 7. RESET (WARNING: Deletes all data):
+  #    docker-compose down -v
+  #
+  # =====================================================================
   genieacs-mongo-data:
