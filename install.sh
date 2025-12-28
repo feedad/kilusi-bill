@@ -720,6 +720,12 @@ if [[ "$DEPLOYMENT" == "docker"* ]]; then
         chmod +x genieacs/apply-theme.sh
         ./genieacs/apply-theme.sh || print_warning "Theme injection failed"
       fi
+      
+      print_info "Uploading default provisions..."
+      if [ -f "genieacs/upload-provisions.sh" ]; then
+        chmod +x genieacs/upload-provisions.sh
+        ./genieacs/upload-provisions.sh || print_warning "Provision upload failed (API might not be ready yet)"
+      fi
     fi
     
     # Wait for services

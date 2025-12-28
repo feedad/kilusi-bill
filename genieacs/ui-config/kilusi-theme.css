@@ -3,43 +3,142 @@
   --kilusi-bg: #1C2536;
   --kilusi-card: #212B3E;
   --kilusi-text: #F2F4F7;
+  --kilusi-text-muted: #9DA4AE;
   --kilusi-primary: #5D87FF;
+  --kilusi-primary-hover: #4F75DD;
   --kilusi-border: #2F3A4D;
+  --kilusi-header-bg: #111927;
 }
 
+/* Base Overrides */
+html,
 body {
   background-color: var(--kilusi-bg) !important;
   color: var(--kilusi-text) !important;
-  font-family: 'Inter', sans-serif;
+  font-family: 'Inter', sans-serif !important;
 }
 
-/* Card/Table Backgrounds */
-.container, .card, .table {
+/* Headers & Navigation */
+header,
+.navbar,
+.top-bar {
+  background-color: var(--kilusi-header-bg) !important;
+  border-bottom: 1px solid var(--kilusi-border) !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2) !important;
+}
+
+/* Cards / Containers */
+.card,
+.panel,
+.box,
+.container-fluid {
+  background-color: var(--kilusi-card) !important;
+  border: 1px solid var(--kilusi-border) !important;
+  color: var(--kilusi-text) !important;
+  border-radius: 8px !important;
+}
+
+/* Tables */
+table,
+.table {
   background-color: var(--kilusi-card) !important;
   color: var(--kilusi-text) !important;
-  border: 1px solid var(--kilusi-border) !important;
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+}
+
+th,
+.table th {
+  background-color: var(--kilusi-bg) !important;
+  color: var(--kilusi-text-muted) !important;
+  border-bottom: 2px solid var(--kilusi-border) !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  font-size: 0.85rem !important;
+}
+
+td,
+.table td {
+  border-bottom: 1px solid var(--kilusi-border) !important;
+  border-top: none !important;
+}
+
+tr:hover td {
+  background-color: rgba(93, 135, 255, 0.05) !important;
 }
 
 /* Links & Buttons */
-a, .btn-primary {
+a {
   color: var(--kilusi-primary) !important;
+  text-decoration: none !important;
 }
 
-.btn-primary {
+a:hover {
+  color: var(--kilusi-primary-hover) !important;
+  text-decoration: underline !important;
+}
+
+.btn,
+button {
+  border-radius: 6px !important;
+  font-weight: 500 !important;
+  cursor: pointer !important;
+}
+
+.btn-primary,
+.button-primary {
   background-color: var(--kilusi-primary) !important;
   border-color: var(--kilusi-primary) !important;
   color: white !important;
 }
 
-/* Navbar */
-.navbar {
-  background-color: var(--kilusi-card) !important;
-  border-bottom: 1px solid var(--kilusi-border) !important;
+.btn-primary:hover {
+  background-color: var(--kilusi-primary-hover) !important;
+  border-color: var(--kilusi-primary-hover) !important;
 }
 
-/* Form Inputs */
-input, select, textarea {
+/* Form Elements */
+input,
+select,
+textarea {
   background-color: var(--kilusi-bg) !important;
   color: var(--kilusi-text) !important;
   border: 1px solid var(--kilusi-border) !important;
+  border-radius: 6px !important;
+  padding: 8px 12px !important;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--kilusi-primary) !important;
+  outline: none !important;
+  box-shadow: 0 0 0 2px rgba(93, 135, 255, 0.2) !important;
+}
+
+/* Dashboard Widgets */
+.widget {
+  background-color: var(--kilusi-card) !important;
+  box-shadow: none !important;
+}
+
+.widget-header {
+  border-bottom: 1px solid var(--kilusi-border) !important;
+  padding-bottom: 10px !important;
+  margin-bottom: 10px !important;
+}
+
+/* Text Colors */
+.text-muted {
+  color: var(--kilusi-text-muted) !important;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  color: var(--kilusi-text) !important;
+  font-weight: 600 !important;
 }
