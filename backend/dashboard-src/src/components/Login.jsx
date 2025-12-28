@@ -66,9 +66,7 @@ function Login({ onLogin }) {
                     </button>
                 </form>
 
-                <div style={{ marginTop: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
-                    <p>Default: superadmin / admin123</p>
-                </div>
+
             </div>
         </div>
     );
