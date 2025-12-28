@@ -662,6 +662,26 @@ if [[ "$DEPLOYMENT" == "docker"* ]]; then
             ;;
 
     esac
+    
+    # Ask if user wants to install GenieACS (TR-069 ACS)
+    echo ""
+    print_info "GenieACS adalah server TR-069 Auto Configuration Server (ACS)"
+    print_info "untuk manajemen modem/router secara remote (PPPoE, WiFi, VLAN, dll)"
+    echo ""
+    read -p "Apakah Anda ingin menginstall GenieACS? [y/N]: " INSTALL_GENIEACS
+    if [[ "$INSTALL_GENIEACS" =~ ^[Yy]$ ]]; then
+        if [ -z "$DOCKER_SERVICES" ]; then
+            # Full docker mode - all services including genieacs
+            DOCKER_SERVICES="postgres freeradius backend frontend mongo genieacs-cwmp genieacs-nbi genieacs-fs genieacs-ui"
+        else
+            # Add GenieACS to existing services
+            DOCKER_SERVICES="$DOCKER_SERVICES mongo genieacs-cwmp genieacs-nbi genieacs-fs genieacs-ui"
+        fi
+        print_success "GenieACS akan diinstall pada port 3002 (UI) dan 7547 (CWMP)"
+    else
+        print_info "GenieACS tidak akan diinstall. Anda bisa menginstallnya nanti dengan menjalankan:"
+        print_info "  docker-compose up -d mongo genieacs-cwmp genieacs-nbi genieacs-fs genieacs-ui"
+    fi
 
     # Configure Connectivity (Interactive)
     configure_connectivity
