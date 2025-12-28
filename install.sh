@@ -690,8 +690,8 @@ if [[ "$DEPLOYMENT" == "docker"* ]]; then
             # Update settings.json with GenieACS config
             if command -v jq &> /dev/null; then
                 jq --arg url "$GENIEACS_NBI_URL" \
-                   --arg user "kilusi" \
-                   --arg pass "kilusiadmin17!" \
+                   --arg user "admin" \
+                   --arg pass "admin" \
                    '.genieacs_url = $url | .genieacs_username = $user | .genieacs_password = $pass' \
                    backend/settings.json > backend/settings.json.tmp && \
                 mv backend/settings.json.tmp backend/settings.json
