@@ -762,9 +762,29 @@ if [[ "$DEPLOYMENT" == "docker"* ]]; then
       # Import GenieACS database from BSON dump
       if [ -d "genieacs/db" ]; then
         print_info "Importing GenieACS configuration from BSON..."
+        
+        # Wait for MongoDB to be ready
+        print_info "Waiting for MongoDB to be ready..."
+        MAX_RETRIES=30
+        COUNT=0
+        while ! $SUDO docker exec genieacs-mongo mongo --eval "db.runCommand({ping:1})" > /dev/null 2>&1; do
+            sleep 2
+            COUNT=$((COUNT+1))
+            if [ $COUNT -ge $MAX_RETRIES ]; then
+                print_warning "MongoDB not ready after ${MAX_RETRIES} retries"
+                break
+            fi
+            echo -n "."
+        done
+        echo ""
+        
+        # Copy and restore
         $SUDO docker cp genieacs/db genieacs-mongo:/tmp/kilusi-db
-        $SUDO docker exec genieacs-mongo mongorestore --db genieacs --drop /tmp/kilusi-db || print_warning "Database restore failed"
-        print_success "GenieACS configuration imported"
+        if $SUDO docker exec genieacs-mongo mongorestore --db genieacs --drop /tmp/kilusi-db; then
+            print_success "GenieACS configuration imported"
+        else
+            print_warning "Database restore failed - you may need to run: docker exec genieacs-mongo mongorestore --db genieacs --drop /tmp/kilusi-db"
+        fi
       fi
       
       # Apply Kilusi Theme
