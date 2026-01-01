@@ -20,10 +20,11 @@ const CUSTOMER_JWT_SECRET = process.env.CUSTOMER_JWT_SECRET || 'your-customer-jw
  * @param {Object} customer - Customer data
  * @returns {string} JWT token
  */
-function generateCustomerJWT(customer) {
+function generateCustomerJWT(customer, serviceId = null) {
     return jwt.sign(
         {
             customerId: customer.id,
+            serviceId: serviceId, // Added serviceId
             phone: customer.phone,
             type: 'customer'
         },
@@ -111,28 +112,68 @@ router.post('/login-by-phone', async (req, res) => {
 
         console.log(`📱 Login by phone request: ${phone} -> ${formattedPhone}`);
 
-        // Find customer by phone
-        const customer = await getOne(
+        // Find customers by phone
+        const customers = await getAll(
             'SELECT id, customer_id, name, phone, email, address FROM customers WHERE phone = $1 OR phone = $2 OR phone = $3',
             [phone, formattedPhone, cleanPhone]
         );
 
-        if (!customer) {
+        if (!customers || customers.length === 0) {
             return res.status(404).json({
                 success: false,
                 message: 'Nomor telepon tidak terdaftar dalam sistem kami'
             });
         }
 
+        // Use the first customer account as the primary one for this session
+        const customer = customers[0];
+
         // Status check removed as column does not exist
         // if (customer.status !== 'active') { ... }
 
         // Generate JWT token
-        const jwtToken = generateCustomerJWT(customer);
+        // Fetch SERVICES for this customer to use as "Accounts"
+        const services = await getAll(
+            `SELECT s.id, s.service_number, s.status, s.address_installation as address, 
+                    p.name as package_name, p.speed as package_speed, p.price as package_price,
+                    c.id as customer_primary_id, c.customer_id, c.name, c.phone, c.email
+             FROM services s
+             JOIN customers c ON s.customer_id = c.id
+             LEFT JOIN packages p ON s.package_id = p.id
+             WHERE c.id = $1`,
+            [customer.id]
+        );
 
-        // Package info lookup removed as package_id column does not exist
+        let accounts = [];
+        if (services && services.length > 0) {
+            // Map services to account objects
+            accounts = services.map(svc => ({
+                id: svc.id, // service ID becomes account ID
+                customer_id: svc.customer_id, // display ID
+                name: svc.name,
+                phone: svc.phone,
+                email: svc.email,
+                address: svc.address,
+                status: svc.status,
+                package_name: svc.package_name,
+                package_price: svc.package_price,
+                package_speed: svc.package_speed,
+                service_number: svc.service_number,
+                type: 'service',
+                customer_primary_id: svc.customer_primary_id
+            }));
+        } else {
+            // Fallback if no services table entries (should not happen if imported correctly)
+            accounts = [customer];
+        }
 
-        console.log(`✅ Customer ${customer.name} logged in via phone-only`);
+        // Select first account
+        const primaryAccount = accounts[0];
+
+        // Generate JWT token with Service ID if available
+        const jwtToken = generateCustomerJWT(customer, primaryAccount.type === 'service' ? primaryAccount.id : null);
+
+        console.log(`✅ Customer ${customer.name} logged in via phone-only. Found ${accounts.length} services.`);
 
         res.json({
             success: true,
@@ -140,13 +181,11 @@ router.post('/login-by-phone', async (req, res) => {
             data: {
                 customer: {
                     ...customer,
-                    status: 'active', // Default to active since column missing
-                    package_name: 'Regular', // Default package
-                    package_price: 0,
-                    package_speed: 'Unknown'
+                    ...primaryAccount, // Merge service info
                 },
                 token: jwtToken,
-                expiresIn: '30d'
+                expiresIn: '30d',
+                accounts: accounts
             }
         });
 
@@ -527,17 +566,20 @@ router.post('/otp', async (req, res) => {
         console.log(`📱 OTP request for phone: ${phone} -> formatted: ${formattedPhone}`);
 
         // Check if customer exists
-        const customer = await getOne(
+        const customers = await getAll(
             'SELECT id, name, phone, status FROM customers WHERE phone = $1 OR phone = $2 OR phone = $3',
             [phone, formattedPhone, cleanPhone]
         );
 
-        if (!customer) {
+        if (!customers || customers.length === 0) {
             return res.status(404).json({
                 success: false,
                 message: 'Nomor telepon tidak terdaftar dalam sistem kami'
             });
         }
+
+        // Use first found customer for basic checks
+        const customer = customers[0];
 
         if (customer.status !== 'active') {
             return res.status(401).json({
@@ -699,7 +741,42 @@ router.post('/verify-otp', async (req, res) => {
             [storedData.customerId]
         );
 
-        if (!customer || customer.status !== 'active') {
+        // Fetch SERVICES for this customer to use as "Accounts"
+        const services = await getAll(
+            `SELECT s.id, s.service_number, s.status, s.address_installation as address, 
+                    p.name as package_name, p.speed as package_speed, p.price as package_price,
+                    c.id as customer_primary_id, c.customer_id, c.name, c.phone, c.email
+             FROM services s
+             JOIN customers c ON s.customer_id = c.id
+             LEFT JOIN packages p ON s.package_id = p.id
+             WHERE c.id = $1`,
+            [customer.id] // Use the customer ID from OTP verification
+        );
+
+        let allAccounts = [];
+        if (services && services.length > 0) {
+            // Map services to account objects
+            allAccounts = services.map(svc => ({
+                id: svc.id, // service ID becomes account ID
+                customer_id: svc.customer_id, // display ID
+                name: svc.name,
+                phone: svc.phone,
+                email: svc.email,
+                address: svc.address,
+                status: svc.status,
+                package_name: svc.package_name,
+                package_price: svc.package_price,
+                package_speed: svc.package_speed,
+                service_number: svc.service_number,
+                type: 'service',
+                customer_primary_id: svc.customer_primary_id
+            }));
+        } else {
+            // Fallback
+            allAccounts = [customer];
+        }
+
+        if (!customer) {
             return res.status(401).json({
                 success: false,
                 message: 'Akun pelanggan tidak aktif atau tidak ditemukan'
@@ -710,15 +787,9 @@ router.post('/verify-otp', async (req, res) => {
         otpStore.delete(formattedPhone);
 
         // Generate JWT token
-        const jwtToken = generateCustomerJWT(customer);
+        const jwtToken = generateCustomerJWT(customer, allAccounts[0].type === 'service' ? allAccounts[0].id : null);
 
-        // Get package info
-        const packageInfo = await getOne(
-            'SELECT name as package_name, price, speed FROM packages WHERE id = $1',
-            [customer.package_id]
-        );
-
-        console.log(`✅ Customer ${customer.name} authenticated successfully via OTP`);
+        console.log(`✅ Customer ${customer.name} authenticated successfully via OTP. Found ${allAccounts.length} services.`);
 
         res.json({
             success: true,
@@ -726,12 +797,11 @@ router.post('/verify-otp', async (req, res) => {
             data: {
                 customer: {
                     ...customer,
-                    package_name: packageInfo?.package_name || null,
-                    package_price: packageInfo?.price || null,
-                    package_speed: packageInfo?.speed || null
+                    ...allAccounts[0]
                 },
                 token: jwtToken,
-                expiresIn: '30d'
+                expiresIn: '30d',
+                accounts: allAccounts
             }
         });
 
@@ -798,5 +868,106 @@ router.post('/resend-otp', async (req, res) => {
     }
 });
 
+/**
+ * Switch Account (for multi-service users)
+ * POST /api/v1/customer-auth/switch-account
+ */
+router.post('/switch-account', async (req, res) => {
+    try {
+        const { targetAccountId, token } = req.body; // targetAccountId is now Service ID
+
+        if (!targetAccountId || !token) {
+            return res.status(400).json({
+                success: false,
+                message: 'Target Account ID dan token diperlukan'
+            });
+        }
+
+        // Verify current token
+        const decoded = jwt.verify(token, CUSTOMER_JWT_SECRET);
+        const currentPhone = decoded.phone;
+
+        // Verify target account (Service) belongs to same phone (Customer)
+        // targetAccountId is Service ID
+        const targetService = await getOne(
+            `SELECT s.id, s.service_number, s.status, s.customer_id as customer_primary_id,
+                    c.id as customer_id_from_join, c.name, c.phone,
+                    p.name as package_name
+             FROM services s
+             JOIN customers c ON s.customer_id = c.id
+             LEFT JOIN packages p ON s.package_id = p.id
+             WHERE s.id = $1`,
+            [targetAccountId]
+        );
+
+        if (!targetService) {
+            // Fallback: Check customers table (legacy compatibility for pure customer IDs)
+            const targetCustomer = await getOne(
+                'SELECT id, name, phone, status, package_id FROM customers WHERE id = $1',
+                [targetAccountId]
+            );
+
+            if (targetCustomer) {
+                // Check phone match
+                const normalize = (p) => p ? p.replace(/[^0-9]/g, '').replace(/^0/, '62').replace(/^62/, '') : '';
+                if (normalize(currentPhone) !== normalize(targetCustomer.phone)) {
+                    return res.status(403).json({ success: false, message: 'Akses ditolak' });
+                }
+                const newToken = generateCustomerJWT(targetCustomer, null);
+                return res.json({
+                    success: true,
+                    message: 'Berhasil berpindah akun',
+                    data: { token: newToken, customer: targetCustomer }
+                });
+            }
+
+            return res.status(404).json({ success: false, message: 'Layanan tidak ditemukan' });
+        }
+
+        // Normalize phones for comparison
+        const normalize = (p) => p ? p.replace(/[^0-9]/g, '').replace(/^0/, '62').replace(/^62/, '') : '';
+
+        if (normalize(currentPhone) !== normalize(targetService.phone)) {
+            return res.status(403).json({
+                success: false,
+                message: 'Anda tidak memiliki akses ke layanan ini'
+            });
+        }
+
+        // Construct customer object for token generation
+        const customerObj = {
+            id: targetService.customer_primary_id, // This is the actual customer ID
+            phone: targetService.phone,
+            name: targetService.name
+        };
+
+        // Generate NEW token for target service
+        const newToken = generateCustomerJWT(customerObj, targetService.id); // Pass service ID as second arg
+
+        res.json({
+            success: true,
+            message: 'Berhasil berpindah akun',
+            data: {
+                token: newToken,
+                customer: {
+                    ...customerObj,
+                    // Add service details to response
+                    package_name: targetService.package_name,
+                    service_number: targetService.service_number,
+                    status: targetService.status,
+                    id: targetService.id // Ensure frontend sees Service ID
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Switch account error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Gagal berpindah akun',
+            error: error.message
+        });
+    }
+});
 
 module.exports = router;

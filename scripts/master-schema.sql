@@ -556,6 +556,7 @@ CREATE TABLE radcheck (
   value VARCHAR(253) NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(username, attribute, op, value),
   PRIMARY KEY (id)
 );
 CREATE INDEX idx_radcheck_username ON radcheck USING btree (username);
@@ -639,6 +640,7 @@ CREATE TABLE radusergroup (
   priority INTEGER DEFAULT 1,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(username, groupname),
   PRIMARY KEY (id)
 );
 CREATE INDEX idx_radusergroup_username ON radusergroup USING btree (username);

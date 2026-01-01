@@ -321,93 +321,185 @@ router.get('/get-customer-data', async (req, res) => {
     console.log('🔍 Backend: Full customer object from auth:', JSON.stringify(customer, null, 2));
 
     // Get customer's complete data from database
+    // Check if we have a serviceId from the token
+    const jwt = require('jsonwebtoken');
+    const CUSTOMER_JWT_SECRET = process.env.CUSTOMER_JWT_SECRET || 'your-customer-jwt-secret-key-change-in-production';
+    let serviceId = null;
+    let customerData = null;
     const db = require('../../../config/database');
-    const customerQuery = `
-      SELECT
-        c.*,
-        p.name as package_name,
-        p.speed as package_speed,
-        p.price as package_price,
-        r.name as region_name
-      FROM customers c
-      LEFT JOIN packages p ON c.package_id = p.id
-      LEFT JOIN regions r ON c.region_id = r.id
-      WHERE c.id = $1
-    `;
-    const customerResult = await db.query(customerQuery, [customer.id]);
 
-    if (customerResult.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Data pelanggan tidak ditemukan'
-      });
+    // Attempt to extract serviceId
+    try {
+      // Verify again to get FULL payload including serviceId
+      const decoded = jwt.verify(token, CUSTOMER_JWT_SECRET);
+      serviceId = decoded.serviceId;
+      console.log('🔍 Backend: Service ID extracted:', serviceId);
+    } catch (e) {
+      // Token might be valid but verify failed here? No, user already validated it.
+      // Just ignore
     }
 
-    const customerData = customerResult.rows[0];
-
-    console.log('🔍 Backend: Customer data from database:', JSON.stringify(customerData, null, 2));
-    console.log('🔍 Backend: Available fields:', Object.keys(customerData));
-    console.log('🔍 Backend: pppoe_username:', customerData.pppoe_username);
-    console.log('🔍 Backend: customer_id:', customerData.customer_id);
-    console.log('🔍 Backend: id:', customerData.id);
-    console.log('🔍 Backend: Looking for field that contains 25110100001...');
-
-    // Check each field for the value we want
-    Object.keys(customerData).forEach(field => {
-      if (customerData[field] && customerData[field].toString().includes('25110100001')) {
-        console.log(`🎯 FOUND! Field '${field}' contains 25110100001:`, customerData[field]);
+    if (serviceId) {
+      // Query SERVICE table - Retrieve comprehensive info
+      const serviceQuery = `
+            SELECT 
+                s.id as service_id,  -- This is the "Account ID"
+                c.id as customer_primary_pk,  -- The Person ID
+                c.customer_id, -- Display Customer ID (5 digits)
+                c.name, c.phone, c.email, 
+                s.address_installation as address, s.status, s.active_date, s.isolir_date, s.period,
+                p.name as package_name, p.speed as package_speed, p.price as package_price,
+                td.pppoe_username, td.ip_address_static, td.mac_address
+            FROM services s
+            JOIN customers c ON s.customer_id = c.id
+            LEFT JOIN packages p ON s.package_id = p.id
+            LEFT JOIN technical_details td ON td.service_id = s.id
+            WHERE s.id = $1
+         `;
+      const serviceResult = await db.query(serviceQuery, [serviceId]);
+      if (serviceResult.rows.length > 0) {
+        const row = serviceResult.rows[0];
+        customerData = {
+          ...row,
+          id: row.service_id, // Map service_id to id for frontend compatibility
+          // Helper fields
+          package_price: parseFloat(row.package_price || 0),
+          enable_isolir: true // Default
+        };
       }
-    });
+    }
 
-    // Check RADIUS online status
+    if (!customerData) {
+      // Fallback or Legacy (Auth found customer but no serviceId, or service lookup failed)
+      console.log('🔍 Backend: Service lookup failed or no serviceId. Trying legacy customer lookup.');
+      // Fixed: customers table has no package_id - get package through services table
+      const customerQuery = `
+          SELECT c.*, 
+                 s.id as service_id, 
+                 s.address_installation as address,
+                 s.status as service_status,
+                 p.name as package_name, 
+                 p.speed as package_speed, 
+                 p.price as package_price,
+                 td.pppoe_username
+          FROM customers c
+          LEFT JOIN services s ON s.customer_id = c.id
+          LEFT JOIN packages p ON s.package_id = p.id
+          LEFT JOIN technical_details td ON td.service_id = s.id
+          WHERE c.id = $1
+          LIMIT 1
+        `;
+      const customerResult = await db.query(customerQuery, [customer.id]);
+
+      if (customerResult.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'Data pelanggan tidak ditemukan'
+        });
+      }
+      customerData = {
+        ...customerResult.rows[0],
+        id: customerResult.rows[0].service_id || customerResult.rows[0].id,
+        service_id: customerResult.rows[0].service_id
+      };
+    }
+
+    // Normalize Data
+    // Ensure critical fields exist
+    if (!customerData.pppoe_username) {
+      // Try to query technical details if not in main object (Customer fallback)
+      // (Only necessary for fallback path)
+    }
+
+    // Proceed to check RADIUS online status
     let isOnline = false;
     let radiusStatus = null;
 
     try {
-      // Check if customer is online in RADIUS
-      const radacctQuery = `
-        SELECT COUNT(*) as active_sessions
-        FROM radacct
-        WHERE username = $1
-        AND acctstoptime IS NULL
-      `;
-      const radacctResult = await db.query(radacctQuery, [customerData.pppoe_username]);
-      isOnline = parseInt(radacctResult.rows[0].active_sessions) > 0;
+      if (customerData.pppoe_username) {
+        // Check if customer is online in RADIUS
+        const radacctQuery = `
+            SELECT COUNT(*) as active_sessions
+            FROM radacct
+            WHERE username = $1
+            AND acctstoptime IS NULL
+          `;
+        const radacctResult = await db.query(radacctQuery, [customerData.pppoe_username]);
+        isOnline = parseInt(radacctResult.rows[0].active_sessions) > 0;
 
-      // Get additional RADIUS info if online
-      if (isOnline) {
-        const activeSessionQuery = `
-          SELECT
-            framedipaddress,
-            acctstarttime,
-            nasipaddress,
-            acctsessiontime,
-            acctinputoctets,
-            acctoutputoctets,
-            callingstationid
-          FROM radacct
-          WHERE username = $1
-          AND acctstoptime IS NULL
-          ORDER BY radacctid DESC
-          LIMIT 1
-        `;
-        const sessionResult = await db.query(activeSessionQuery, [customerData.pppoe_username]);
+        // Get additional RADIUS info if online
+        if (isOnline) {
+          const activeSessionQuery = `
+              SELECT
+                framedipaddress,
+                acctstarttime,
+                nasipaddress,
+                acctsessiontime,
+                acctinputoctets,
+                acctoutputoctets,
+                callingstationid
+              FROM radacct
+              WHERE username = $1
+              AND acctstoptime IS NULL
+              ORDER BY radacctid DESC
+              LIMIT 1
+            `;
+          const sessionResult = await db.query(activeSessionQuery, [customerData.pppoe_username]);
 
-        if (sessionResult.rows.length > 0) {
-          const session = sessionResult.rows[0];
-          radiusStatus = {
-            ipAddress: session.framedipaddress,
-            onlineTime: session.acctstarttime,
-            nasIP: session.nasipaddress,
-            sessionTime: session.acctsessiontime || 0,
-            uploadBytes: session.acctinputoctets || 0,
-            downloadBytes: session.acctoutputoctets || 0,
-            macAddress: session.callingstationid || null
-          };
+          if (sessionResult.rows.length > 0) {
+            const session = sessionResult.rows[0];
+            radiusStatus = {
+              ipAddress: session.framedipaddress,
+              onlineTime: session.acctstarttime,
+              nasIP: session.nasipaddress,
+              sessionTime: session.acctsessiontime || 0,
+              uploadBytes: session.acctinputoctets || 0,
+              downloadBytes: session.acctoutputoctets || 0,
+              macAddress: session.callingstationid || null
+            };
+          }
         }
       }
     } catch (radiusError) {
       console.error('Error checking RADIUS status:', radiusError);
+    }
+
+    // Check monthly usage
+    let usageStats = {
+      total_usage: 0,
+      download: 0,
+      upload: 0,
+      usage_percentage: 0,
+      limit: 0 // 0 means unlimited
+    };
+
+    try {
+      const usageQuery = `
+        SELECT 
+          COALESCE(SUM(acctinputoctets), 0) as total_upload, 
+          COALESCE(SUM(acctoutputoctets), 0) as total_download
+        FROM radacct
+        WHERE username = $1
+        AND acctstarttime >= DATE_TRUNC('month', CURRENT_DATE)
+      `;
+
+      const usageResult = await db.query(usageQuery, [customerData.pppoe_username]);
+
+      if (usageResult.rows.length > 0) {
+        const row = usageResult.rows[0];
+        const upload = parseInt(row.total_upload) || 0;
+        const download = parseInt(row.total_download) || 0;
+
+        usageStats = {
+          total_usage: upload + download,
+          download: download,
+          upload: upload,
+          usage_percentage: 0,
+          limit: 0
+        };
+      }
+    } catch (usageError) {
+      console.error('Error calculating usage:', usageError);
     }
 
     // Check for active invoices (display only - no calculations)
@@ -458,6 +550,46 @@ router.get('/get-customer-data', async (req, res) => {
       console.error('Error checking billing status:', billingError);
     }
 
+    // Query all services for this customer (for account switcher)
+    let accounts = [];
+    try {
+      const accountsQuery = `
+        SELECT 
+          s.id,
+          s.service_number,
+          s.status,
+          s.address_installation as address,
+          s.billing_type,
+          p.name as package_name,
+          p.speed as package_speed,
+          p.price as package_price,
+          td.pppoe_username
+        FROM services s
+        LEFT JOIN packages p ON s.package_id = p.id
+        LEFT JOIN technical_details td ON td.service_id = s.id
+        WHERE s.customer_id = $1
+        ORDER BY s.id
+      `;
+      const accountsResult = await db.query(accountsQuery, [customer.id]);
+
+      if (accountsResult.rows.length > 0) {
+        accounts = accountsResult.rows.map(svc => ({
+          id: svc.id,
+          service_number: svc.service_number,
+          status: svc.status,
+          address: svc.address,
+          billing_type: svc.billing_type,
+          package_name: svc.package_name,
+          package_speed: svc.package_speed,
+          package_price: parseFloat(svc.package_price) || 0,
+          pppoe_username: svc.pppoe_username
+        }));
+        console.log(`🔍 Backend: Found ${accounts.length} services for customer ${customer.id}`);
+      }
+    } catch (accountsError) {
+      console.error('Error fetching customer accounts:', accountsError);
+    }
+
     // Customer portal should NOT calculate expiry date
     // Display-only from admin data - no calculations here
     // Expiry date should be calculated by admin billing system and stored in database
@@ -500,7 +632,9 @@ router.get('/get-customer-data', async (req, res) => {
         router: customerData.router,
         isOnline: isOnline,
         hasInvoice: hasInvoice,
-        calculated_isolir_date: customerData.isolir_date // Same logic as admin - calculated isolir date
+        calculated_isolir_date: customerData.isolir_date, // Same logic as admin - calculated isolir date
+        service_id: customerData.service_id, // Explicitly provide service_id for active state tracking
+        accounts: accounts // All services for this customer (for account switcher)
       },
       radiusStatus: radiusStatus || {
         connected: isOnline,
@@ -509,7 +643,8 @@ router.get('/get-customer-data', async (req, res) => {
         ipAddress: null,
         uptime: null
       },
-      billingStats: billingStats
+      billingStats: billingStats,
+      usageStats: usageStats
     };
 
     res.json({
@@ -663,7 +798,7 @@ router.put('/update-ssid', async (req, res) => {
     }
 
     // Update SSID in customer table
-    const updateSSIDQuery = `
+    /*const updateSSIDQuery = `
       UPDATE customers
       SET ssid = $1,
           updated_at = NOW()
@@ -671,13 +806,13 @@ router.put('/update-ssid', async (req, res) => {
     `;
 
     const result = await query(updateSSIDQuery, [ssid.trim(), customer.id]);
+    
+    if (result.rowCount === 0) { ... } */
 
-    if (result.rowCount === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Data pelanggan tidak ditemukan'
-      });
-    }
+    return res.status(501).json({
+      success: false,
+      message: 'Fitur belum tersedia (kolom database belum ada)'
+    });
 
     res.json({
       success: true,
@@ -726,7 +861,7 @@ router.put('/update-password', async (req, res) => {
     }
 
     // Update password in customer table
-    const updatePasswordQuery = `
+    /*const updatePasswordQuery = `
       UPDATE customers
       SET wifi_password = $1,
           updated_at = NOW()
@@ -735,12 +870,12 @@ router.put('/update-password', async (req, res) => {
 
     const result = await query(updatePasswordQuery, [password, customer.id]);
 
-    if (result.rowCount === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Data pelanggan tidak ditemukan'
-      });
-    }
+    if (result.rowCount === 0) { ... } */
+
+    return res.status(501).json({
+      success: false,
+      message: 'Fitur belum tersedia (kolom database belum ada)'
+    });
 
     res.json({
       success: true,
@@ -763,3 +898,4 @@ router.put('/update-password', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.validateSessionToken = validateSessionToken;

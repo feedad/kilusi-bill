@@ -78,22 +78,49 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Clear all auth storage
-      console.warn('Unauthorized - clearing all auth storage and redirecting to login')
+      const url = error.config?.url || ''
+
+      // Determine if this is a customer portal route
+      const isCustomerRoute = url.includes('/api/v1/customer') ||
+        url.includes('/api/v1/support/') ||
+        url.includes('/api/v1/billing/customer/') ||
+        url.includes('/api/v1/billing/my-') ||
+        url.includes('/api/v1/customer-billing/') ||
+        url.includes('/api/v1/customer-payments/')
+
+      // Determine if this is an admin route
+      const isAdminRoute = !isCustomerRoute && (
+        url.includes('/api/v1/admin') ||
+        url.includes('/api/v1/dashboard') ||
+        url.includes('/api/v1/settings') ||
+        url.includes('/api/v1/billing/') // Generic billing routes are admin
+      )
+
+      console.warn(`Unauthorized (401) on ${isCustomerRoute ? 'customer' : isAdminRoute ? 'admin' : 'unknown'} route:`, url)
 
       try {
-        localStorage.removeItem('auth-storage')
-        localStorage.removeItem('auth_token')
-        localStorage.removeItem('user_data')
-        localStorage.removeItem('customer_token')
-        localStorage.removeItem('customer_data')
+        if (isCustomerRoute) {
+          // Only clear customer auth for customer routes
+          console.log('🔑 Clearing customer auth tokens only')
+          localStorage.removeItem('customer_token')
+          localStorage.removeItem('customer_data')
+        } else if (isAdminRoute) {
+          // Only clear admin auth for admin routes
+          console.log('🔑 Clearing admin auth tokens only')
+          localStorage.removeItem('auth-storage')
+          localStorage.removeItem('auth_token')
+          localStorage.removeItem('user_data')
+        } else {
+          // Unknown route - don't clear anything, just log
+          console.log('🔑 401 on unknown route type, not clearing any tokens')
+        }
       } catch (e) {
         console.error('Error clearing localStorage:', e)
       }
 
-      // Emit custom event for auth error to trigger redirect
-      if (typeof window !== 'undefined') {
-        console.log('🔑 401 Error detected, emitting auth:expired event')
+      // Only emit auth:expired for customer routes
+      if (isCustomerRoute && typeof window !== 'undefined') {
+        console.log('🔑 Customer route 401 - emitting auth:expired event')
         window.dispatchEvent(new CustomEvent('auth:expired', {
           detail: { message: 'Authentication expired', status: 401 }
         }))

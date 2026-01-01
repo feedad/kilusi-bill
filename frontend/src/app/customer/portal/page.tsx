@@ -5,49 +5,41 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
-  FileText,
   Wifi,
   WifiOff,
   AlertTriangle,
-  Headset,
   Zap,
-  Copy,
-  Users,
-  TrendingUp,
-  Clock,
-  CheckCircle,
-  Activity,
+  CreditCard,
   RefreshCw,
   Smartphone,
-  ExternalLink,
   Calendar,
   ChevronDown,
   ChevronUp,
-  CreditCard
+  Ticket,
+  Globe,
+  Home,
+  Building2,
+  MapPin,
+  Clock,
+  ArrowRightLeft,
+  CheckCircle2
 } from 'lucide-react'
 import { useCustomerAuth } from '@/contexts/CustomerAuthContext'
 import { useRouter } from 'next/navigation'
 import { toast } from 'react-hot-toast'
 import { customerAPI } from '@/lib/customer-api'
+import CustomerAuth, { Customer } from '@/lib/customer-auth'
 
-interface CustomerData {
-  id: number
-  customer_id?: string
-  name: string
-  phone: string
-  status: string
-  address?: string
-  package_name?: string
-  package_price?: number
-  pppoe_username?: string // PPPoE username untuk koneksi internet
-  password?: string
-  status_text?: string
+interface CustomerData extends Customer {
+  accounts?: Customer[]
   registration_date?: string
   isolation_date?: string
-  expiry_date?: string // tanggal expired real dari database
-  calculated_isolir_date?: string // tanggal isolir yang sudah dikalkulasi (sama seperti admin)
-  hasInvoice?: boolean // untuk menentukan apakah invoice sudah keluar
-  isOnline?: boolean // status RADIUS online/offline
+  expiry_date?: string
+  calculated_isolir_date?: string
+  service_id?: string | number
+  hasInvoice?: boolean
+  isOnline?: boolean
+  package_price?: number // ensure type override if needed
 }
 
 interface BillingStats {
@@ -59,6 +51,14 @@ interface BillingStats {
   overdueInvoices: number
 }
 
+interface UsageStats {
+  total_usage: number
+  download: number
+  upload: number
+  usage_percentage: number
+  limit: number
+}
+
 interface RadiusStatus {
   connected: boolean
   lastSeen?: string
@@ -67,18 +67,11 @@ interface RadiusStatus {
   uptime?: string
 }
 
-interface PortalData {
-  loginUrl: string
-  token: string
-  expiresAt: string
-  daysUntilExpiry: number
-  radiusStatus: RadiusStatus
-}
-
 export default function CustomerPortal() {
   const router = useRouter()
-  const { customer } = useCustomerAuth()
+  const { customer, loginWithToken } = useCustomerAuth()
   const [customerData, setCustomerData] = useState<CustomerData | null>(null)
+  const [availableAccounts, setAvailableAccounts] = useState<Customer[]>([])
   const [billingStats, setBillingStats] = useState<BillingStats>({
     totalInvoices: 0,
     paidInvoices: 0,
@@ -87,12 +80,13 @@ export default function CustomerPortal() {
     totalUnpaid: 0,
     overdueInvoices: 0
   })
-  const [portalData, setPortalData] = useState<PortalData | null>(null)
+  const [usageStats, setUsageStats] = useState<UsageStats | null>(null)
+  const [radiusStatus, setRadiusStatus] = useState<RadiusStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [switching, setSwitching] = useState(false)
   const [showDetailedInfo, setShowDetailedInfo] = useState(false)
 
-  // Fungsi untuk menentukan greeting berdasarkan waktu
   const getGreeting = () => {
     const hour = new Date().getHours()
     if (hour < 10) return 'Selamat Pagi'
@@ -101,605 +95,451 @@ export default function CustomerPortal() {
     return 'Selamat Malam'
   }
 
-  
-  useEffect(() => {
-    const fetchCustomerData = async () => {
-      try {
-        setLoading(true)
-
-        // Get the current authentication token
-        const token = localStorage.getItem('customer_token')
-
-        if (!token) {
-          console.log('No authentication token found, redirecting to login')
-          router.push('/customer/login')
-          return
-        }
-
-        console.log('🔍 Fetching customer data using standardized API...')
-
-        // Use standardized customer API
-        const result = await customerAPI.getCustomerData()
-        console.log('📡 API Response:', result)
-
-        if (!result.success) {
-          // Handle authentication errors through API client
-          if (result.error?.includes('Authentication') || result.error?.includes('Unauthorized')) {
-            console.log('Authentication error, redirecting to login')
-            logout()
-            return
-          }
-          throw new Error(result.message || 'API returned error')
-        }
-
-        const { customer: apiCustomer, radiusStatus, billingStats } = result.data
-
-        // Map the comprehensive API response to our local CustomerData interface
-        const enrichedCustomer: CustomerData = {
-          id: apiCustomer.id,
-          customer_id: apiCustomer.customer_id,
-          name: apiCustomer.name,
-          phone: apiCustomer.phone,
-          status: apiCustomer.status,
-          address: apiCustomer.address,
-          registration_date: apiCustomer.install_date?.split('T')[0],
-          isolation_date: apiCustomer.isolation_date,
-          expiry_date: apiCustomer.expiry_date,
-          calculated_isolir_date: apiCustomer.calculated_isolir_date, // Add calculated isolir date like admin
-          hasInvoice: apiCustomer.hasInvoice,
-          isOnline: apiCustomer.isOnline,
-          package_name: apiCustomer.package_name,
-          package_price: parseFloat(apiCustomer.package_price) || 0,
-          pppoe_username: apiCustomer.pppoe_username,
-          password: undefined // Don't expose password in portal
-        }
-
-        console.log('✅ Mapped customer data:', enrichedCustomer)
-        console.log('📊 Billing stats:', billingStats)
-        console.log('🌐 RADIUS status:', radiusStatus)
-
-        setCustomerData(enrichedCustomer)
-        setBillingStats(billingStats)
-
-        // Set portal data
-        const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001'
-        setPortalData({
-          loginUrl: `${baseUrl}/customer/login/${token}`,
-          token: token,
-          expiresAt: enrichedCustomer.expiry_date ? new Date(enrichedCustomer.expiry_date).toISOString() : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-          daysUntilExpiry: enrichedCustomer.expiry_date ? Math.ceil((new Date(enrichedCustomer.expiry_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)) : 30,
-          radiusStatus: radiusStatus || {
-            connected: enrichedCustomer.isOnline || false,
-            lastSeen: enrichedCustomer.isOnline ? new Date().toISOString() : null,
-            onlineTime: null,
-            ipAddress: null,
-            uptime: null
-          }
-        })
-
-      } catch (error) {
-        console.error('💥 Error fetching customer data:', error)
-        console.error('💥 Error details:', {
-          message: error.message,
-          status: error.status,
-          statusText: error.statusText,
-          token: localStorage.getItem('customer_token') ? 'present' : 'missing',
-          customerFromContext: customer ? 'present' : 'missing'
-        })
-
-        // Try fallback to auth context data if API fails
-        if (customer) {
-          console.log('🔄 Using auth context data as fallback')
-          console.log('⚠️ WARNING: Fallback data may be incorrect!')
-          console.log('⚠️ customer.isolation_date:', customer.isolation_date)
-          console.log('⚠️ customer.billing_status:', customer.billing_status)
-
-          // Fix: Use correct data from auth context like profile page
-          const enrichedCustomer: CustomerData = {
-            id: customer.id,
-            customer_id: customer.customer_id,
-            name: customer.name,
-            phone: customer.phone,
-            status: customer.status,
-            address: customer.address,
-            registration_date: customer.registration_date || customer.created_at?.split('T')[0],
-            isolation_date: customer.isolir_date || '2025-12-01T05:33:12.434Z', // Use correct field
-            expiry_date: customer.expiry_date,
-            hasInvoice: false, // Correct default - no invoice shown until API confirms
-            isOnline: customer.is_online || false,
-            package_name: customer.package_name,
-            package_price: parseFloat(customer.package_price) || 0,
-            pppoe_username: customer.pppoe_username,
-            password: undefined
-          }
-
-          setCustomerData(enrichedCustomer)
-          setBillingStats({
-            totalInvoices: 0,
-            paidInvoices: 0,
-            unpaidInvoices: 0,
-            totalPaid: 0,
-            totalUnpaid: 0,
-            overdueInvoices: 0
-          })
-
-          const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001'
-          const token = localStorage.getItem('customer_token') || 'demo-session-token'
-
-          setPortalData({
-            loginUrl: `${baseUrl}/customer/login/${token}`,
-            token: token,
-            expiresAt: enrichedCustomer.expiry_date ? new Date(enrichedCustomer.expiry_date).toISOString() : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-            daysUntilExpiry: enrichedCustomer.expiry_date ? Math.ceil((new Date(enrichedCustomer.expiry_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)) : 30,
-            radiusStatus: {
-              connected: enrichedCustomer.isOnline,
-              lastSeen: enrichedCustomer.isOnline ? new Date().toLocaleString('id-ID') : null,
-              onlineTime: enrichedCustomer.isOnline ? 'Online' : null,
-              ipAddress: enrichedCustomer.isOnline ? 'Connected' : null,
-              uptime: enrichedCustomer.isOnline ? 'Active' : null
-            }
-          })
-        } else {
-          // No fallback available, redirect to login
-          console.log('No fallback data available, redirecting to login')
-          router.push('/customer/login')
-          return
-        }
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    fetchCustomerData()
-  }, []) // Remove customer dependency to avoid conflicts with token-based auth
-
-  const handleRefresh = async () => {
-    setRefreshing(true)
+  const fetchCustomerData = async () => {
     try {
-      console.log('🔄 Refreshing customer data from enhanced API...')
-
-      // Get the current authentication token
+      setLoading(true)
       const token = localStorage.getItem('customer_token')
 
       if (!token) {
-        toast.error('❌ Token tidak ditemukan, silakan login kembali')
+        router.push('/customer/login')
         return
       }
 
-      // Use standardized customer API
+      // Check for available accounts in localStorage
+      // We prioritize the persistent storage we created in CustomerAuth
+      const storedAccounts = CustomerAuth.getAccounts()
+      const storedCustomer = CustomerAuth.getCurrentCustomer()
+
+      if (storedAccounts.length > 0) {
+        setAvailableAccounts(storedAccounts)
+      } else if (storedCustomer?.accounts && storedCustomer.accounts.length > 0) {
+        setAvailableAccounts(storedCustomer.accounts)
+      } else if (storedCustomer) {
+        // If no list found, at least show current
+        setAvailableAccounts([storedCustomer])
+      }
+
       const result = await customerAPI.getCustomerData()
 
       if (!result.success) {
-        // Handle authentication errors through API client
         if (result.error?.includes('Authentication') || result.error?.includes('Unauthorized')) {
-          toast.error('❌ Sesi telah berakhir, silakan login kembali')
-          logout()
+          CustomerAuth.logout()
+          router.push('/customer/login')
           return
         }
         throw new Error(result.message || 'API returned error')
       }
 
-      const { customer: apiCustomer, radiusStatus, billingStats } = result.data
+      const { customer: apiCustomer, radiusStatus: apiRadius, billingStats: apiBilling, usageStats: apiUsage } = result.data
 
-      // Map the comprehensive API response to our local CustomerData interface
-      const refreshedCustomer: CustomerData = {
-        id: apiCustomer.id,
-        customer_id: apiCustomer.customer_id,
-        name: apiCustomer.name,
-        phone: apiCustomer.phone,
-        status: apiCustomer.status,
-        address: apiCustomer.address,
+      const enrichedCustomer: CustomerData = {
+        ...apiCustomer,
         registration_date: apiCustomer.install_date?.split('T')[0],
-        isolation_date: apiCustomer.isolation_date,
-        expiry_date: apiCustomer.expiry_date,
-        calculated_isolir_date: apiCustomer.calculated_isolir_date, // Add calculated isolir date
-        hasInvoice: apiCustomer.hasInvoice,
-        isOnline: apiCustomer.isOnline,
-        package_name: apiCustomer.package_name,
         package_price: parseFloat(apiCustomer.package_price) || 0,
-        pppoe_username: apiCustomer.pppoe_username,
-        password: undefined
+        // Preserve accounts list from persistence if API doesn't return it
+        accounts: (apiCustomer.accounts && apiCustomer.accounts.length > 0)
+          ? apiCustomer.accounts
+          : storedAccounts
       }
 
-      console.log('✅ Refreshed customer data:', refreshedCustomer)
-      console.log('📊 Refreshed billing stats:', billingStats)
-      console.log('🌐 Refreshed RADIUS status:', radiusStatus)
+      setCustomerData(enrichedCustomer)
+      setBillingStats(apiBilling)
+      setRadiusStatus(apiRadius)
+      setUsageStats(apiUsage)
 
-      setCustomerData(refreshedCustomer)
-      setBillingStats(billingStats)
+      // Update available accounts and persistence if API returned new list
+      if (enrichedCustomer.accounts && enrichedCustomer.accounts.length > 0) {
+        setAvailableAccounts(enrichedCustomer.accounts)
+        // Update persistent storage
+        CustomerAuth.setAccounts(enrichedCustomer.accounts)
+      } else if (storedAccounts.length > 0) {
+        // If API didn't return accounts but we have them stored, keep them in state
+        setAvailableAccounts(storedAccounts)
+      }
 
-      // Update portal data with refreshed radius status
-      if (portalData) {
-        setPortalData({
-          ...portalData,
-          radiusStatus: radiusStatus || {
-            connected: refreshedCustomer.isOnline || false,
-            lastSeen: refreshedCustomer.isOnline ? new Date().toISOString() : null,
-            onlineTime: null,
-            ipAddress: null,
-            uptime: null
-          }
+    } catch (error: any) {
+      console.error('Error fetching data:', error)
+      // Fallback
+      if (customer) {
+        setCustomerData({
+          ...customer,
+          package_price: parseFloat(customer.package_price?.toString() || '0')
         })
+        if (customer.accounts) setAvailableAccounts(customer.accounts)
       }
-
-      toast.success('✅ Data berhasil diperbarui')
-
-    } catch (error) {
-      console.error('💥 Error refreshing data:', error)
-      toast.error(`❌ Gagal memperbarui data: ${error.message}`)
     } finally {
-      setRefreshing(false)
+      setLoading(false)
     }
   }
 
-  const handleCopyPortalLink = async () => {
-    if (portalData?.loginUrl) {
-      try {
-        await navigator.clipboard.writeText(portalData.loginUrl)
-        toast.success('✅ Link portal berhasil disalin!')
-      } catch (error) {
-        toast.error('❌ Gagal menyalin link')
+  useEffect(() => {
+    fetchCustomerData()
+  }, [])
+
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    await fetchCustomerData()
+    setRefreshing(false)
+    toast.success('Data diperbarui')
+  }
+
+  const handleSwitchAccount = async (targetId: number) => {
+    if (!customerData?.id || targetId === customerData.id) return
+
+    setSwitching(true)
+    const toastId = toast.loading('Memindahkan akun...')
+
+    try {
+      const res = await customerAPI.switchAccount(targetId)
+
+      if (res.success && res.data) {
+        // Update credentials
+        // IMPORTANT: We must preserve the accounts list before setting new auth data
+        // because the switch-account endpoint might not return the full list of linked accounts
+        const currentAccounts = CustomerAuth.getAccounts()
+
+        // If the response includes accounts, use them, otherwise keep existing
+        if (res.data.customer.accounts && res.data.customer.accounts.length > 0) {
+          CustomerAuth.setAccounts(res.data.customer.accounts)
+        } else if (currentAccounts.length > 0) {
+          // Inject existing accounts into the new customer object for consistency
+          res.data.customer.accounts = currentAccounts
+        }
+
+        CustomerAuth.setAuthData(res.data.customer, res.data.token)
+
+        // Reload page to ensure clean state
+        window.location.reload()
+      } else {
+        toast.error('Gagal berpindah akun')
       }
+    } catch (error) {
+      console.error('Switch account error:', error)
+      toast.error('Gagal berpindah akun')
+    } finally {
+      toast.dismiss(toastId)
+      setSwitching(false)
     }
   }
 
   const handleRestartDevice = async () => {
-    if (!confirm('Apakah Anda yakin ingin me-restart device? Internet akan terputus selama 1-2 menit.')) {
-      return
-    }
-
-    toast.loading('🔄 Mengirim perintah restart...')
+    if (!confirm('Reboot perangkat? Koneksi akan terputus sebentar.')) return
+    toast.loading('Mengirim perintah...')
     setTimeout(() => {
-      toast.success('✅ Perintah restart berhasil dikirim. Device akan restart dalam 1-2 menit.')
+      toast.dismiss()
+      toast.success('Perangkat sedang restart')
     }, 2000)
-    toast.dismiss()
+  }
+
+  const formatBytes = (bytes: number) => {
+    if (bytes === 0) return '0 B'
+    const k = 1024
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
   }
 
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('id-ID', {
-      style: 'currency',
-      currency: 'IDR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0
-    }).format(amount)
-  }
-
-  const getStatusBadge = (status: string, isOnline?: boolean) => {
-    switch (status) {
-      case 'active':
-        if (isOnline === true) {
-          return <Badge className="bg-green-500/90 dark:bg-green-600/80 text-white flex items-center"><Wifi className="w-3 h-3 mr-1" />Online</Badge>
-        } else if (isOnline === false) {
-          return <Badge className="bg-red-500/90 dark:bg-red-600/80 text-white flex items-center"><WifiOff className="w-3 h-3 mr-1" />Offline</Badge>
-        }
-        return <Badge className="bg-green-500/90 dark:bg-green-600/80 text-white flex items-center"><Wifi className="w-3 h-3 mr-1" />Online</Badge>
-      case 'suspended':
-        return <Badge className="bg-orange-500/90 dark:bg-orange-600/80 text-white">Suspended</Badge>
-      case 'inactive':
-        return <Badge className="bg-gray-500/90 dark:bg-gray-600/80 text-white">Inactive</Badge>
-      default:
-        return <Badge variant="outline">{status}</Badge>
-    }
-  }
-
-  const getRadiusStatusBadge = (connected: boolean) => {
-    if (connected) {
-      return <Badge className="bg-green-500/90 dark:bg-green-600/80 text-white flex items-center"><Wifi className="w-3 h-3 mr-1" />Online</Badge>
-    }
-    return <Badge className="bg-red-500/90 dark:bg-red-600/80 text-white flex items-center"><WifiOff className="w-3 h-3 mr-1" />Offline</Badge>
+    return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(amount)
   }
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Memuat dashboard...</p>
-        </div>
-      </div>
-    )
+    return <div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div></div>
   }
 
-  // Show not found message if no customer data
-  if (!customerData) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="text-red-500 mb-4">
-            <AlertTriangle className="w-12 h-12 mx-auto mb-2" />
-            <h2 className="text-xl font-semibold">Data Pelanggan Tidak Ditemukan</h2>
-          </div>
-          <p className="text-gray-600 mb-2">Silakan login kembali atau hubungi admin</p>
-          <p className="text-gray-500 text-sm mb-4">
-            Token: {localStorage.getItem('customer_token') ? '✅ Ada' : '❌ Tidak ada'} |
-            Customer: {customer?.name || '❌ Tidak ada'}
-          </p>
-          <Button onClick={() => {
-            console.log('Redirecting to login...')
-            localStorage.removeItem('customer_token')
-            localStorage.removeItem('customer_data')
-            router.push('/customer/login')
-          }}>
-            Kembali ke Login
+  if (!customerData) return null
+
+  // Calculate usage
+  const totalUsageBytes = usageStats?.total_usage || 0
+  const limitBytes = usageStats?.limit || 0
+
+  // If unlimited (0), use 100% full ring if usage > 0, else 0%
+  // Or visual scale relative to 500GB if unlimited just for reference (optional), but safer to just show full ring if unlimited.
+  const displayPercentage = limitBytes > 0
+    ? Math.min((totalUsageBytes / limitBytes) * 100, 100)
+    : (totalUsageBytes > 0 ? 100 : 0) // Full circle if active
+
+  const usageDisplay = formatBytes(totalUsageBytes)
+  const limitDisplay = limitBytes > 0 ? formatBytes(limitBytes) : 'Unlimited'
+
+  const usageColor = displayPercentage > 90 && limitBytes > 0 ? 'text-red-500' : 'text-blue-500'
+  const usageStroke = displayPercentage > 90 && limitBytes > 0 ? '#ef4444' : '#3b82f6'
+
+  return (
+    <div className="space-y-6 max-w-5xl mx-auto pb-10">
+
+      {/* Header Section */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">{getGreeting()}, {customerData.name.split(' ')[0]}</h1>
+          <p className="text-muted-foreground">Kelola semua layanan internet Anda dalam satu tempat.</p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing}>
+            <RefreshCw className={`w-4 h-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+            Refresh
           </Button>
         </div>
       </div>
-    )
-  }
 
-  return (
-    <div className="space-y-6">
-      {/* Customer Greeting & Info Card */}
-      {customerData && (
-        <Card className="bg-gradient-to-r from-blue-600/90 to-purple-600/90 dark:from-blue-700/80 dark:to-purple-700/80 text-white border-0">
-          <CardHeader className="text-white border-0">
-            <CardTitle className="flex items-center justify-between">
-              <div className="flex items-center">
-                <div className="w-8 h-8 bg-white/20 dark:bg-white/10 rounded-lg flex items-center justify-center mr-3">
-                  <Users className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="text-2xl font-bold text-white dark:text-white selection:bg-blue-200/20 selection:text-blue-100 hover:bg-transparent hover:text-white">
-                    {getGreeting()}, {customerData.name}!
-                  </div>
-                  <div className="text-blue-100 dark:text-blue-200 text-sm">Selamat datang di portal pelanggan</div>
-                </div>
-              </div>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={handleRefresh}
-                disabled={refreshing}
-                className="bg-white/20 hover:bg-white/30 text-white border-white/30"
-              >
-                <RefreshCw className={`w-4 h-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
-                Refresh
-              </Button>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
-            {/* Single Compact Info Widget */}
-            <div className="bg-white/10 backdrop-blur rounded-lg p-4 border border-white/20">
-              {/* ID Pelanggan & Status */}
-              <div className="flex items-center justify-between mb-3">
-                <Badge className="bg-white/20 text-white border-white/30 font-mono text-sm">
-                  {customerData.customer_id || customerData.id?.toString() || 'Unknown'}
-                </Badge>
-                {getStatusBadge(customerData.status, customerData.isOnline)}
-              </div>
+      {/* Account Service Switcher (New Feature) */}
+      {availableAccounts.length > 0 && (
+        <div className="w-full overflow-x-auto pb-2 -mx-4 px-4 md:mx-0 md:px-0">
+          <div className="flex gap-4 min-w-max">
+            {availableAccounts.map((acc: any) => {
+              // Robust active check: Compare against current customer id OR serviceId OR pppoe_username
+              const isActive = customerData && (
+                (acc.pppoe_username && customerData.pppoe_username && acc.pppoe_username === customerData.pppoe_username) ||
+                String(acc.id) === String(customerData.id) ||
+                (customerData.service_id && String(acc.id) === String(customerData.service_id))
+              )
 
-              {/* Status Layanan */}
-              <div className="mb-3">
-                <div className="flex items-start">
-                  {customerData.status === 'active' ? (
-                    <>
-                      <Activity className="w-4 h-4 mr-2 mt-1 text-green-300 flex-shrink-0" />
-                      <div className="flex-1">
-                        <div className="text-base font-medium">Layanan internet aktif</div>
-                        <div className="text-sm text-blue-200">
-                          Sampai {new Date(
-                            // Use same logic as admin: calculated_isolir_date first, then isolir_date
-                            customerData.calculated_isolir_date || customerData.isolir_date || Date.now() + 30 * 24 * 60 * 60 * 1000
-                          ).toLocaleDateString('id-ID', {
-                            day: 'numeric',
-                            month: 'long',
-                            year: 'numeric'
-                          })}
-                        </div>
+              return (
+                <div
+                  key={acc.id}
+                  onClick={() => !isActive && handleSwitchAccount(acc.id)}
+                  className={`
+                        cursor-pointer transition-all duration-300 group
+                        rounded-xl p-5 w-[310px] flex flex-col gap-3 relative overflow-hidden
+                        ${isActive
+                      ? 'bg-blue-600 text-white shadow-[0_20px_40px_-15px_rgba(59,130,246,0.5)] scale-[1.02] border-none'
+                      : 'bg-[#1e293b]/40 text-slate-400 hover:bg-slate-800 border border-slate-700/50 opacity-70 hover:opacity-100'
+                    }
+                        ${switching ? 'opacity-50 pointer-events-none' : ''}
+                      `}
+                >
+                  {/* Managed Header */}
+                  <div className="flex justify-between items-start z-10">
+                    <div className="flex items-center gap-3">
+                      <div className={`p-2.5 rounded-lg backdrop-blur-sm ${isActive ? 'bg-white/20' : 'bg-background/20'}`}>
+                        {acc.package_name?.toLowerCase().includes('corporate') || acc.package_name?.toLowerCase().includes('bisnis')
+                          ? <Building2 className={`w-5 h-5 ${isActive ? 'text-white' : ''}`} />
+                          : <Home className={`w-5 h-5 ${isActive ? 'text-white' : ''}`} />
+                        }
                       </div>
-                    </>
-                  ) : (
-                    <>
-                      <AlertTriangle className="w-4 h-4 mr-2 mt-1 text-yellow-300 flex-shrink-0" />
-                      <div className="flex-1">
-                        <div className="text-base font-medium">Layanan internet suspended</div>
-                        {customerData.isolation_date && (
-                          <div className="text-sm text-red-300">
-                            Sejak {new Date(customerData.isolation_date).toLocaleDateString('id-ID', {
-                              day: 'numeric',
-                              month: 'long',
-                              year: 'numeric'
-                            })}
-                          </div>
-                        )}
+                      <div className="flex flex-col">
+                        <span className={`text-[10px] font-bold uppercase tracking-widest ${isActive ? 'text-white/70' : 'opacity-60'}`}>No. Layanan</span>
+                        <span className={`font-mono text-xl font-black tracking-tight ${isActive ? 'text-white' : 'text-primary'}`}>
+                          #{acc.service_number || (acc.pppoe_username ? acc.pppoe_username.split('@')[0] : null) || `ID:${acc.id}`}
+                        </span>
                       </div>
-                    </>
-                  )}
-                </div>
-
-                {/* Tombol Bayar - Muncul hanya saat invoice sudah terbit */}
-                {customerData.hasInvoice && (
-                  <div className="mt-2 ml-6">
-                    <Button
-                      onClick={() => router.push('/customer/billing')}
-                      className={`${
-                        customerData.status === 'active'
-                          ? 'bg-green-600 hover:bg-green-700'
-                          : 'bg-red-600 hover:bg-red-700'
-                      } text-white border-0 px-4 py-1 h-8 text-sm`}
-                      size="sm"
-                    >
-                      {customerData.status === 'active' ? (
-                        <>
-                          <CreditCard className="w-3 h-3 mr-1" />
-                          Bayar Sekarang
-                        </>
-                      ) : (
-                        <>
-                          <AlertTriangle className="w-3 h-3 mr-1" />
-                          Bayar Sekarang
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                )}
-              </div>
-
-              {/* Paket & Harga */}
-              <div className="mb-3">
-                <div className="flex items-start">
-                  <Zap className="w-4 h-4 mr-2 mt-1 text-blue-300 flex-shrink-0" />
-                  <div className="flex-1">
-                    <div className="text-base font-medium">
-                      {customerData.package_name || 'Bronze'}
                     </div>
-                    {customerData.package_price && (
-                      <div className="text-sm text-blue-200">
-                        {formatCurrency(customerData.package_price)}/bulan
+                    {isActive && (
+                      <div className="bg-white/20 text-white px-2 py-0.5 rounded-full text-[10px] font-black tracking-tighter shadow-sm">
+                        DIKELOLA
                       </div>
                     )}
                   </div>
+
+                  <div className="z-10 mt-1">
+                    <h3 className={`font-bold text-lg truncate mb-0.5 ${isActive ? 'text-white' : ''}`}>
+                      {acc.address ? acc.address.split(',')[0] : `Layanan #${acc.id}`}
+                    </h3>
+                    <div className={`flex items-center gap-2 text-sm font-medium ${isActive ? 'text-white/90' : 'opacity-80'}`}>
+                      <Zap className={`w-4 h-4 ${isActive ? 'text-white' : 'text-yellow-400'}`} /> {acc.package_name || 'Paket Internet'}
+                    </div>
+                  </div>
+
+                  {/* Connection Indicator */}
+                  <div className={`flex items-center gap-2 text-xs font-semibold z-10 mt-auto pt-3 border-t ${isActive ? 'border-white/10' : 'border-muted/20'}`}>
+                    <div className={`w-2 h-2 rounded-full ${acc.status === 'active' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]'}`}></div>
+                    <span className={isActive ? 'text-white' : (acc.status === 'active' ? 'text-green-500' : 'text-red-500')}>
+                      {acc.status === 'active' ? 'Layanan Aktif' : 'Suspended'}
+                    </span>
+
+                    {isActive ? (
+                      <div className="ml-auto flex items-center gap-1.5 text-white">
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span className="text-[10px] font-black tracking-tighter uppercase">Sedang Dikelola</span>
+                      </div>
+                    ) : (
+                      <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <span className="text-[10px] uppercase font-bold text-primary italic">Pilih Layanan</span>
+                        <ArrowRightLeft className="w-3 h-3 text-primary" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Background Decoration */}
+                  <div className="absolute -right-6 -bottom-6 opacity-10 rotate-12">
+                    <Wifi className="w-32 h-32" />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Main Dashboard Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+        {/* Left Column: Usage & Status */}
+        <Card className="md:col-span-2 border-0 shadow-sm bg-gradient-to-br from-card to-accent/10">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Wifi className="w-5 h-5 text-primary" /> Status Koneksi
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col md:flex-row items-center justify-between gap-8">
+
+              {/* Gauge Visualization */}
+              <div className="relative w-48 h-48 flex-shrink-0">
+                <svg className="w-full h-full transform -rotate-90">
+                  <circle cx="96" cy="96" r="88" stroke="currentColor" strokeWidth="12" fill="transparent" className="text-muted/20" />
+                  <circle cx="96" cy="96" r="88" stroke={usageStroke} strokeWidth="12" fill="transparent"
+                    strokeDasharray={2 * Math.PI * 88}
+                    strokeDashoffset={2 * Math.PI * 88 * (1 - displayPercentage / 100)}
+                    className="transition-all duration-1000 ease-out"
+                  />
+                </svg>
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+                  <span className="text-3xl font-bold">
+                    {limitBytes > 0 ? `${Math.round(displayPercentage)}%` : usageDisplay.split(' ')[0]}
+                  </span>
+                  <span className="text-xs text-muted-foreground">{limitBytes > 0 ? 'Used' : usageDisplay.split(' ')[1]}</span>
+                  <span className="text-sm font-medium mt-1">{limitDisplay}</span>
                 </div>
               </div>
 
-              {/* Toggle Button */}
-              <div className="flex justify-center">
-                <Button
-                  variant="ghost"
-                  onClick={() => setShowDetailedInfo(!showDetailedInfo)}
-                  className="text-white hover:bg-white/10 p-2"
-                >
-                  {showDetailedInfo ? (
-                    <ChevronUp className="w-4 h-4" />
-                  ) : (
-                    <ChevronDown className="w-4 h-4" />
-                  )}
+              {/* Connection Details */}
+              <div className="flex-1 w-full space-y-4">
+
+                <div className="flex items-center justify-between p-3 rounded-lg bg-background border">
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2 rounded-full ${customerData.isOnline ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
+                      {customerData.isOnline ? <Wifi className="w-5 h-5" /> : <WifiOff className="w-5 h-5" />}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Status Modem</p>
+                      <p className={`font-semibold ${customerData.isOnline ? 'text-green-600' : 'text-red-500'}`}>
+                        {customerData.isOnline ? 'Online / Terhubung' : 'Offline / Terputus'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-3 rounded-lg bg-background border">
+                    <p className="text-xs text-muted-foreground mb-1">IP Address</p>
+                    <p className="font-mono text-sm font-medium">{radiusStatus?.ipAddress || '-'}</p>
+                  </div>
+                  <div className="p-3 rounded-lg bg-background border">
+                    <p className="text-xs text-muted-foreground mb-1">Uptime</p>
+                    <p className="font-mono text-sm font-medium">{radiusStatus?.uptime || '-'}</p>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Right Column: Billing & Actions */}
+        <div className="space-y-6">
+
+          {/* Billing Card */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center justify-between">
+                Tagihan Bulan Ini
+                <CreditCard className="w-4 h-4 text-muted-foreground" />
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="mt-2">
+                <span className="text-3xl font-bold tracking-tight">
+                  {customerData.hasInvoice && billingStats?.unpaidInvoices > 0
+                    ? formatCurrency(customerData.package_price)
+                    : 'Rp 0'}
+                </span>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {customerData.hasInvoice && billingStats?.unpaidInvoices > 0
+                    ? 'Belum dibayar'
+                    : 'Lunas / Tidak ada tagihan'}
+                </p>
+              </div>
+
+              {customerData.hasInvoice && billingStats?.unpaidInvoices > 0 && (
+                <Button className="w-full mt-4 bg-green-600 hover:bg-green-700" onClick={() => router.push('/customer/billing')}>
+                  Bayar Sekarang
                 </Button>
-              </div>
-
-              {/* Detailed Info */}
-              {showDetailedInfo && (
-                <div className="mt-4 space-y-3 text-sm border-t border-white/20 pt-4">
-                  <div className="flex items-start">
-                    <span className="w-4 h-4 mr-2 text-blue-300 mt-0.5">👤</span>
-                    <div>
-                      <span className="block">Nama Lengkap</span>
-                      <span className="text-blue-200">{customerData.name}</span>
-                    </div>
-                  </div>
-
-                  {customerData.address && (
-                    <div className="flex items-start">
-                      <span className="w-4 h-4 mr-2 text-blue-300 mt-0.5">📍</span>
-                      <div>
-                        <span className="block">Alamat</span>
-                        <span className="text-blue-200">{customerData.address}</span>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="flex items-center">
-                    <Smartphone className="w-4 h-4 mr-2 text-blue-300" />
-                    <div>
-                      <span className="block">Nomor HP</span>
-                      <span className="text-blue-200">{customerData.phone}</span>
-                    </div>
-                  </div>
-
-                  {customerData.registration_date && (
-                    <div className="flex items-center">
-                      <Calendar className="w-4 h-4 mr-2 text-blue-300" />
-                      <div>
-                        <span className="block">Tanggal Daftar</span>
-                        <span className="text-blue-200">
-                          {new Date(customerData.registration_date).toLocaleDateString('id-ID', {
-                            day: 'numeric',
-                            month: 'long',
-                            year: 'numeric'
-                          })}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-
-                  {customerData.isolation_date && (
-                    <div className="flex items-center">
-                      <AlertTriangle className="w-4 h-4 mr-2 text-yellow-300" />
-                      <div>
-                        <span className="block">Tanggal Isolir</span>
-                        <span className="text-yellow-200">
-                          {new Date(customerData.isolation_date).toLocaleDateString('id-ID', {
-                            day: 'numeric',
-                            month: 'long',
-                            year: 'numeric'
-                          })}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-
-                  {customerData.pppoe_username && (
-                    <div className="flex items-center">
-                      <Wifi className="w-4 h-4 mr-2 text-blue-300" />
-                      <div>
-                        <span className="block">PPPoE Username</span>
-                        <span className="text-blue-200 font-mono text-xs">{customerData.pppoe_username}</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
               )}
+              {billingStats?.unpaidInvoices <= 0 && (
+                <Button variant="outline" className="w-full mt-4" onClick={() => router.push('/customer/billing')}>
+                  Riwayat Tagihan
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Quick Actions */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Aksi Cepat</CardTitle>
+            </CardHeader>
+            <CardContent className="grid grid-cols-2 gap-2">
+              <Button variant="ghost" className="h-auto py-3 flex flex-col gap-2" onClick={handleRestartDevice}>
+                <RefreshCw className="w-5 h-5 text-blue-500" />
+                <span className="text-xs">Restart WiFi</span>
+              </Button>
+              <Button variant="ghost" className="h-auto py-3 flex flex-col gap-2" onClick={() => router.push('/customer/support/tickets/new')}>
+                <Ticket className="w-5 h-5 text-purple-500" />
+                <span className="text-xs">Buat Tiket</span>
+              </Button>
+              <Button variant="ghost" className="h-auto py-3 flex flex-col gap-2" onClick={() => router.push('/customer/settings/device')}>
+                <Globe className="w-5 h-5 text-orange-500" />
+                <span className="text-xs">Ganti Password</span>
+              </Button>
+              <Button variant="ghost" className="h-auto py-3 flex flex-col gap-2" onClick={() => setShowDetailedInfo(!showDetailedInfo)}>
+                <ChevronDown className={`w-5 h-5 text-gray-500 transition-transform ${showDetailedInfo ? 'rotate-180' : ''}`} />
+                <span className="text-xs">Detail Info</span>
+              </Button>
+            </CardContent>
+          </Card>
+
+        </div>
+
+      </div>
+
+      {/* Detailed Info Section (Collapsible) */}
+      {showDetailedInfo && (
+        <Card className="animate-in fade-in slide-in-from-top-4">
+          <CardHeader>
+            <CardTitle className="text-lg">Informasi Teknis</CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="space-y-1">
+              <p className="text-sm text-muted-foreground">Package ID</p>
+              <p className="font-medium">{customerData.package_name}</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-sm text-muted-foreground">PPPoE Username</p>
+              <p className="font-mono text-sm">{customerData.pppoe_username}</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-sm text-muted-foreground">Lokasi</p>
+              <div className="flex items-start gap-2">
+                <MapPin className="w-4 h-4 text-muted-foreground mt-0.5" />
+                <p className="text-sm">{customerData.address}</p>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <p className="text-sm text-muted-foreground">Terdaftar Sejak</p>
+              <div className="flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-muted-foreground" />
+                <p className="text-sm">
+                  {customerData.registration_date
+                    ? new Date(customerData.registration_date).toLocaleDateString('id-ID', { dateStyle: 'long' })
+                    : '-'}
+                </p>
+              </div>
             </div>
           </CardContent>
         </Card>
       )}
 
-      {/* Quick Actions Card - Terpisah */}
-      <Card className="bg-gradient-to-r from-purple-600/90 to-pink-600/90 dark:from-purple-700/80 dark:to-pink-700/80 text-white border-0">
-        <CardContent className="pt-6">
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            <Button
-              onClick={() => router.push('/customer/billing')}
-              className="bg-white/20 dark:bg-white/10 hover:bg-white/30 dark:hover:bg-white/20 text-white border-white/30 dark:border-white/20 h-16 flex flex-col items-center justify-center"
-              variant="ghost"
-            >
-              <FileText className="w-5 h-5 mb-1" />
-              <div className="text-center">
-                <div className="text-xs font-medium">Lihat Tagihan</div>
-              </div>
-            </Button>
-
-            <Button
-              onClick={handleRestartDevice}
-              className="bg-white/20 dark:bg-white/10 hover:bg-white/30 dark:hover:bg-white/20 text-white border-white/30 dark:border-white/20 h-16 flex flex-col items-center justify-center"
-              variant="ghost"
-            >
-              <RefreshCw className="w-5 h-5 mb-1" />
-              <div className="text-center">
-                <div className="text-xs font-medium">Restart Device</div>
-              </div>
-            </Button>
-
-            <Button
-              onClick={() => router.push('/customer/support/tickets/new')}
-              className="bg-white/20 dark:bg-white/10 hover:bg-white/30 dark:hover:bg-white/20 text-white border-white/30 dark:border-white/20 h-16 flex flex-col items-center justify-center"
-              variant="ghost"
-            >
-              <Headset className="w-5 h-5 mb-1" />
-              <div className="text-center">
-                <div className="text-xs font-medium">Buat Tiket</div>
-              </div>
-            </Button>
-
-            <Button
-              onClick={() => {
-                const adminNumber = '6281947215703'
-                const message = encodeURIComponent('Halo admin, saya butuh bantuan dengan layanan internet saya.')
-                window.open(`https://wa.me/${adminNumber}?text=${message}`, '_blank')
-              }}
-              className="bg-white/20 dark:bg-white/10 hover:bg-white/30 dark:hover:bg-white/20 text-white border-white/30 dark:border-white/20 h-16 flex flex-col items-center justify-center"
-              variant="ghost"
-            >
-              <Headset className="w-5 h-5 mb-1" />
-              <div className="text-center">
-                <div className="text-xs font-medium">Hubungi Support</div>
-              </div>
-            </Button>
-
-                      </div>
-        </CardContent>
-      </Card>
-
-        </div>
+    </div>
   )
 }

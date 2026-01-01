@@ -22,7 +22,16 @@ import {
     CheckCircle,
     Bell,
     GripVertical,
+    ChevronDown,
 } from 'lucide-react'
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuCheckboxItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { adminApi } from '@/lib/api-clients'
 import { toast } from 'react-hot-toast'
 
@@ -36,6 +45,8 @@ interface Broadcast {
     endDate: string
     priority: number
     createdAt: string
+    target_all?: boolean
+    target_areas?: string // JSON string or array from backend
 }
 
 const BROADCAST_TYPES = [
@@ -49,6 +60,7 @@ export default function BroadcastPage() {
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
     const [broadcasts, setBroadcasts] = useState<Broadcast[]>([])
+    const [regions, setRegions] = useState<{ id: string, name: string }[]>([])
     const [showForm, setShowForm] = useState(false)
     const [editingId, setEditingId] = useState<string | null>(null)
 
@@ -61,11 +73,27 @@ export default function BroadcastPage() {
         startDate: '',
         endDate: '',
         priority: 0,
+        target_all: true,
+        target_areas: [] as string[],
     })
 
     useEffect(() => {
         fetchBroadcasts()
+        fetchRegions()
     }, [])
+
+    const fetchRegions = async () => {
+        try {
+            const response = await adminApi.get('/api/v1/regions')
+            if (response.data.success) {
+                setRegions(response.data.data || [])
+            }
+        } catch (error) {
+            console.error('Error fetching regions:', error)
+            // Fallback for empty/missing table
+            setRegions([])
+        }
+    }
 
     const fetchBroadcasts = async () => {
         setLoading(true)
@@ -115,6 +143,11 @@ export default function BroadcastPage() {
             startDate: '',
             endDate: '',
             priority: 0,
+            startDate: '',
+            endDate: '',
+            priority: 0,
+            target_all: true,
+            target_areas: [],
         })
         setEditingId(null)
         setShowForm(false)
@@ -129,6 +162,14 @@ export default function BroadcastPage() {
             startDate: broadcast.startDate,
             endDate: broadcast.endDate,
             priority: broadcast.priority,
+            target_all: broadcast.target_all !== undefined ? broadcast.target_all : true,
+            target_areas: broadcast.target_areas
+                ? (Array.isArray(broadcast.target_areas)
+                    ? broadcast.target_areas
+                    : typeof broadcast.target_areas === 'string'
+                        ? (broadcast.target_areas as string).replace(/[\[\]"]/g, '').split(',').map(s => s.trim()).filter(Boolean)
+                        : [])
+                : [],
         })
         setEditingId(broadcast.id)
         setShowForm(true)
@@ -142,17 +183,22 @@ export default function BroadcastPage() {
 
         setSaving(true)
         try {
+            const payload = {
+                ...form,
+                target_areas: form.target_all ? [] : form.target_areas
+            }
+
             if (editingId) {
                 // Update existing
-                const response = await adminApi.put(`/api/v1/broadcasts/${editingId}`, form)
+                const response = await adminApi.put(`/api/v1/broadcasts/${editingId}`, payload)
                 if (response.data.success) {
-                    toast.success('Broadcast berhasil diperbarui')
+                    toast.success('Pengumuman berhasil diperbarui')
                     fetchBroadcasts()
                     resetForm()
                 }
             } else {
                 // Create new
-                const response = await adminApi.post('/api/v1/broadcasts', form)
+                const response = await adminApi.post('/api/v1/broadcasts', payload)
                 if (response.data.success) {
                     toast.success('Broadcast berhasil dibuat')
                     fetchBroadcasts()
@@ -227,7 +273,7 @@ export default function BroadcastPage() {
                 <div>
                     <h1 className="text-3xl font-bold flex items-center gap-2">
                         <Megaphone className="h-8 w-8" />
-                        Broadcast Banner
+                        Pengumuman
                     </h1>
                     <p className="text-muted-foreground">
                         Kelola pengumuman yang ditampilkan di portal pelanggan
@@ -235,7 +281,7 @@ export default function BroadcastPage() {
                 </div>
                 <Button onClick={() => { resetForm(); setShowForm(true) }}>
                     <Plus className="h-4 w-4 mr-2" />
-                    Buat Broadcast
+                    Buat Pengumuman
                 </Button>
             </div>
 
@@ -243,9 +289,9 @@ export default function BroadcastPage() {
             {showForm && (
                 <Card>
                     <CardHeader>
-                        <CardTitle>{editingId ? 'Edit Broadcast' : 'Buat Broadcast Baru'}</CardTitle>
+                        <CardTitle>{editingId ? 'Edit Pengumuman' : 'Buat Pengumuman Baru'}</CardTitle>
                         <CardDescription>
-                            Broadcast akan ditampilkan sebagai banner di portal pelanggan
+                            Pengumuman akan ditampilkan sebagai banner di portal pelanggan
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
@@ -317,6 +363,93 @@ export default function BroadcastPage() {
                             </div>
                         </div>
 
+                        {/* Target Audience Section */}
+                        <div className="p-4 border rounded-lg bg-gray-50 dark:bg-gray-800/50">
+                            <label className="text-sm font-medium mb-4 block">Target Audience</label>
+
+                            <div className="space-y-4">
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="checkbox"
+                                        checked={form.target_all}
+                                        onChange={(e) => setForm({ ...form, target_all: e.target.checked })}
+                                        id="targetAll"
+                                    />
+                                    <label htmlFor="targetAll" className="text-sm font-medium">
+                                        Kirim ke Semua Pelanggan
+                                    </label>
+                                </div>
+
+                                {!form.target_all && (
+                                    <div className="ml-6">
+                                        <label className="text-sm font-medium mb-1 block">
+                                            Pilih Wilayah
+                                        </label>
+                                        <DropdownMenu>
+                                            <DropdownMenuTrigger asChild>
+                                                <Button variant="outline" className="w-full justify-between">
+                                                    {form.target_areas.length > 0
+                                                        ? `${form.target_areas.length} Wilayah Dipilih`
+                                                        : "Pilih Wilayah..."}
+                                                    <ChevronDown className="ml-2 h-4 w-4 opacity-50" />
+                                                </Button>
+                                            </DropdownMenuTrigger>
+                                            <DropdownMenuContent className="w-[300px] max-h-[300px] overflow-y-auto">
+                                                <DropdownMenuLabel>Daftar Wilayah</DropdownMenuLabel>
+                                                <DropdownMenuSeparator />
+                                                {regions.length === 0 ? (
+                                                    <div className="p-2 text-sm text-muted-foreground text-center">
+                                                        Tidak ada data wilayah ditemukan (Tabel regions kosong)
+                                                    </div>
+                                                ) : (
+                                                    regions.map((region) => (
+                                                        <DropdownMenuCheckboxItem
+                                                            key={region.id}
+                                                            checked={form.target_areas.includes(region.name)}
+                                                            onCheckedChange={(checked) => {
+                                                                setForm(prev => ({
+                                                                    ...prev,
+                                                                    target_areas: checked
+                                                                        ? [...prev.target_areas, region.name]
+                                                                        : prev.target_areas.filter(name => name !== region.name)
+                                                                }))
+                                                            }}
+                                                        >
+                                                            {region.name}
+                                                        </DropdownMenuCheckboxItem>
+                                                    ))
+                                                )}
+                                            </DropdownMenuContent>
+                                        </DropdownMenu>
+
+                                        {/* Display selected tags */}
+                                        {form.target_areas.length > 0 && (
+                                            <div className="flex flex-wrap gap-1 mt-2">
+                                                {form.target_areas.map(area => (
+                                                    <Badge key={area} variant="secondary" className="text-xs">
+                                                        {area}
+                                                        <button
+                                                            onClick={() => setForm(prev => ({
+                                                                ...prev,
+                                                                target_areas: prev.target_areas.filter(name => name !== area)
+                                                            }))}
+                                                            className="ml-1 hover:text-red-500"
+                                                        >
+                                                            ×
+                                                        </button>
+                                                    </Badge>
+                                                ))}
+                                            </div>
+                                        )}
+
+                                        <p className="text-xs text-muted-foreground mt-2">
+                                            Pilih wilayah target dari dropdown. (Data diambil dari tabel regions)
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
                         <div className="flex items-center gap-2">
                             <input
                                 type="checkbox"
@@ -325,7 +458,7 @@ export default function BroadcastPage() {
                                 id="isActive"
                             />
                             <label htmlFor="isActive" className="text-sm font-medium">
-                                Aktifkan broadcast ini
+                                Aktifkan pengumuman ini
                             </label>
                         </div>
 
@@ -335,11 +468,16 @@ export default function BroadcastPage() {
                             <div className={`p-4 rounded-lg ${getTypeConfig(form.type).color} text-white`}>
                                 <div className="flex items-center gap-2 font-semibold">
                                     {React.createElement(getTypeConfig(form.type).icon, { className: 'h-5 w-5' })}
-                                    {form.title || 'Judul Broadcast'}
+                                    {form.title || 'Judul Pengumuman'}
                                 </div>
                                 <p className="mt-1 text-sm opacity-90">
-                                    {form.content || 'Konten broadcast akan ditampilkan di sini...'}
+                                    {form.content || 'Konten pengumuman akan ditampilkan di sini...'}
                                 </p>
+                                {(!form.target_all && form.target_areas.length > 0) && (
+                                    <div className="mt-2 pt-2 border-t border-white/20 text-xs">
+                                        Target: {form.target_areas.join(', ')}
+                                    </div>
+                                )}
                             </div>
                         </div>
 
@@ -360,14 +498,14 @@ export default function BroadcastPage() {
             {/* Broadcasts List */}
             <Card>
                 <CardHeader>
-                    <CardTitle>Daftar Broadcast</CardTitle>
+                    <CardTitle>Daftar Pengumuman</CardTitle>
                 </CardHeader>
                 <CardContent>
                     {broadcasts.length === 0 ? (
                         <div className="text-center py-8 text-muted-foreground">
                             <Megaphone className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                            <p>Belum ada broadcast</p>
-                            <p className="text-sm">Klik &quot;Buat Broadcast&quot; untuk membuat pengumuman baru</p>
+                            <p>Belum ada pengumuman</p>
+                            <p className="text-sm">Klik &quot;Buat Pengumuman&quot; untuk membuat pengumuman baru</p>
                         </div>
                     ) : (
                         <div className="space-y-3">
@@ -389,6 +527,11 @@ export default function BroadcastPage() {
                                                         <Badge variant={broadcast.isActive ? 'default' : 'secondary'}>
                                                             {broadcast.isActive ? 'Aktif' : 'Nonaktif'}
                                                         </Badge>
+                                                        {!broadcast.target_all && (
+                                                            <Badge variant="outline" className="text-xs">
+                                                                Target Area
+                                                            </Badge>
+                                                        )}
                                                     </div>
                                                     <p className="text-sm text-muted-foreground mt-1">{broadcast.content}</p>
                                                     <div className="flex gap-4 mt-2 text-xs text-muted-foreground">

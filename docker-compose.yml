@@ -83,7 +83,7 @@ services:
       - kilusi-network
     command: freeradius -f -l stdout -X
     healthcheck:
-      test: [ "CMD", "pgrep", "freeradius" ]
+      test: [ "CMD", "pgrep", "radiusd" ]
       interval: 30s
       timeout: 10s
       retries: 3

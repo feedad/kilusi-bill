@@ -109,23 +109,22 @@ export default function CustomerBilling() {
   const authenticatedApiCall = async <T,>(apiCall: () => Promise<T>): Promise<T | null> => {
     console.log('🔐 Billing: authenticatedApiCall called, isAuthenticated:', isAuthenticated)
 
-    // Check both React state and localStorage
-    const hasReactAuth = isAuthenticated
+    // Check localStorage - this is more reliable than React state during hydration
     const token = localStorage.getItem('customer_token')
     const customerData = localStorage.getItem('customer_data')
     const hasLocalStorageAuth = token && customerData
 
-    console.log('🔐 Billing: Auth check - React:', hasReactAuth, 'LocalStorage:', hasLocalStorageAuth)
     console.log('🔐 Billing: Token:', token ? 'exists' : 'missing')
     console.log('🔐 Billing: Customer data:', customerData ? 'exists' : 'missing')
 
-    if (!hasReactAuth && !hasLocalStorageAuth) {
-      console.log('⚠️ Billing: No auth data found, redirecting to login')
+    // Only redirect if localStorage has no auth - React state might be stale
+    if (!hasLocalStorageAuth) {
+      console.log('⚠️ Billing: No auth data found in localStorage, redirecting to login')
       router.push('/customer/login')
       return null
     }
 
-    console.log('✅ Billing: Authentication found, proceeding with request')
+    console.log('✅ Billing: Authentication found in localStorage, proceeding with request')
 
     try {
       const result = await apiCall()
@@ -136,14 +135,16 @@ export default function CustomerBilling() {
       console.error('💥 Billing: Error response:', error.response?.data)
       console.error('💥 Billing: Error status:', error.response?.status)
 
+      // Only trigger auth:expired for actual 401 errors, not other API errors
       if (error.response?.status === 401 || error?.status === 401) {
-        console.warn('⚠️ Billing: Authentication expired, dispatching logout')
-        // Trigger auth expired event
+        console.warn('⚠️ Billing: Authentication expired (401), dispatching logout')
         window.dispatchEvent(new CustomEvent('auth:expired', {
           detail: { reason: 'API authentication failed' }
         }))
         return null
       }
+
+      // For other errors (500, network, etc), don't logout - just throw
       throw error
     }
   }
@@ -199,8 +200,9 @@ export default function CustomerBilling() {
 
             // Fetch invoices using new payment API
             const customerToken = localStorage.getItem('customer_token')
+            const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || ''
 
-            const invoicesResponse = await fetch('/api/v1/customer-payments/invoices', {
+            const invoicesResponse = await fetch(`${apiBaseUrl}/api/v1/customer-payments/invoices`, {
               headers: {
                 'Authorization': `Bearer ${customerToken}`,
                 'Content-Type': 'application/json'
@@ -417,8 +419,8 @@ export default function CustomerBilling() {
       const customerData = getCustomerData()
       const packagePrice = customerData?.package_price || 0
 
-      // Use standardized customer API for bulk payment calculation
-      const response = await customerAPI.request('/api/v1/billing/bulk-payment/calculate', {
+      // Use customer-billing API for bulk payment calculation (requires customer JWT)
+      const response = await customerAPI.request('/api/v1/customer-billing/calculate-bulk-payment', {
         method: 'POST',
         body: JSON.stringify({
           months,

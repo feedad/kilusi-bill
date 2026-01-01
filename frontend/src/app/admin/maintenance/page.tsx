@@ -22,7 +22,16 @@ import {
     PauseCircle,
     Bell,
     MessageSquare,
+    ChevronDown,
 } from 'lucide-react'
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuCheckboxItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { adminApi } from '@/lib/api-clients'
 import { toast } from 'react-hot-toast'
 
@@ -51,6 +60,7 @@ export default function MaintenancePage() {
     const [saving, setSaving] = useState(false)
     const [maintenances, setMaintenances] = useState<Maintenance[]>([])
     const [showForm, setShowForm] = useState(false)
+    const [regions, setRegions] = useState<{ id: string, name: string }[]>([])
     const [editingId, setEditingId] = useState<string | null>(null)
 
     // Form state
@@ -59,10 +69,26 @@ export default function MaintenancePage() {
         description: '',
         startTime: '',
         endTime: '',
-        affectedAreas: '',
+        affectedAreas: [] as string[],
         status: 'scheduled' as Maintenance['status'],
         notifyCustomers: true,
     })
+
+    useEffect(() => {
+        fetchRegions()
+    }, [])
+
+    const fetchRegions = async () => {
+        try {
+            const response = await adminApi.get('/api/v1/regions')
+            if (response.data.success) {
+                setRegions(response.data.data || [])
+            }
+        } catch (error) {
+            console.error('Error fetching regions:', error)
+            setRegions([])
+        }
+    }
 
     useEffect(() => {
         fetchMaintenances()
@@ -115,7 +141,7 @@ export default function MaintenancePage() {
             description: '',
             startTime: '',
             endTime: '',
-            affectedAreas: '',
+            affectedAreas: [],
             status: 'scheduled',
             notifyCustomers: true,
         })
@@ -129,7 +155,7 @@ export default function MaintenancePage() {
             description: maintenance.description,
             startTime: maintenance.startTime,
             endTime: maintenance.endTime,
-            affectedAreas: maintenance.affectedAreas.join('\n'),
+            affectedAreas: maintenance.affectedAreas,
             status: maintenance.status,
             notifyCustomers: maintenance.notifyCustomers,
         })
@@ -147,7 +173,7 @@ export default function MaintenancePage() {
         try {
             const payload = {
                 ...form,
-                affectedAreas: form.affectedAreas.split('\n').filter(a => a.trim()),
+                affectedAreas: form.affectedAreas,
             }
 
             if (editingId) {
@@ -171,7 +197,8 @@ export default function MaintenancePage() {
             const newMaintenance: Maintenance = {
                 id: Date.now().toString(),
                 ...form,
-                affectedAreas: form.affectedAreas.split('\n').filter(a => a.trim()),
+                ...form,
+                affectedAreas: form.affectedAreas,
                 notificationSent: false,
                 createdAt: new Date().toISOString(),
             }
@@ -336,12 +363,62 @@ export default function MaintenancePage() {
 
                         <div>
                             <label className="text-sm font-medium mb-2 block">Area Terdampak</label>
-                            <Textarea
-                                value={form.affectedAreas}
-                                onChange={(e) => setForm({ ...form, affectedAreas: e.target.value })}
-                                placeholder="Satu area per baris, contoh:&#10;Area Jakarta Selatan&#10;Area Tangerang"
-                                rows={3}
-                            />
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button variant="outline" className="w-full justify-between">
+                                        {form.affectedAreas.length > 0
+                                            ? `${form.affectedAreas.length} Area Dipilih`
+                                            : "Pilih Area Terdampak..."}
+                                        <ChevronDown className="ml-2 h-4 w-4 opacity-50" />
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent className="w-[300px] max-h-[300px] overflow-y-auto">
+                                    <DropdownMenuLabel>Daftar Wilayah</DropdownMenuLabel>
+                                    <DropdownMenuSeparator />
+                                    {regions.length === 0 ? (
+                                        <div className="p-2 text-sm text-muted-foreground text-center">
+                                            Tidak ada data wilayah ditemukan
+                                        </div>
+                                    ) : (
+                                        regions.map((region) => (
+                                            <DropdownMenuCheckboxItem
+                                                key={region.id}
+                                                checked={form.affectedAreas.includes(region.name)}
+                                                onCheckedChange={(checked) => {
+                                                    setForm(prev => ({
+                                                        ...prev,
+                                                        affectedAreas: checked
+                                                            ? [...prev.affectedAreas, region.name]
+                                                            : prev.affectedAreas.filter(name => name !== region.name)
+                                                    }))
+                                                }}
+                                            >
+                                                {region.name}
+                                            </DropdownMenuCheckboxItem>
+                                        ))
+                                    )}
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+
+                            {/* Display selected tags */}
+                            {form.affectedAreas.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-2">
+                                    {form.affectedAreas.map(area => (
+                                        <Badge key={area} variant="secondary" className="text-xs">
+                                            {area}
+                                            <button
+                                                onClick={() => setForm(prev => ({
+                                                    ...prev,
+                                                    affectedAreas: prev.affectedAreas.filter(name => name !== area)
+                                                }))}
+                                                className="ml-1 hover:text-red-500"
+                                            >
+                                                ×
+                                            </button>
+                                        </Badge>
+                                    ))}
+                                </div>
+                            )}
                             <p className="text-xs text-muted-foreground mt-1">Kosongkan jika mempengaruhi semua area</p>
                         </div>
 

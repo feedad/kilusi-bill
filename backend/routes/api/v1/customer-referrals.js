@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const ReferralService = require('../../../services/referral-service');
+const { validateSessionToken } = require('./customer-auth-nextjs');
 
 // Middleware to verify customer token
 const verifyCustomerToken = async (req, res, next) => {
@@ -12,6 +13,19 @@ const verifyCustomerToken = async (req, res, next) => {
         success: false,
         message: 'Token tidak ditemukan'
       });
+    }
+
+    require('fs').appendFileSync('/tmp/auth-token.log', `[Referral] ${new Date().toISOString()} Token: ${token}\n`);
+
+    // 1. Try validating as Session Token (Next.js Frontend)
+    try {
+      const sessionValidation = await validateSessionToken(token);
+      if (sessionValidation.valid && sessionValidation.customer) {
+        req.customer = sessionValidation.customer;
+        return next();
+      }
+    } catch (sessionError) {
+      // Ignore and continue to JWT
     }
 
     // Use the database from config
@@ -29,7 +43,7 @@ const verifyCustomerToken = async (req, res, next) => {
         const query = `
           SELECT c.*
           FROM customers c
-          WHERE c.id = $1 AND c.status = 'active'
+          WHERE c.id = $1
         `;
         const result = await pool.query(query, [decoded.customerId]);
 

@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { logger } = require('../../../config/logger');
 const { query } = require('../../../config/database');
-const { jwtAuth } = require('../../../middleware/jwtAuth');
+const { customerJwtAuth } = require('../../../middleware/customerJwtAuth');
 const { asyncHandler } = require('../../../middleware/response');
 const PaymentGatewayManager = require('../../../config/paymentGateway');
 
@@ -15,7 +15,7 @@ const getCustomerIdFromToken = (req) => {
 };
 
 // GET /api/v1/customer-payments/methods - Get available payment methods for customer
-router.get('/methods', jwtAuth, asyncHandler(async (req, res) => {
+router.get('/methods', customerJwtAuth, asyncHandler(async (req, res) => {
   try {
     const { amount } = req.query;
     const customerId = getCustomerIdFromToken(req);
@@ -30,8 +30,8 @@ router.get('/methods', jwtAuth, asyncHandler(async (req, res) => {
       const amountNum = parseFloat(amount);
       methods = methods.filter(method => {
         return method.active &&
-               (!method.minimum_amount || amountNum >= method.minimum_amount) &&
-               (!method.maximum_amount || amountNum <= method.maximum_amount);
+          (!method.minimum_amount || amountNum >= method.minimum_amount) &&
+          (!method.maximum_amount || amountNum <= method.maximum_amount);
       });
 
       // Sort by fee amount (lowest first)
@@ -70,14 +70,14 @@ router.get('/methods', jwtAuth, asyncHandler(async (req, res) => {
 }));
 
 // GET /api/v1/customer-payments/invoices - Get customer's unpaid invoices
-router.get('/invoices', jwtAuth, asyncHandler(async (req, res) => {
+router.get('/invoices', customerJwtAuth, asyncHandler(async (req, res) => {
   try {
     const customerId = getCustomerIdFromToken(req);
     const { status = 'unpaid', limit = 10, offset = 0 } = req.query;
 
     const result = await query(`
       SELECT
-        i.id, i.invoice_number, i.amount, i.discount_amount, i.final_amount,
+        i.id, i.invoice_number, i.amount, i.discount, i.total_amount,
         i.due_date, i.status, i.created_at, i.notes,
         p.name as package_name, p.speed as package_speed, p.price as package_price,
         CASE
@@ -123,7 +123,7 @@ router.get('/invoices', jwtAuth, asyncHandler(async (req, res) => {
 }));
 
 // GET /api/v1/customer-payments/invoices/:id - Get specific invoice details
-router.get('/invoices/:id', jwtAuth, asyncHandler(async (req, res) => {
+router.get('/invoices/:id', customerJwtAuth, asyncHandler(async (req, res) => {
   try {
     const { id } = req.params;
     const customerId = getCustomerIdFromToken(req);
@@ -174,7 +174,7 @@ router.get('/invoices/:id', jwtAuth, asyncHandler(async (req, res) => {
 }));
 
 // POST /api/v1/customer-payments/invoices/:id/pay - Initiate payment for invoice
-router.post('/invoices/:id/pay', jwtAuth, asyncHandler(async (req, res) => {
+router.post('/invoices/:id/pay', customerJwtAuth, asyncHandler(async (req, res) => {
   try {
     const { id } = req.params;
     const customerId = getCustomerIdFromToken(req);
@@ -217,7 +217,7 @@ router.post('/invoices/:id/pay', jwtAuth, asyncHandler(async (req, res) => {
           transaction_id: existingPayment.id,
           invoice_id: id,
           invoice_number: invoice.invoice_number,
-          amount: invoice.final_amount,
+          amount: invoice.total_amount,
           payment_method: existingPayment.payment_method,
           gateway: existingPayment.gateway,
           payment_url: existingPayment.gateway_response?.payment_url,
@@ -236,7 +236,7 @@ router.post('/invoices/:id/pay', jwtAuth, asyncHandler(async (req, res) => {
       customer_name: customer_details.name || invoice.customer_name,
       customer_email: customer_details.email || invoice.customer_email,
       customer_phone: customer_details.phone || invoice.customer_phone,
-      amount: invoice.final_amount,
+      amount: invoice.total_amount,
       package_name: invoice.package_name,
       return_url: `${req.protocol}://${req.get('host')}/customer/payments/success`,
       callback_url: `${req.protocol}://${req.get('host')}/api/v1/payments/webhook/${gateway}`
@@ -266,7 +266,7 @@ router.post('/invoices/:id/pay', jwtAuth, asyncHandler(async (req, res) => {
 
     // Extract fee information if available
     const feeAmount = paymentResult.fee?.amount || 0;
-    const netAmount = invoice.final_amount - feeAmount;
+    const netAmount = invoice.total_amount - feeAmount;
 
     const transactionValues = [
       id,
@@ -275,7 +275,7 @@ router.post('/invoices/:id/pay', jwtAuth, asyncHandler(async (req, res) => {
       paymentResult.order_id,
       payment_method,
       'invoice',
-      invoice.final_amount,
+      invoice.total_amount,
       feeAmount,
       netAmount,
       'pending',
@@ -315,7 +315,7 @@ router.post('/invoices/:id/pay', jwtAuth, asyncHandler(async (req, res) => {
         transaction_id: transaction.id,
         invoice_id: id,
         invoice_number: invoice.invoice_number,
-        amount: invoice.final_amount,
+        amount: invoice.total_amount,
         fee_amount: feeAmount,
         net_amount: netAmount,
         payment_method: payment_method,
@@ -343,7 +343,7 @@ router.post('/invoices/:id/pay', jwtAuth, asyncHandler(async (req, res) => {
 }));
 
 // GET /api/v1/customer-payments/transactions/:id - Get payment transaction status
-router.get('/transactions/:id', jwtAuth, asyncHandler(async (req, res) => {
+router.get('/transactions/:id', customerJwtAuth, asyncHandler(async (req, res) => {
   try {
     const { id } = req.params;
     const customerId = getCustomerIdFromToken(req);
@@ -408,7 +408,7 @@ router.get('/transactions/:id', jwtAuth, asyncHandler(async (req, res) => {
 }));
 
 // GET /api/v1/customer-payments/history - Get customer's payment history
-router.get('/history', jwtAuth, asyncHandler(async (req, res) => {
+router.get('/history', customerJwtAuth, asyncHandler(async (req, res) => {
   try {
     const customerId = getCustomerIdFromToken(req);
     const { limit = 20, offset = 0, status } = req.query;
@@ -472,7 +472,7 @@ router.get('/history', jwtAuth, asyncHandler(async (req, res) => {
 }));
 
 // GET /api/v1/customer-payments/summary - Get customer's payment summary
-router.get('/summary', jwtAuth, asyncHandler(async (req, res) => {
+router.get('/summary', customerJwtAuth, asyncHandler(async (req, res) => {
   try {
     const customerId = getCustomerIdFromToken(req);
 

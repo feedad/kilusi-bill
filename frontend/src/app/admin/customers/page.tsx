@@ -162,7 +162,17 @@ export default function CustomersPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [identityError, setIdentityError] = useState<string | null>(null)
-  const [searchQuery, setSearchQuery] = useState('')
+  const [searchQuery, setSearchQuery] = useState('') // The actual query sent to API
+  const [searchInput, setSearchInput] = useState('') // The input field value
+
+  // Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearchQuery(searchInput)
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [searchInput])
+
   // Search state for modal
   const [modalSearchResults, setModalSearchResults] = useState<Customer[]>([])
   const [isModalSearching, setIsModalSearching] = useState(false)
@@ -225,7 +235,7 @@ export default function CustomersPage() {
   const [lastStatusRefresh, setLastStatusRefresh] = useState<Date | null>(null)
 
   // Multi-Service Constants removed - Reverting to single modal
-  
+
   // Customer defaults hook
 
   // Customer defaults hook
@@ -246,25 +256,25 @@ export default function CustomersPage() {
     const today = new Date();
     const yy = today.getFullYear().toString().slice(-2);
     const mm = (today.getMonth() + 1).toString().padStart(2, '0');
-    
+
     // CustID is normalized 5 digits
     const custId = customer.customer_id || customer.id || '00000';
-    
+
     // Calculate index: Count existing services for this specific customer ID
     // Note: 'customers' only has current page. Ideally, we should ask backend for count.
     // For now, using length of filter on loaded customers might be inaccurate if pagination is used.
     // Optimization: We will perform a specific check or default to '01' if first, 
     // but the user requirement implies a sequential service number.
     // Let's assume '01' for now as the basic requirement unless we fetch service count.
-    
+
     // BETTER APPROACH: Use the count of services returned by the backend in search results if available?
     // Or just default to '01' since "Add Service" typically implies adding a new one.
     // If the user has existing services, we'd need to know how many.
     // Assuming 01 for the first service if we can't easily count.
     // If `customers` state has all customers, filtering works. If paginated, it doesn't.
     // We will simulate '01' for this step as per user example `25120000101`.
-    const nextIndex = '01'; 
-    
+    const nextIndex = '01';
+
     const serviceNumber = `${yy}${mm}${custId}${nextIndex}`;
     const suffix = getDefaultValue('pppoe_suffix', 'isp');
     const pppoeUsername = `${serviceNumber}@${suffix}`;
@@ -446,7 +456,7 @@ export default function CustomersPage() {
         }))
 
         setCustomers(customersWithDefaultStatus)
-        const pagination = response.data.data.pagination || {}
+        const pagination = response.data.pagination || {}
         setTotalItems(pagination.total || 0)
 
         // Fetch connection status for first few customers (for better UX)
@@ -603,43 +613,51 @@ export default function CustomersPage() {
     }
   }
 
+  /* State for Modal Pagination */
+  const [modalCurrentPage, setModalCurrentPage] = useState(1)
+  const [modalTotalItems, setModalTotalItems] = useState(0)
+
   // Server-side search for modal
-  const handleModalSearch = async (query: string) => {
-    setModalSearchQuery(query)
-    
+  const handleModalSearch = async (query: string, page: number = 1) => {
+    // Only update query state if it's a new query (page 1) or we keep it consistent
+    if (page === 1) setModalSearchQuery(query)
+
     try {
       setIsModalSearching(true)
       const params = new URLSearchParams({
-        page: '1',
+        page: page.toString(),
         limit: '10', // Show 10 items
         search: query,
         // Do not pass has_service to show ALL customers (including those without services)
       })
-      
+
       const response = await adminApi.get(`/api/v1/customers?${params}`)
       if (response.data.success) {
-         // Fix: API returns data as array directly
-         const rawData = response.data.data
-         setModalSearchResults(Array.isArray(rawData) ? rawData : (rawData?.customers || []))
+        // Fix: API returns data as array directly
+        const rawData = response.data.data
+        setModalSearchResults(Array.isArray(rawData) ? rawData : (rawData?.customers || []))
+
+        const pagination = response.data.pagination || {}
+        setModalTotalItems(pagination.total || 0)
+        setModalCurrentPage(page)
       }
     } catch (error) {
-       console.error('Error searching customers for modal:', error)
+      console.error('Error searching customers for modal:', error)
     } finally {
-       setIsModalSearching(false)
+      setIsModalSearching(false)
     }
   }
 
   // Debounce the modal search
-  // Debounce the modal search
   useEffect(() => {
     // Immediate search if empty (to show defaults), otherwise wait for debounce
-    if (!modalSearchQuery) {
-      handleModalSearch('')
-      return
-    }
+    const query = modalSearchQuery;
+
+    // We only trigger if query changes (page reset to 1)
+    // Page changes are handled by page buttons directly calling handleModalSearch
 
     const timer = setTimeout(() => {
-         handleModalSearch(modalSearchQuery)
+      handleModalSearch(query, 1)
     }, 500)
     return () => clearTimeout(timer)
   }, [modalSearchQuery])
@@ -1591,8 +1609,8 @@ export default function CustomersPage() {
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   placeholder="Cari pelanggan (nama, telepon, NIK, ID Pelanggan, PPPoE)..."
-                  value={searchQuery}
-                  onChange={(e) => handleSearchChange(e.target.value)}
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
                   className="pl-10"
                 />
               </div>
@@ -1938,11 +1956,10 @@ export default function CustomersPage() {
                   className="px-3 py-2 border rounded-md bg-background"
                   disabled={submittingBulk}
                 >
-                  <option value="">Pilih Siklus</option>
-                  <option value="profile">Profile</option>
-                  <option value="monthly">Monthly</option>
-                  <option value="quarterly">Quarterly</option>
-                  <option value="yearly">Yearly</option>
+                  <option value="">Pilih Siklus Billing</option>
+                  <option value="profile">Profile (Berdasarkan Periode PPPoE)</option>
+                  <option value="fixed">Tetap (Tanggal Tetap Setiap Bulan)</option>
+                  <option value="monthly">Bulanan (Tanggal 20 Setiap Bulan)</option>
                 </select>
                 <Button
                   size="sm"
@@ -1979,12 +1996,12 @@ export default function CustomersPage() {
                     Koneksi
                   </th>
                   <th
-                    className="text-left p-3 font-semibold text-foreground whitespace-nowrap cursor-pointer hover:bg-muted/50 transition-colors w-28"
-                    onClick={() => handleSort('customer_id')}
+                    className="text-left p-3 font-semibold text-foreground whitespace-nowrap cursor-pointer hover:bg-muted/50 transition-colors w-32"
+                    onClick={() => handleSort('service_number')}
                   >
                     <div className="flex items-center gap-1">
                       No Layanan
-                      {sortField === 'customer_id' && (
+                      {sortField === 'service_number' && (
                         sortDirection === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />
                       )}
                     </div>
@@ -1998,7 +2015,7 @@ export default function CustomersPage() {
                   <th className="text-left p-3 font-semibold text-foreground whitespace-nowrap w-28">Siklus</th>
                   <th className="text-left p-3 font-semibold text-foreground whitespace-nowrap w-32">Router</th>
                   <th
-                    className="text-left p-3 font-semibold text-foreground whitespace-nowrap cursor-pointer hover:bg-muted/50 transition-colors w-48"
+                    className="text-left p-3 font-semibold text-foreground whitespace-nowrap cursor-pointer hover:bg-muted/50 transition-colors w-20"
                     onClick={() => handleSort('region')}
                   >
                     <div className="flex items-center gap-1">
@@ -2093,13 +2110,12 @@ export default function CustomersPage() {
                         )}
                       </td>
                       <td className="p-3">
-                        {/* Service Number - Use service_number field */}
-                        <span className="text-sm text-foreground font-mono">
-                          {customer.service_number || customer.customer_id || '-'}
+                        <span className="text-sm text-foreground">
+                          {customer.service_number || '-'}
                         </span>
                       </td>
                       <td className="p-3">
-                        <span className="text-sm text-foreground">{customer.name}</span>
+                        <span className="text-sm text-foreground whitespace-nowrap">{customer.name}</span>
                       </td>
                       <td className="p-3">
                         <span className="text-sm text-foreground">
@@ -2118,28 +2134,28 @@ export default function CustomersPage() {
                         </span>
                       </td>
                       <td className="p-3">
-                        <span className="text-sm text-foreground">
+                        <span className="text-sm text-foreground whitespace-nowrap">
                           {customer.package_name || '-'}
                         </span>
                       </td>
                       <td className="p-3">
-                        <span className="text-sm text-foreground">
+                        <span className="text-sm text-foreground whitespace-nowrap">
                           {getBillingTypeText(customer.billing_type)}
                         </span>
                       </td>
                       <td className="p-3">
-                        <span className="text-sm text-foreground">
+                        <span className="text-sm text-foreground whitespace-nowrap">
                           {getBillingCycleText(customer.siklus)}
                         </span>
                       </td>
                       <td className="p-3">
-                        <span className="text-sm text-foreground">
+                        <span className="text-sm text-foreground whitespace-nowrap">
                           {getRouterText(customer.router, routers)}
                         </span>
                       </td>
                       <td className="p-3">
                         <span className="text-sm text-foreground">
-                          {customer.region_name || customer.area || '-'}
+                          {customer.region_id ? customer.region_id.toString().padStart(2, '0') : '-'}
                         </span>
                       </td>
                       <td className="p-3">
@@ -2178,71 +2194,46 @@ export default function CustomersPage() {
       </Card>
 
       {/* Pagination Controls */}
-      {totalItems > pageSize && (
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div className="text-sm text-muted-foreground">
-                Menampilkan {Math.min((currentPage - 1) * pageSize + 1, totalItems)} - {Math.min(currentPage * pageSize, totalItems)} dari {totalItems} data
-              </div>
-              <div className="flex items-center space-x-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(1)}
-                  disabled={currentPage === 1}
-                >
-                  <ChevronLeft className="h-4 w-4 mr-1" />
-                  Pertama
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(currentPage - 1)}
-                  disabled={currentPage === 1}
-                >
-                  <ChevronLeft className="h-4 w-4 mr-1" />
-                  Sebelumnya
-                </Button>
+      <div className="flex items-center justify-end mt-4">
+        <div className="flex items-center border rounded-lg overflow-hidden border-gray-700 bg-gray-800">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setCurrentPage(currentPage - 1)}
+            disabled={currentPage === 1}
+            className="rounded-none border-r border-gray-700 h-9 px-4 hover:bg-gray-700 text-gray-300 disabled:opacity-50"
+          >
+            Previous
+          </Button>
 
-                {/* Page Numbers */}
-                <div className="flex items-center space-x-1">
-                  {getPageNumbers().map((page) => (
-                    <Button
-                      key={page}
-                      variant={page === currentPage ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => typeof page === 'number' && setCurrentPage(page)}
-                      disabled={page === '...'}
-                    >
-                      {page}
-                    </Button>
-                  ))}
-                </div>
+          {/* Page Numbers */}
+          {getPageNumbers().map((page, index) => (
+            <Button
+              key={index}
+              variant="ghost"
+              size="sm"
+              onClick={() => typeof page === 'number' && setCurrentPage(page)}
+              disabled={page === '...'}
+              className={`rounded-none border-r border-gray-700 h-9 w-9 p-0 hover:bg-gray-700 ${page === currentPage
+                ? "bg-blue-600 text-white hover:bg-blue-600 font-medium"
+                : "text-gray-300"
+                } ${index === getPageNumbers().length - 1 ? "border-r-0" : ""}`}
+            >
+              {page}
+            </Button>
+          ))}
 
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(currentPage + 1)}
-                  disabled={currentPage === getTotalPages()}
-                >
-                  Berikutnya
-                  <ChevronRight className="h-4 w-4 ml-1" />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(getTotalPages())}
-                  disabled={currentPage === getTotalPages()}
-                >
-                  Terakhir
-                  <ChevronRight className="h-4 w-4 ml-1" />
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setCurrentPage(currentPage + 1)}
+            disabled={currentPage === getTotalPages()}
+            className="rounded-none border-l border-gray-700 h-9 px-4 hover:bg-gray-700 text-gray-300 disabled:opacity-50"
+          >
+            Next
+          </Button>
+        </div>
+      </div>
 
       {/* Customer Detail Modal */}
       {showDetailModal && selectedCustomer && (
@@ -2474,344 +2465,343 @@ export default function CustomersPage() {
                   <Users className="w-5 h-5 mr-3 text-blue-500" />
                   Informasi Pelanggan
                 </h3>
-                  
+
                 {/* ID & Basic Info */}
                 <div className="space-y-6">
-                   {/* ID & Basic Info Banner */}
-                   {/* Service Number Banner */}
-                   <div className="mb-6">
-                     <div className="text-center bg-green-50 dark:bg-green-900/10 p-4 rounded-lg border border-green-100 dark:border-green-800/20">
-                       <div className="text-[10px] uppercase font-bold text-green-500 mb-1">Nomor Layanan</div>
-                       <div className="text-xl font-bold text-gray-900 dark:text-gray-100 font-mono tracking-wider">
-                         {(formData as any).service_number || '----------'}
-                       </div>
-                     </div>
-                   </div>
-
-            {/* Search Trigger for Name */}
-            <div className="space-y-2">
-               <Label htmlFor="create-name" className="text-base">Nama Lengkap *</Label>
-               <div className="relative group">
-                 <Input
-                   id="create-name"
-                   value={formData.name}
-                   readOnly
-                   placeholder="Klik untuk mencari pelanggan..."
-                   className="h-11 text-lg bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700 cursor-pointer pr-10 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                    onClick={() => {
-                      if (!isEditing) {
-                        setSearchModalMode('select') // Select Mode for Service Form
-                        setShowSearchCustomerModal(true)
-                      }
-                    }}
-                 />
-                 {!isEditing && (
-                   <Search className="absolute right-3 top-3 h-5 w-5 text-gray-400 group-hover:text-blue-500 transition-colors pointer-events-none" />
-                 )}
-               </div>
-               {!isEditing && <p className="text-xs text-muted-foreground">Klik input diatas atau icon pencarian untuk memilih pelanggan.</p>}
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-               <div className="space-y-2">
-                  <Label htmlFor="create-phone" className="text-base">Nomor Telepon *</Label>
-                  <Input
-                    id="create-phone"
-                    value={formData.phone}
-                    readOnly
-                    placeholder="Auto-filled"
-                    className="h-11 text-lg bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 focus:bg-white transition-colors"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="create-nik" className="text-base">NIK</Label>
-                  <Input
-                    id="create-nik"
-                    value={formData.nik}
-                    readOnly
-                    placeholder="Auto-filled"
-                    className="h-11 text-lg bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 focus:bg-white transition-colors"
-                  />
-                </div>
-            </div>
-          </div>
-        </div>
-      {/* SECTION: Location & Map (Read-Only Address) */}
-      <div className="bg-gray-50 dark:bg-gray-800/50 p-6 rounded-lg border border-gray-100 dark:border-gray-800">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center mb-6 border-b pb-4">
-            <MapPin className="w-5 h-5 mr-3 text-red-500" />
-            Lokasi & Peta
-          </h3>
-
-             <div className="space-y-6">
-              <div className="space-y-2">
-                 <Label htmlFor="create-address" className="text-base">Alamat Tagihan (Billing)</Label>
-                  <Textarea
-                    id="create-address"
-                    value={formData.address}
-                    onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                    placeholder="Alamat untuk pengiriman tagihan"
-                    rows={2}
-                    className="text-base resize-y bg-white dark:bg-gray-950 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100"
-                  />
-               </div>
-
-              <div className="space-y-2">
-                 <Label htmlFor="create-installation-address" className="text-base">Alamat Instalasi (Pemasangan)</Label>
-                  <Textarea
-                    id="create-installation-address"
-                    value={formData.installation_address}
-                    onChange={(e) => setFormData({ ...formData, installation_address: e.target.value })}
-                    placeholder="Alamat lokasi pemasangan layanan (biarkan kosong jika sama dengan alamat tagihan)"
-                    rows={2}
-                    className="text-base resize-y bg-white dark:bg-gray-950 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100"
-                  />
-                  <p className="text-xs text-muted-foreground">* Kosongkan jika sama dengan alamat tagihan</p>
-               </div>
-
-
-                      <div className="space-y-2">
-                        <Label className="text-base mb-2 block">Titik Koordinat (Map)</Label>
-                        <div className="h-[400px] w-full rounded-lg overflow-hidden border-2 border-gray-200 dark:border-gray-700 shadow-sm">
-                           <CoordinateMap
-                            latitude={formData.latitude}
-                            longitude={formData.longitude}
-                            address={formData.address}
-                            onCoordinatesChange={(lat, lng) => {
-                              console.log('🗺️ CoordinateMap onChange:', { lat, lng, latType: typeof lat, lngType: typeof lng })
-                              setFormData(prev => ({ ...prev, latitude: lat, longitude: lng }))
-                            }}
-                          />
-                        </div>
-                        <p className="text-sm text-muted-foreground mt-2">
-                          * Geser pin merah pada peta untuk menentukan lokasi yang lebih akurat.
-                        </p>
-                        
-                        <div className="grid grid-cols-2 gap-4 mt-4">
-                           <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Latitude</Label>
-                              <Input 
-                                value={formData.latitude || ''} 
-                                readOnly 
-                                className="bg-gray-50 dark:bg-gray-800/50 font-mono text-xs h-9" 
-                              />
-                           </div>
-                           <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Longitude</Label>
-                              <Input 
-                                value={formData.longitude || ''} 
-                                readOnly 
-                                className="bg-gray-50 dark:bg-gray-800/50 font-mono text-xs h-9" 
-                              />
-                           </div>
-                        </div>
+                  {/* ID & Basic Info Banner */}
+                  {/* Service Number Banner */}
+                  <div className="mb-6">
+                    <div className="text-center bg-green-50 dark:bg-green-900/10 p-4 rounded-lg border border-green-100 dark:border-green-800/20">
+                      <div className="text-[10px] uppercase font-bold text-green-500 mb-1">Nomor Layanan</div>
+                      <div className="text-xl font-bold text-gray-900 dark:text-gray-100 font-mono tracking-wider">
+                        {(formData as any).service_number || '----------'}
                       </div>
+                    </div>
                   </div>
+
+                  {/* Search Trigger for Name */}
+                  <div className="space-y-2">
+                    <Label htmlFor="create-name" className="text-base">Nama Lengkap *</Label>
+                    <div className="relative group">
+                      <Input
+                        id="create-name"
+                        value={formData.name}
+                        readOnly
+                        placeholder="Klik untuk mencari pelanggan..."
+                        className="h-11 text-lg bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700 cursor-pointer pr-10 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                        onClick={() => {
+                          if (!isEditing) {
+                            setSearchModalMode('select') // Select Mode for Service Form
+                            setShowSearchCustomerModal(true)
+                          }
+                        }}
+                      />
+                      {!isEditing && (
+                        <Search className="absolute right-3 top-3 h-5 w-5 text-gray-400 group-hover:text-blue-500 transition-colors pointer-events-none" />
+                      )}
+                    </div>
+                    {!isEditing && <p className="text-xs text-muted-foreground">Klik input diatas atau icon pencarian untuk memilih pelanggan.</p>}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <Label htmlFor="create-phone" className="text-base">Nomor Telepon *</Label>
+                      <Input
+                        id="create-phone"
+                        value={formData.phone}
+                        readOnly
+                        placeholder="Auto-filled"
+                        className="h-11 text-lg bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 focus:bg-white transition-colors"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="create-nik" className="text-base">NIK</Label>
+                      <Input
+                        id="create-nik"
+                        value={formData.nik}
+                        readOnly
+                        placeholder="Auto-filled"
+                        className="h-11 text-lg bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 focus:bg-white transition-colors"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+              {/* SECTION: Location & Map (Read-Only Address) */}
+              <div className="bg-gray-50 dark:bg-gray-800/50 p-6 rounded-lg border border-gray-100 dark:border-gray-800">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center mb-6 border-b pb-4">
+                  <MapPin className="w-5 h-5 mr-3 text-red-500" />
+                  Lokasi & Peta
+                </h3>
+
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                    <Label htmlFor="create-address" className="text-base">Alamat Tagihan (Billing)</Label>
+                    <Textarea
+                      id="create-address"
+                      value={formData.address}
+                      onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                      placeholder="Alamat untuk pengiriman tagihan"
+                      rows={2}
+                      className="text-base resize-y bg-white dark:bg-gray-950 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="create-installation-address" className="text-base">Alamat Instalasi (Pemasangan)</Label>
+                    <Textarea
+                      id="create-installation-address"
+                      value={formData.installation_address}
+                      onChange={(e) => setFormData({ ...formData, installation_address: e.target.value })}
+                      placeholder="Alamat lokasi pemasangan layanan (biarkan kosong jika sama dengan alamat tagihan)"
+                      rows={2}
+                      className="text-base resize-y bg-white dark:bg-gray-950 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100"
+                    />
+                    <p className="text-xs text-muted-foreground">* Kosongkan jika sama dengan alamat tagihan</p>
+                  </div>
+
+
+                  <div className="space-y-2">
+                    <Label className="text-base mb-2 block">Titik Koordinat (Map)</Label>
+                    <div className="h-[400px] w-full rounded-lg overflow-hidden border-2 border-gray-200 dark:border-gray-700 shadow-sm">
+                      <CoordinateMap
+                        latitude={formData.latitude}
+                        longitude={formData.longitude}
+                        address={formData.address}
+                        onCoordinatesChange={(lat, lng) => {
+                          console.log('🗺️ CoordinateMap onChange:', { lat, lng, latType: typeof lat, lngType: typeof lng })
+                          setFormData(prev => ({ ...prev, latitude: lat, longitude: lng }))
+                        }}
+                      />
+                    </div>
+                    <p className="text-sm text-muted-foreground mt-2">
+                      * Geser pin merah pada peta untuk menentukan lokasi yang lebih akurat.
+                    </p>
+
+                    <div className="grid grid-cols-2 gap-4 mt-4">
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Latitude</Label>
+                        <Input
+                          value={formData.latitude || ''}
+                          readOnly
+                          className="bg-gray-50 dark:bg-gray-800/50 font-mono text-xs h-9"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Longitude</Label>
+                        <Input
+                          value={formData.longitude || ''}
+                          readOnly
+                          className="bg-gray-50 dark:bg-gray-800/50 font-mono text-xs h-9"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
 
 
               {/* SECTION: Technical (ODP) */}
               <div className="bg-gray-50 dark:bg-gray-800/50 p-6 rounded-lg border border-gray-100 dark:border-gray-800">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center mb-6 border-b pb-4">
-                    <Settings className="w-5 h-5 mr-3 text-orange-500" />
-                    Data Teknis (ODP)
-                  </h3>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center mb-6 border-b pb-4">
+                  <Settings className="w-5 h-5 mr-3 text-orange-500" />
+                  Data Teknis (ODP)
+                </h3>
 
-                  <div className="grid grid-cols-1 gap-6">
-                      <div className="space-y-2">
-                        <Label htmlFor="create-odp" className="text-base">Optical Distribution Point (ODP)</Label>
-                        <select
-                          id="create-odp"
-                          value={formData.odp_id || ''}
-                          onChange={(e) => {
-                            const selectedODP = odps.find(odp => odp.id.toString() === e.target.value)
-                            setFormData({
-                              ...formData,
-                              odp_id: e.target.value,
-                              odp_name: selectedODP?.name || '',
-                              odp_address: selectedODP?.address || ''
-                            })
-                          }}
-                          className="block w-full px-3 py-3 h-12 border border-gray-300 dark:border-gray-600 rounded-md text-base bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          disabled={fetchingODPs}
-                        >
-                          <option value="">-- Pilih ODP --</option>
-                          {Array.isArray(odps) && odps.map((odp) => (
-                            <option key={odp.id} value={odp.id}>
-                              {odp.name} ({odp.available_ports} ports) - {odp.address}
-                            </option>
-                          ))}
-                        </select>
-                         {!fetchingODPs && odps.length === 0 && (
-                          <span className="text-sm text-red-500">Tidak ada ODP tersedia. Tambah ODP terlebih dahulu!</span>
-                        )}
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="create-cable-length" className="text-base">Panjang Kabel (Meter)</Label>
-                        <Input
-                          id="create-cable-length"
-                          type="number"
-                          value={formData.cable_length || ''}
-                          onChange={(e) => setFormData({ ...formData, cable_length: e.target.value ? parseInt(e.target.value) : undefined })}
-                          placeholder="Contoh: 150"
-                          className="h-11 text-lg"
-                        />
-                        <p className="text-xs text-muted-foreground">* Panjang kabel dari ODP ke lokasi pelanggan</p>
-                      </div>
-
-                      {formData.odp_id && (
-                        <div className="space-y-2">
-                          <Label htmlFor="create-odp-port" className="text-base">Port ODP</Label>
-                          <Input
-                            id="create-odp-port"
-                            value={formData.odp_port || ''}
-                            onChange={(e) => setFormData({ ...formData, odp_port: e.target.value })}
-                            placeholder="Contoh: 1"
-                            className="h-11 text-lg"
-                          />
-                        </div>
-                      )}
+                <div className="grid grid-cols-1 gap-6">
+                  <div className="space-y-2">
+                    <Label htmlFor="create-odp" className="text-base">Optical Distribution Point (ODP)</Label>
+                    <select
+                      id="create-odp"
+                      value={formData.odp_id || ''}
+                      onChange={(e) => {
+                        const selectedODP = odps.find(odp => odp.id.toString() === e.target.value)
+                        setFormData({
+                          ...formData,
+                          odp_id: e.target.value,
+                          odp_name: selectedODP?.name || '',
+                          odp_address: selectedODP?.address || ''
+                        })
+                      }}
+                      className="block w-full px-3 py-3 h-12 border border-gray-300 dark:border-gray-600 rounded-md text-base bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      disabled={fetchingODPs}
+                    >
+                      <option value="">-- Pilih ODP --</option>
+                      {Array.isArray(odps) && odps.map((odp) => (
+                        <option key={odp.id} value={odp.id}>
+                          {odp.name} ({odp.available_ports} ports) - {odp.address}
+                        </option>
+                      ))}
+                    </select>
+                    {!fetchingODPs && odps.length === 0 && (
+                      <span className="text-sm text-red-500">Tidak ada ODP tersedia. Tambah ODP terlebih dahulu!</span>
+                    )}
                   </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="create-cable-length" className="text-base">Panjang Kabel (Meter)</Label>
+                    <Input
+                      id="create-cable-length"
+                      type="number"
+                      value={formData.cable_length || ''}
+                      onChange={(e) => setFormData({ ...formData, cable_length: e.target.value ? parseInt(e.target.value) : undefined })}
+                      placeholder="Contoh: 150"
+                      className="h-11 text-lg"
+                    />
+                    <p className="text-xs text-muted-foreground">* Panjang kabel dari ODP ke lokasi pelanggan</p>
+                  </div>
+
+                  {formData.odp_id && (
+                    <div className="space-y-2">
+                      <Label htmlFor="create-odp-port" className="text-base">Port ODP</Label>
+                      <Input
+                        id="create-odp-port"
+                        value={formData.odp_port || ''}
+                        onChange={(e) => setFormData({ ...formData, odp_port: e.target.value })}
+                        placeholder="Contoh: 1"
+                        className="h-11 text-lg"
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* SECTION: Services */}
-               <div className="bg-gray-50 dark:bg-gray-800/50 p-6 rounded-lg border border-gray-100 dark:border-gray-800">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center mb-6 border-b pb-4">
-                    <Cable className="w-5 h-5 mr-3 text-green-500" />
-                    Layanan & Perangkat
-                  </h3>
+              <div className="bg-gray-50 dark:bg-gray-800/50 p-6 rounded-lg border border-gray-100 dark:border-gray-800">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center mb-6 border-b pb-4">
+                  <Cable className="w-5 h-5 mr-3 text-green-500" />
+                  Layanan & Perangkat
+                </h3>
 
-                  <div className="space-y-6">
-                      <div className="space-y-2">
-                         <Label htmlFor="create-region" className="text-base font-semibold text-orange-600 dark:text-orange-400">Wilayah / Area Layanan *</Label>
-                         <select
-                           id="create-region"
-                           value={formData.region}
-                           onChange={(e) => setFormData({ ...formData, region: e.target.value })}
-                           className="block w-full px-3 py-3 h-12 border-2 border-orange-200 dark:border-orange-900/30 rounded-md text-base bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                         >
-                           <option value="">-- Pilih Wilayah Layanan --</option>
-                           {Array.isArray(regions) && regions.map((region) => (
-                             <option key={region.id} value={region.id}>
-                               {region.name}
-                             </option>
-                           ))}
-                         </select>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                         <div className="space-y-2">
-                            <Label htmlFor="create-package" className="text-base">Paket Internet</Label>
-                            <select
-                              id="create-package"
-                              value={formData.package_id}
-                              onChange={(e) => setFormData({ ...formData, package_id: e.target.value })}
-                              className="block w-full px-3 py-3 h-12 border border-gray-300 dark:border-gray-600 rounded-md text-base bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                            >
-                              <option value="">-- Pilih Paket --</option>
-                              {Array.isArray(packages) && packages.filter(pkg => pkg.isActive).map((pkg) => (
-                                <option key={pkg.id} value={pkg.id}>
-                                  {pkg.name} ({pkg.speed})
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                          <div className="space-y-2">
-                            <Label htmlFor="create-router" className="text-base">Router (NAS)</Label>
-                            <select
-                              id="create-router"
-                              value={formData.router}
-                              onChange={(e) => setFormData({ ...formData, router: e.target.value })}
-                              className="block w-full px-3 py-3 h-12 border border-gray-300 dark:border-gray-600 rounded-md text-base bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                            >
-                              <option value="all">All Router (Bebas)</option>
-                              {Array.isArray(routers) && routers.filter(r => r.id !== 'all').map((router) => (
-                                <option key={router.id} value={router.shortname}>
-                                  {router.shortname}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                         <div className="space-y-2">
-                             <Label htmlFor="create-pppoe-user" className="text-base">PPPoE Username</Label>
-                             <Input
-                                id="create-pppoe-user"
-                                value={formData.pppoe_username}
-                                onChange={(e) => setFormData(prev => ({ ...prev, pppoe_username: e.target.value }))}
-                                placeholder="Kosong = Auto (Service Number)"
-                                className="h-11 font-mono text-base bg-white dark:bg-gray-950 dark:text-gray-100 dark:border-gray-700"
-                              />
-                         </div>
-                          <div className="space-y-2">
-                             <Label htmlFor="create-pppoe-pass" className="text-base">PPPoE Password</Label>
-                             <Input
-                                id="create-pppoe-pass"
-                                value={formData.pppoe_password}
-                                onChange={(e) => setFormData(prev => ({ ...prev, pppoe_password: e.target.value }))}
-                                placeholder="Password"
-                                className="h-11 font-mono text-base bg-white dark:bg-gray-950 dark:text-gray-100 dark:border-gray-700"
-                              />
-                         </div>
-                      </div>
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                    <Label htmlFor="create-region" className="text-base font-semibold text-orange-600 dark:text-orange-400">Wilayah / Area Layanan *</Label>
+                    <select
+                      id="create-region"
+                      value={formData.region}
+                      onChange={(e) => setFormData({ ...formData, region: e.target.value })}
+                      className="block w-full px-3 py-3 h-12 border-2 border-orange-200 dark:border-orange-900/30 rounded-md text-base bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    >
+                      <option value="">-- Pilih Wilayah Layanan --</option>
+                      {Array.isArray(regions) && regions.map((region) => (
+                        <option key={region.id} value={region.id}>
+                          {region.name}
+                        </option>
+                      ))}
+                    </select>
                   </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <Label htmlFor="create-package" className="text-base">Paket Internet</Label>
+                      <select
+                        id="create-package"
+                        value={formData.package_id}
+                        onChange={(e) => setFormData({ ...formData, package_id: e.target.value })}
+                        className="block w-full px-3 py-3 h-12 border border-gray-300 dark:border-gray-600 rounded-md text-base bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <option value="">-- Pilih Paket --</option>
+                        {Array.isArray(packages) && packages.filter(pkg => pkg.isActive).map((pkg) => (
+                          <option key={pkg.id} value={pkg.id}>
+                            {pkg.name} ({pkg.speed})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="create-router" className="text-base">Router (NAS)</Label>
+                      <select
+                        id="create-router"
+                        value={formData.router}
+                        onChange={(e) => setFormData({ ...formData, router: e.target.value })}
+                        className="block w-full px-3 py-3 h-12 border border-gray-300 dark:border-gray-600 rounded-md text-base bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <option value="all">All Router (Bebas)</option>
+                        {Array.isArray(routers) && routers.filter(r => r.id !== 'all').map((router) => (
+                          <option key={router.id} value={router.shortname}>
+                            {router.shortname}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <Label htmlFor="create-pppoe-user" className="text-base">PPPoE Username</Label>
+                      <Input
+                        id="create-pppoe-user"
+                        value={formData.pppoe_username}
+                        onChange={(e) => setFormData(prev => ({ ...prev, pppoe_username: e.target.value }))}
+                        placeholder="Kosong = Auto (Service Number)"
+                        className="h-11 font-mono text-base bg-white dark:bg-gray-950 dark:text-gray-100 dark:border-gray-700"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="create-pppoe-pass" className="text-base">PPPoE Password</Label>
+                      <Input
+                        id="create-pppoe-pass"
+                        value={formData.pppoe_password}
+                        onChange={(e) => setFormData(prev => ({ ...prev, pppoe_password: e.target.value }))}
+                        placeholder="Password"
+                        className="h-11 font-mono text-base bg-white dark:bg-gray-950 dark:text-gray-100 dark:border-gray-700"
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* SECTION: Billing */}
-               <div className="bg-gray-50 dark:bg-gray-800/50 p-6 rounded-lg border border-gray-100 dark:border-gray-800">
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center mb-6 border-b pb-4">
-                      <CreditCard className="w-5 h-5 mr-3 text-purple-500" />
-                      Tagihan
-                    </h3>
+              <div className="bg-gray-50 dark:bg-gray-800/50 p-6 rounded-lg border border-gray-100 dark:border-gray-800">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center mb-6 border-b pb-4">
+                  <CreditCard className="w-5 h-5 mr-3 text-purple-500" />
+                  Tagihan
+                </h3>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                         <div className="space-y-2">
-                          <Label className="text-base">Jenis Tagihan</Label>
-                          <select
-                            value={formData.billing_type}
-                            onChange={(e) => setFormData({ ...formData, billing_type: e.target.value })}
-                            className="block w-full px-3 py-3 h-12 border border-gray-300 dark:border-gray-600 rounded-md text-base bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          >
-                            <option value="prepaid">Prabayar</option>
-                            <option value="postpaid">Pascabayar</option>
-                          </select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label className="text-base">Siklus Billing</Label>
-                          <select
-                            value={formData.siklus}
-                            onChange={(e) => setFormData({ ...formData, siklus: e.target.value })}
-                            className="block w-full px-3 py-3 h-12 border border-gray-300 dark:border-gray-600 rounded-md text-base bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          >
-                             <option value="profile">Profile (Sesuai Masa Aktif)</option>
-                             <option value="tetap">Tetap (Tanggal Sama Tiap Bulan)</option>
-                             <option value="bulan">Bulanan (Jatuh Tempo Tgl 20)</option>
-                          </select>
-                        </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                  <div className="space-y-2">
+                    <Label className="text-base">Jenis Tagihan</Label>
+                    <select
+                      value={formData.billing_type}
+                      onChange={(e) => setFormData({ ...formData, billing_type: e.target.value })}
+                      className="block w-full px-3 py-3 h-12 border border-gray-300 dark:border-gray-600 rounded-md text-base bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="prepaid">Prabayar</option>
+                      <option value="postpaid">Pascabayar</option>
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-base">Siklus Billing</Label>
+                    <select
+                      value={formData.siklus}
+                      onChange={(e) => setFormData({ ...formData, siklus: e.target.value })}
+                      className="block w-full px-3 py-3 h-12 border border-gray-300 dark:border-gray-600 rounded-md text-base bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="profile">Profile (Sesuai Masa Aktif)</option>
+                      <option value="tetap">Tetap (Tanggal Sama Tiap Bulan)</option>
+                      <option value="bulan">Bulanan (Jatuh Tempo Tgl 20)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Compact Billing Summary */}
+                {getSelectedPackage() && (
+                  <div className={`p-4 rounded-md border ${formData.billing_type === 'prepaid'
+                    ? 'bg-blue-50 border-blue-100 text-blue-700 dark:bg-blue-900/30 dark:border-blue-800 dark:text-blue-200'
+                    : 'bg-green-50 border-green-100 text-green-700 dark:bg-green-900/30 dark:border-green-800 dark:text-green-200'
+                    }`}>
+                    <div className="flex justify-between items-center text-lg font-bold mb-2">
+                      <span>Total Tagihan Awal:</span>
+                      <span>Rp {calculateTotalBillingSync(getSelectedPackage()?.price, getSelectedPackage()?.id?.toString(), formData.billing_type).toLocaleString('id-ID')}</span>
                     </div>
+                    <div className="flex justify-between items-center text-sm opacity-80">
+                      <span>Harga Paket Bulanan:</span>
+                      <span>Rp {getSelectedPackage()?.price?.toLocaleString('id-ID')}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
 
-                    {/* Compact Billing Summary */}
-                    {getSelectedPackage() && (
-                      <div className={`p-4 rounded-md border ${
-                        formData.billing_type === 'prepaid' 
-                          ? 'bg-blue-50 border-blue-100 text-blue-700 dark:bg-blue-900/30 dark:border-blue-800 dark:text-blue-200' 
-                          : 'bg-green-50 border-green-100 text-green-700 dark:bg-green-900/30 dark:border-green-800 dark:text-green-200'
-                      }`}>
-                         <div className="flex justify-between items-center text-lg font-bold mb-2">
-                            <span>Total Tagihan Awal:</span>
-                            <span>Rp {calculateTotalBillingSync(getSelectedPackage()?.price, getSelectedPackage()?.id?.toString(), formData.billing_type).toLocaleString('id-ID')}</span>
-                         </div>
-                         <div className="flex justify-between items-center text-sm opacity-80">
-                            <span>Harga Paket Bulanan:</span>
-                            <span>Rp {getSelectedPackage()?.price?.toLocaleString('id-ID')}</span>
-                         </div>
-                      </div>
-                    )}
-               </div>
-               
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setShowCreateModal(false)}>
@@ -2844,37 +2834,18 @@ export default function CustomersPage() {
 
 
       {/* Region Management Modal */}
-      
+
       {/* Search Customer Modal (Table View) */}
       <Dialog open={showSearchCustomerModal} onOpenChange={setShowSearchCustomerModal}>
         <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden flex flex-col">
           <DialogHeader>
-          <div className="flex justify-between items-center pr-8">
-            <DialogTitle>
-              {searchModalMode === 'view' ? 'Data Pelanggan Utama' : 'Pilih Pelanggan untuk Layanan'}
-            </DialogTitle>
-             {searchModalMode === 'view' && (
-               <Button 
-                size="sm" 
-                className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2"
-                onClick={() => {
-                  setIdentityFormData({ customer_id: '', name: '', phone: '', nik: '', address: '' })
-                  setIsIdentityEditing(false)
-                  setEditingIdentityId(null)
-                  setShowIdentityModal(true)
-                }}
-              >
-                <Plus className="h-4 w-4" /> Tambah Pelanggan
-              </Button>
-             )}
-          </div>
-          </DialogHeader>
-          
-           <div className="bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200 border-l-4 border-blue-500 dark:border-blue-500 p-4 mb-4 text-sm flex justify-between items-center">
-              <span>Untuk mencari data pelanggan yang sudah ada silahkan ketik nama atau nomor hp pelanggan di kolom pencarian</span>
-              {searchModalMode === 'select' && (
-                <Button 
-                  size="sm" 
+            <div className="flex justify-between items-center pr-8">
+              <DialogTitle>
+                {searchModalMode === 'view' ? 'Data Pelanggan Utama' : 'Pilih Pelanggan untuk Layanan'}
+              </DialogTitle>
+              {searchModalMode === 'view' && (
+                <Button
+                  size="sm"
                   className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2"
                   onClick={() => {
                     setIdentityFormData({ customer_id: '', name: '', phone: '', nik: '', address: '' })
@@ -2883,100 +2854,149 @@ export default function CustomersPage() {
                     setShowIdentityModal(true)
                   }}
                 >
-                  <Plus className="h-4 w-4" /> Tambah Pelanggan Baru
+                  <Plus className="h-4 w-4" /> Tambah Pelanggan
                 </Button>
               )}
-           </div>
+            </div>
+          </DialogHeader>
+
+          <div className="bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200 border-l-4 border-blue-500 dark:border-blue-500 p-4 mb-4 text-sm flex justify-between items-center">
+            <span>Untuk mencari data pelanggan yang sudah ada silahkan ketik nama atau nomor hp pelanggan di kolom pencarian</span>
+            {searchModalMode === 'select' && (
+              <Button
+                size="sm"
+                className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2"
+                onClick={() => {
+                  setIdentityFormData({ customer_id: '', name: '', phone: '', nik: '', address: '' })
+                  setIsIdentityEditing(false)
+                  setEditingIdentityId(null)
+                  setShowIdentityModal(true)
+                }}
+              >
+                <Plus className="h-4 w-4" /> Tambah Pelanggan Baru
+              </Button>
+            )}
+          </div>
 
           <div className="flex justify-between items-center mb-4">
-             <div className="text-sm font-medium text-muted-foreground italic">
-                * Pilih pelanggan dari daftar di bawah untuk melanjutkan penugasan layanan.
-             </div>
-             <div className="relative w-72">
-                 <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                 <Input 
-                   placeholder="Search: ID, Nama, Phone" 
-                   className="pl-9 h-9"
-                   value={modalSearchQuery}
-                   onChange={(e) => setModalSearchQuery(e.target.value)}
-                 />
-             </div>
+            <div className="text-sm font-medium text-muted-foreground italic">
+              * Pilih pelanggan dari daftar di bawah untuk melanjutkan penugasan layanan.
+            </div>
+            <div className="relative w-72">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search: ID, Nama, Phone"
+                className="pl-9 h-9"
+                value={modalSearchQuery}
+                onChange={(e) => setModalSearchQuery(e.target.value)}
+              />
+            </div>
           </div>
 
           <div className="flex-1 border rounded-md overflow-hidden">
-             <div className="overflow-x-scroll" style={{ maxWidth: '100%' }}>
-               <table className="text-sm text-left" style={{ minWidth: '1000px', width: '100%' }}>
+            <div className="overflow-x-scroll" style={{ maxWidth: '100%' }}>
+              <table className="text-sm text-left" style={{ minWidth: '1000px', width: '100%' }}>
                 <thead className="bg-gray-100 dark:bg-gray-800 text-xs uppercase font-semibold text-gray-700 dark:text-gray-300">
-                   <tr>
-                      {searchModalMode === 'select' && <th className="px-4 py-3">Pilih</th>}
-                      <th className="px-4 py-3">ID Pel</th>
-                      <th className="px-4 py-3">Pelanggan</th>
-                      <th className="px-4 py-3">Phone</th>
-                      <th className="px-4 py-3">No. Identitas</th>
-                      <th className="px-4 py-3">Alamat</th>
-                   </tr>
+                  <tr>
+                    {searchModalMode === 'select' && <th className="px-4 py-3">Pilih</th>}
+                    <th className="px-4 py-3">ID Pel</th>
+                    <th className="px-4 py-3">Pelanggan</th>
+                    <th className="px-4 py-3">Phone</th>
+                    <th className="px-4 py-3">No. Identitas</th>
+                    <th className="px-4 py-3">Alamat</th>
+                  </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                   {isModalSearching ? (
-                     <tr>
-                       <td colSpan={searchModalMode === 'select' ? 6 : 5} className="px-4 py-8 text-center text-muted-foreground">
-                         <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
-                         Mencari data...
-                       </td>
-                     </tr>
-                   ) : modalSearchResults.length > 0 ? (
-                      modalSearchResults.map((customer) => (
-                         <tr 
-                           key={customer.id} 
-                           className={`hover:bg-gray-50 dark:hover:bg-gray-800/50 ${searchModalMode === 'view' ? 'cursor-pointer' : ''}`}
-                           onClick={() => {
-                             if (searchModalMode === 'view') {
-                               handleEditIdentity(customer)
-                             }
-                           }}
-                         >
-                            {searchModalMode === 'select' && (
-                              <td className="px-4 py-3">
-                                 <Button 
-                                   size="sm" 
-                                   className="bg-red-500 hover:bg-red-600 text-white text-xs h-7"
-                                   onClick={(e) => {
-                                     e.stopPropagation();
-                                     handleSelectCustomerFromSearch(customer)
-                                   }}
-                                 >
-                                   » Pilih
-                                 </Button>
-                              </td>
-                            )}
-                            <td className="px-4 py-3 font-mono">{customer.customer_id}</td>
-                            <td className="px-4 py-3 font-medium">
-                               {customer.name}
-                               {searchModalMode === 'view' && <Edit className="inline ml-2 h-3 w-3 text-gray-400" />}
-                            </td>
-                            <td className="px-4 py-3">{customer.phone}</td>
-                            <td className="px-4 py-3">{customer.nik || '-'}</td>
-                            <td className="px-4 py-3 max-w-[200px] truncate" title={customer.billing_address || customer.address || '-'}>{customer.billing_address || customer.address || '-'}</td>
-                         </tr>
-                      ))
-                   ) : modalSearchQuery ? (
-                     <tr>
-                       <td colSpan={searchModalMode === 'select' ? 6 : 5} className="px-4 py-8 text-center text-muted-foreground">
-                         Tidak ada pelanggan yang cocok dengan "{modalSearchQuery}"
-                       </td>
-                     </tr>
-                   ) : (
-                     // Show some default customers if no search query (e.g. recent ones from main list)
-                     // Or just instructions
-                      <tr>
-                       <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground italic">
-                         Ketik ID, Nama, atau Nomor HP untuk mencari...
-                       </td>
-                     </tr>
-                   )}
+                  {isModalSearching ? (
+                    <tr>
+                      <td colSpan={searchModalMode === 'select' ? 6 : 5} className="px-4 py-8 text-center text-muted-foreground">
+                        <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
+                        Mencari data...
+                      </td>
+                    </tr>
+                  ) : modalSearchResults.length > 0 ? (
+                    modalSearchResults.map((customer) => (
+                      <tr
+                        key={customer.id}
+                        className={`hover:bg-gray-50 dark:hover:bg-gray-800/50 ${searchModalMode === 'view' ? 'cursor-pointer' : ''}`}
+                        onClick={() => {
+                          if (searchModalMode === 'view') {
+                            handleEditIdentity(customer)
+                          }
+                        }}
+                      >
+                        {searchModalMode === 'select' && (
+                          <td className="px-4 py-3">
+                            <Button
+                              size="sm"
+                              className="bg-red-500 hover:bg-red-600 text-white text-xs h-7"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSelectCustomerFromSearch(customer)
+                              }}
+                            >
+                              » Pilih
+                            </Button>
+                          </td>
+                        )}
+                        <td className="px-4 py-3 font-mono">{customer.customer_id}</td>
+                        <td className="px-4 py-3 font-medium">
+                          {customer.name}
+                          {searchModalMode === 'view' && <Edit className="inline ml-2 h-3 w-3 text-gray-400" />}
+                        </td>
+                        <td className="px-4 py-3">{customer.phone}</td>
+                        <td className="px-4 py-3">{customer.nik || '-'}</td>
+                        <td className="px-4 py-3 max-w-[200px] truncate" title={customer.billing_address || customer.address || '-'}>{customer.billing_address || customer.address || '-'}</td>
+                      </tr>
+                    ))
+                  ) : modalSearchQuery ? (
+                    <tr>
+                      <td colSpan={searchModalMode === 'select' ? 6 : 5} className="px-4 py-8 text-center text-muted-foreground">
+                        Tidak ada pelanggan yang cocok dengan "{modalSearchQuery}"
+                      </td>
+                    </tr>
+                  ) : (
+                    // Show some default customers if no search query (e.g. recent ones from main list)
+                    // Or just instructions
+                    <tr>
+                      <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground italic">
+                        Ketik ID, Nama, atau Nomor HP untuk mencari...
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
-             </div>
+            </div>
+          </div>
+
+          {/* Modal Pagination */}
+          <div className="flex items-center justify-between mt-4 px-1 pb-4">
+            <div className="text-xs text-muted-foreground">
+              Total: {modalTotalItems} data
+            </div>
+            <div className="flex items-center border rounded-lg overflow-hidden border-gray-200 dark:border-gray-700">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => handleModalSearch(modalSearchQuery, modalCurrentPage - 1)}
+                disabled={modalCurrentPage === 1}
+                className="rounded-none border-r border-gray-200 dark:border-gray-700 h-8 px-3 text-xs hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+              >
+                Previous
+              </Button>
+              <div className="h-8 px-3 flex items-center justify-center bg-gray-50 dark:bg-gray-800 text-xs font-medium border-r border-gray-200 dark:border-gray-700">
+                Page {modalCurrentPage}
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => handleModalSearch(modalSearchQuery, modalCurrentPage + 1)}
+                disabled={modalCurrentPage >= Math.ceil(modalTotalItems / 10)}
+                className="rounded-none h-8 px-3 text-xs hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+              >
+                Next
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
@@ -2994,67 +3014,67 @@ export default function CustomersPage() {
           )}
 
           <div className="space-y-4 py-4">
-             <div className="space-y-2">
-                <Label htmlFor="ident-id">ID Pelanggan (Optional)</Label>
-                <Input
-                  id="ident-id"
-                  value={identityFormData.customer_id}
-                  onChange={(e) => setIdentityFormData({ ...identityFormData, customer_id: e.target.value })}
-                  placeholder="Opsional: 5 digit (cth: 00001) atau kosongkan untuk Auto"
-                  className="font-mono bg-white dark:bg-gray-950"
-                />
-                <p className="text-[10px] text-muted-foreground">Biarkan kosong untuk generate ID otomatis (urutan 5 digit).</p>
-             </div>
+            <div className="space-y-2">
+              <Label htmlFor="ident-id">ID Pelanggan (Optional)</Label>
+              <Input
+                id="ident-id"
+                value={identityFormData.customer_id}
+                onChange={(e) => setIdentityFormData({ ...identityFormData, customer_id: e.target.value })}
+                placeholder="Opsional: 5 digit (cth: 00001) atau kosongkan untuk Auto"
+                className="font-mono bg-white dark:bg-gray-950"
+              />
+              <p className="text-[10px] text-muted-foreground">Biarkan kosong untuk generate ID otomatis (urutan 5 digit).</p>
+            </div>
 
-             <div className="space-y-2">
-                <Label htmlFor="ident-name">Nama Lengkap *</Label>
+            <div className="space-y-2">
+              <Label htmlFor="ident-name">Nama Lengkap *</Label>
+              <Input
+                id="ident-name"
+                value={identityFormData.name}
+                onChange={(e) => setIdentityFormData({ ...identityFormData, name: e.target.value })}
+                placeholder="Nama Lengkap"
+                className="bg-white dark:bg-gray-950"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="ident-address">Alamat Tagihan (Billing) *</Label>
+              <Textarea
+                id="ident-address"
+                value={identityFormData.address}
+                onChange={(e) => setIdentityFormData({ ...identityFormData, address: e.target.value })}
+                placeholder="Alamat penagihan atau alamat domisili pelanggan"
+                className="bg-white dark:bg-gray-950 min-h-[80px]"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="ident-phone">Nomor HP *</Label>
                 <Input
-                  id="ident-name"
-                  value={identityFormData.name}
-                  onChange={(e) => setIdentityFormData({ ...identityFormData, name: e.target.value })}
-                  placeholder="Nama Lengkap"
+                  id="ident-phone"
+                  value={identityFormData.phone}
+                  onChange={(e) => setIdentityFormData({ ...identityFormData, phone: e.target.value })}
+                  placeholder="08..."
                   className="bg-white dark:bg-gray-950"
                 />
-             </div>
-
-             <div className="space-y-2">
-                <Label htmlFor="ident-address">Alamat Tagihan (Billing) *</Label>
-                <Textarea
-                  id="ident-address"
-                  value={identityFormData.address}
-                  onChange={(e) => setIdentityFormData({ ...identityFormData, address: e.target.value })}
-                  placeholder="Alamat penagihan atau alamat domisili pelanggan"
-                  className="bg-white dark:bg-gray-950 min-h-[80px]"
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="ident-nik">NIK</Label>
+                <Input
+                  id="ident-nik"
+                  value={identityFormData.nik}
+                  onChange={(e) => setIdentityFormData({ ...identityFormData, nik: e.target.value })}
+                  placeholder="NIK (Optional)"
+                  className="bg-white dark:bg-gray-950"
                 />
-             </div>
-
-             <div className="grid grid-cols-2 gap-4">
-               <div className="space-y-2">
-                  <Label htmlFor="ident-phone">Nomor HP *</Label>
-                  <Input
-                    id="ident-phone"
-                    value={identityFormData.phone}
-                    onChange={(e) => setIdentityFormData({ ...identityFormData, phone: e.target.value })}
-                    placeholder="08..."
-                    className="bg-white dark:bg-gray-950"
-                  />
-               </div>
-               <div className="space-y-2">
-                  <Label htmlFor="ident-nik">NIK</Label>
-                  <Input
-                    id="ident-nik"
-                    value={identityFormData.nik}
-                    onChange={(e) => setIdentityFormData({ ...identityFormData, nik: e.target.value })}
-                    placeholder="NIK (Optional)"
-                    className="bg-white dark:bg-gray-950"
-                  />
-               </div>
-             </div>
+              </div>
+            </div>
           </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowIdentityModal(false)}>Batal</Button>
-            <Button 
+            <Button
               className="bg-red-600 hover:bg-red-700 text-white"
               disabled={submitting}
               onClick={async () => {
@@ -3079,12 +3099,12 @@ export default function CustomersPage() {
                   } else {
                     await adminApi.post('/api/v1/customers/identity', payload)
                   }
-                  
+
                   // Success
                   setIdentityFormData({ customer_id: '', name: '', phone: '', nik: '', address: '' })
                   setShowIdentityModal(false)
                   fetchCustomers() // Refresh list
-                  
+
                 } catch (err: any) {
                   console.error('Error creating identity:', err);
                   console.log('Error Response Data:', err.response?.data);

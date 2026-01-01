@@ -22,7 +22,7 @@ export interface BroadcastBannerProps {
 interface ExtendedBroadcastMessage extends BroadcastMessage {
   requires_persistence?: boolean // Override default persistence behavior
   is_dismissible?: boolean // Allow overriding dismissibility
-  banner_type?: 'informasi' | 'gangguan' | 'maintenance' | 'selesai'
+  banner_type?: 'informasi' | 'gangguan' | 'maintenance' | 'selesai' | 'info' | 'warning' | 'error' | 'success'
 }
 
 const BroadcastBanner: React.FC<BroadcastBannerProps> = ({
@@ -165,6 +165,7 @@ const BroadcastBanner: React.FC<BroadcastBannerProps> = ({
   const getBannerConfig = (type: ExtendedBroadcastMessage['banner_type']) => {
     switch (type) {
       case 'informasi':
+      case 'info':
         return {
           icon: Info,
           cardBg: 'bg-blue-500 dark:bg-blue-600',
@@ -176,6 +177,7 @@ const BroadcastBanner: React.FC<BroadcastBannerProps> = ({
           label: 'Informasi'
         }
       case 'gangguan':
+      case 'error': // Map 'important'/'error' from admin to red
         return {
           icon: WifiOff,
           cardBg: 'bg-red-500 dark:bg-red-600',
@@ -187,6 +189,7 @@ const BroadcastBanner: React.FC<BroadcastBannerProps> = ({
           label: 'Gangguan'
         }
       case 'maintenance':
+      case 'warning': // Map 'warning' from admin to yellow
         return {
           icon: Settings,
           cardBg: 'bg-yellow-500 dark:bg-yellow-600',
@@ -198,6 +201,7 @@ const BroadcastBanner: React.FC<BroadcastBannerProps> = ({
           label: 'Maintenance'
         }
       case 'selesai':
+      case 'success': // Map 'success' from admin to green
         return {
           icon: CheckCircle,
           cardBg: 'bg-green-500 dark:bg-green-600',
@@ -380,7 +384,7 @@ const BroadcastBanner: React.FC<BroadcastBannerProps> = ({
         </div>
       )}
 
-          </div>
+    </div>
   )
 }
 

@@ -112,7 +112,9 @@ class BillingCycleService {
                     return this.calculateProfileIsolirDate(activeDate, profilePeriod || settings.profile_default_period);
 
                 case 'fixed':
-                    return this.calculateFixedIsolirDate(activeDate, settings.fixed_day);
+                    // For fixed cycle, use the day of the month from customer's active_date
+                    const fixedDay = new Date(activeDate).getDate();
+                    return this.calculateFixedIsolirDate(activeDate, fixedDay);
 
                 case 'monthly':
                     return this.calculateMonthlyIsolirDate(activeDate);
@@ -322,7 +324,7 @@ class BillingCycleService {
         const service = await getOne(`
             SELECT id FROM services WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1
         `, [customerId]);
-        
+
         if (!service) throw new Error('No services found for customer');
         return this.updateServiceBillingDates(service.id);
     }

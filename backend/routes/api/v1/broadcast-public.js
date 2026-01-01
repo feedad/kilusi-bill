@@ -16,21 +16,26 @@ router.get('/messages/active', async (req, res) => {
     let paramIndex = 1;
 
     if (customerId) {
-      // Get customer's region from database
-      const customerQuery = `SELECT area FROM customers WHERE id = $1`;
-      const customerResult = await query(customerQuery, [customerId]);
+      // Note: area column missing in customers table
+      // Disable region lookup
+      /*
+    // Get customer's region from database
+    const customerQuery = `SELECT area FROM customers WHERE id = $1`;
+    const customerResult = await query(customerQuery, [customerId]);
 
-      if (customerResult.rows.length > 0) {
-        const customerRegionName = customerResult.rows[0].area;
+    if (customerResult.rows.length > 0) {
+      const customerRegionName = customerResult.rows[0].area;
 
-        whereClause += ` AND (
-          target_all = true
-          OR target_areas IS NULL
-          OR $${paramIndex} = ANY(string_to_array(replace(target_areas::text, '"', ''), ','))
-        )`;
-        queryParams.push(customerRegionName);
-        paramIndex++;
-      }
+      whereClause += ` AND (
+        target_all = true
+        OR target_areas IS NULL
+        OR $${paramIndex} = ANY(string_to_array(replace(target_areas::text, '"', ''), ','))
+      )`;
+      queryParams.push(customerRegionName);
+      paramIndex++;
+    } */
+      // Only show global messages
+      whereClause += ` AND (target_all = true OR target_areas IS NULL)`;
     } else if (customerRegion) {
       whereClause += ` AND (
         target_all = true

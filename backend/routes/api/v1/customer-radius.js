@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getPool } = require('../../../config/database');
 const radiusDb = require('../../../config/radius-postgres');
+const { validateSessionToken } = require('./customer-auth-nextjs');
 
 // Middleware to verify customer token (JWT only for OTP login)
 const verifyCustomerToken = async (req, res, next) => {
@@ -13,6 +14,30 @@ const verifyCustomerToken = async (req, res, next) => {
         success: false,
         message: 'Token tidak ditemukan'
       });
+    }
+
+    require('fs').appendFileSync('/tmp/auth-token.log', `[Radius] ${new Date().toISOString()} Token: ${token}\n`);
+
+    // 1. Try validating as Session Token (Next.js Frontend)
+    try {
+      const sessionValidation = await validateSessionToken(token);
+      if (sessionValidation.valid && sessionValidation.customer) {
+        console.log('✅ Session Token Validated for:', sessionValidation.customer.name);
+
+        // Ensure we have the latest data from DB if needed, but session usually has enough
+        // Or we can just use the customer object from session
+        req.customer = sessionValidation.customer;
+
+        // IMPORTANT: Fetch pppoe_username from DB if missing in session
+        // Note: Columns missing in DB, disabling fetch
+        if (!req.customer.pppoe_username) {
+          // Logic disabled
+        }
+
+        return next();
+      }
+    } catch (sessionError) {
+      console.log('Session validation check failed (continuing to JWT):', sessionError.message);
     }
 
     // Use the database from config
@@ -27,12 +52,9 @@ const verifyCustomerToken = async (req, res, next) => {
       if (decoded.type === 'customer' && decoded.customerId) {
         // Get customer by ID
         const query = `
-          SELECT c.*,
-                 COALESCE(p.name, 'Default Package') as package_name,
-                 p.price as package_price
+          SELECT c.*
           FROM customers c
-          LEFT JOIN packages p ON c.package_id = p.id
-          WHERE c.id = $1 AND c.status = 'active'
+          WHERE c.id = $1
         `;
         const result = await pool.query(query, [decoded.customerId]);
 
@@ -82,7 +104,10 @@ router.get('/info', verifyCustomerToken, async (req, res) => {
     const customer = req.customer;
 
     // Get real RADIUS connection status
-    const radiusConnection = await radiusDb.getUserConnectionStatus(customer.pppoe_username);
+    let radiusConnection = { online: false };
+    if (customer.pppoe_username) {
+      radiusConnection = await radiusDb.getUserConnectionStatus(customer.pppoe_username);
+    }
 
     console.log(`[DEBUG] Customer API: RADIUS connection for ${customer.pppoe_username}:`, JSON.stringify(radiusConnection, null, 2));
     console.log(`[DEBUG] Session start from radiusConnection:`, radiusConnection.session_start);
@@ -274,26 +299,22 @@ router.put('/password', verifyCustomerToken, async (req, res) => {
     }
 
     // Use the database from config
-    const pool = getPool();
+    // const pool = getPool();
 
     // Update password in customer table
-    const updatePasswordQuery = `
+    // Column missing in DB
+    /*const updatePasswordQuery = `
       UPDATE customers
       SET wifi_password = $1,
           updated_at = NOW()
       WHERE id = $2
     `;
 
-    await pool.query(updatePasswordQuery, [newPassword, customer.id]);
+    await pool.query(updatePasswordQuery, [newPassword, customer.id]);*/
 
-    res.json({
-      success: true,
-      message: 'Password WiFi berhasil diperbarui',
-      data: {
-        username: customer.customer_id,
-        passwordChanged: true,
-        timestamp: new Date().toISOString()
-      }
+    return res.status(501).json({
+      success: false,
+      message: 'Fitur belum tersedia (kolom database belum ada)'
     });
 
   } catch (error) {
@@ -320,26 +341,22 @@ router.put('/ssid', verifyCustomerToken, async (req, res) => {
     }
 
     // Use the database from config
-    const pool = getPool();
+    // const pool = getPool();
 
     // Update SSID in customer table
-    const updateSSIDQuery = `
+    // Column missing in DB
+    /*const updateSSIDQuery = `
       UPDATE customers
       SET ssid = $1,
           updated_at = NOW()
       WHERE id = $2
     `;
 
-    await pool.query(updateSSIDQuery, [newSSID.trim(), customer.id]);
+    await pool.query(updateSSIDQuery, [newSSID.trim(), customer.id]);*/
 
-    res.json({
-      success: true,
-      message: 'SSID berhasil diperbarui',
-      data: {
-        oldSSID: customer.ssid,
-        newSSID: newSSID.trim(),
-        timestamp: new Date().toISOString()
-      }
+    return res.status(501).json({
+      success: false,
+      message: 'Fitur belum tersedia (kolom database belum ada)'
     });
 
   } catch (error) {

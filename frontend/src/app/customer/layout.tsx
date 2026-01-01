@@ -61,8 +61,21 @@ function CustomerLayoutContent({
     if (!loading) {
       setAuthChecked(true)
       console.log('🔑 Layout: Auth checked = true, isAuthenticated:', isAuthenticated)
+
+      // Strict Auth Guard - check BOTH React state AND localStorage
+      // localStorage is more reliable during hydration
+      const hasLocalStorageAuth = typeof window !== 'undefined' &&
+        localStorage.getItem('customer_token') &&
+        localStorage.getItem('customer_data')
+
+      console.log('🔑 Layout: hasLocalStorageAuth:', !!hasLocalStorageAuth)
+
+      if (!isAuthenticated && !hasLocalStorageAuth && pathname !== '/customer/login') {
+        console.warn('⛔ Layout: User not authenticated (neither React state nor localStorage), redirecting to login');
+        router.push('/customer/login');
+      }
     }
-  }, [loading, isAuthenticated])
+  }, [loading, isAuthenticated, pathname, router])
 
   useEffect(() => {
     // Generate portal URL when customer data is available
@@ -257,7 +270,7 @@ function CustomerLayoutContent({
     }
   }, [sidebarOpen])
 
-  
+
   const handleRegenerateToken = async () => {
     const result = await regenerateToken()
     if (result) {
@@ -383,11 +396,10 @@ function CustomerLayoutContent({
                     <Link
                       key={item.name}
                       href={item.href}
-                      className={`flex items-center text-sm font-medium transition-colors ${
-                        item.current
-                          ? 'text-blue-600'
-                          : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
-                      }`}
+                      className={`flex items-center text-sm font-medium transition-colors ${item.current
+                        ? 'text-blue-600'
+                        : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
+                        }`}
                     >
                       <item.icon className="w-4 h-4 mr-2" />
                       {item.name}
@@ -445,9 +457,8 @@ function CustomerLayoutContent({
                         notifications.map((notification) => (
                           <div
                             key={notification.id}
-                            className={`px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer border-b border-gray-100 dark:border-gray-700 last:border-b-0 ${
-                              !notification.read ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-                            }`}
+                            className={`px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer border-b border-gray-100 dark:border-gray-700 last:border-b-0 ${!notification.read ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                              }`}
                             onClick={() => handleMarkNotificationRead(notification.id)}
                           >
                             <div className="flex items-start">
@@ -510,35 +521,15 @@ function CustomerLayoutContent({
                             <div className="flex items-center space-x-2 mt-1">
                               <Badge className="text-xs">
                                 {(() => {
-                                  console.log('🔍 Badge Debug - customerData.customer_id:', customerData?.customer_id);
-                                  console.log('🔍 Badge Debug - customer.customer_id:', customer?.customer_id);
-                                  console.log('🔍 Badge Debug - customer.id:', customer?.id);
+                                  // Simple logic: Use customer_id if available, otherwise fallback
+                                  const idToDisplay = customerData?.customer_id || customer?.customer_id;
 
-                                  // Try to get customer_id from localStorage as fallback
-                                  const localStorageCustomer = typeof window !== 'undefined'
-                                    ? JSON.parse(localStorage.getItem('customer_data') || '{}')
-                                    : {};
-
-                                  console.log('🔍 Badge Debug - localStorage customer:', localStorageCustomer);
-
-                                  // Debug API response first
-                                  console.log('🔍 Badge Debug - Full customerData object:', customerData);
-                                  console.log('🔍 Badge Debug - customerData keys:', customerData ? Object.keys(customerData) : 'null');
-
-                                  // Prioritize customer_id with database fallback
-                                  let displayId;
-                                  if (customerData?.customer_id && customerData.customer_id !== customerData.id?.toString()) {
-                                    displayId = customerData.customer_id;
-                                  } else if (customer?.customer_id && customer.customer_id !== customer.id?.toString()) {
-                                    displayId = customer.customer_id;
-                                  } else if (localStorageCustomer?.customer_id && localStorageCustomer.customer_id !== localStorageCustomer.id?.toString()) {
-                                    displayId = localStorageCustomer.customer_id;
-                                  } else {
-                                    displayId = `CUS${customer?.id?.toString().padStart(5, '0') || '00000'}`;
+                                  if (idToDisplay) {
+                                    return idToDisplay;
                                   }
 
-                                  console.log('🔍 Badge Debug - Final display ID:', displayId);
-                                  return displayId;
+                                  // Only fallback to generated ID if absolutely no customer_id exists
+                                  return `CUS${(customer?.id || 0).toString().padStart(5, '0')}`;
                                 })()}
                               </Badge>
                               {getStatusBadge(customerData?.status || customer?.status)}
@@ -627,7 +618,7 @@ function CustomerLayoutContent({
                   )}
                 </div>
 
-                </div>
+              </div>
             </div>
           </div>
         </header>
@@ -692,11 +683,10 @@ function CustomerLayoutContent({
                     key={item.name}
                     href={item.href}
                     onClick={() => setSidebarOpen(false)}
-                    className={`flex items-center px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      item.current
-                        ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 border-r-2 border-blue-600'
-                        : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
+                    className={`flex items-center px-3 py-2 rounded-lg text-sm font-medium transition-colors ${item.current
+                      ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 border-r-2 border-blue-600'
+                      : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-gray-700'
+                      }`}
                   >
                     <item.icon className="w-4 h-4 mr-3" />
                     {item.name}

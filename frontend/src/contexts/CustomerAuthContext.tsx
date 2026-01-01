@@ -8,9 +8,9 @@ interface CustomerAuthContextType extends AuthState {
   login: (phone: string, otp?: string) => Promise<boolean>
   loginWithToken: (token: string) => Promise<boolean>
   logout: () => void
-  requestOTP: (phone: string) => Promise<{success: boolean, message: string}>
+  requestOTP: (phone: string) => Promise<{ success: boolean, message: string }>
   refreshCustomerData: () => Promise<void>
-  regenerateToken: () => Promise<{token: string; loginUrl: string} | null>
+  regenerateToken: () => Promise<{ token: string; loginUrl: string } | null>
 }
 
 type AuthAction =
@@ -245,7 +245,7 @@ export function CustomerAuthProvider({ children }: CustomerAuthProviderProps) {
     }
   }
 
-  const requestOTP = async (phone: string): Promise<{success: boolean, message: string}> => {
+  const requestOTP = async (phone: string): Promise<{ success: boolean, message: string }> => {
     try {
       const result = await CustomerAuth.requestOTP(phone)
       return result
@@ -281,7 +281,7 @@ export function CustomerAuthProvider({ children }: CustomerAuthProviderProps) {
     }
   }
 
-  const regenerateToken = async (): Promise<{token: string; loginUrl: string} | null> => {
+  const regenerateToken = async (): Promise<{ token: string; loginUrl: string } | null> => {
     if (!state.isAuthenticated || !state.customer) {
       return null
     }
@@ -333,7 +333,12 @@ export function CustomerAuthProvider({ children }: CustomerAuthProviderProps) {
 
     if (!hasToken && !hasCustomer) {
       // No auth data found, finish loading to allow redirect
-      return children
+      // IMPORTANT: Must wrap with Provider even here, otherwise useCustomerAuth hook throws error
+      return (
+        <CustomerAuthContext.Provider value={value}>
+          {children}
+        </CustomerAuthContext.Provider>
+      )
     }
 
     return (
@@ -367,9 +372,9 @@ export function useCustomerAuth(): CustomerAuthContextType {
         error: null,
         login: async () => false,
         loginWithToken: async () => false,
-        logout: () => {},
+        logout: () => { },
         requestOTP: async () => ({ success: false, message: 'Not available' }),
-        refreshCustomerData: async () => {},
+        refreshCustomerData: async () => { },
         regenerateToken: async () => null
       }
     }
@@ -384,9 +389,9 @@ export function useCustomerAuth(): CustomerAuthContextType {
       error: null,
       login: async () => false,
       loginWithToken: async () => false,
-      logout: () => {},
+      logout: () => { },
       requestOTP: async () => ({ success: false, message: 'Not available' }),
-      refreshCustomerData: async () => {},
+      refreshCustomerData: async () => { },
       regenerateToken: async () => null
     }
   }
@@ -399,9 +404,17 @@ export function useRequireAuth() {
   const router = useRouter()
 
   useEffect(() => {
-    if (!loading && !isAuthenticated && typeof window !== 'undefined') {
-      // Use Next.js router instead of hard redirect
-      router.push('/customer/login')
+    if (!loading && typeof window !== 'undefined') {
+      // Check BOTH React state AND localStorage before redirecting
+      // localStorage is more reliable during hydration
+      const hasLocalStorageAuth =
+        localStorage.getItem('customer_token') &&
+        localStorage.getItem('customer_data')
+
+      if (!isAuthenticated && !hasLocalStorageAuth) {
+        // Use Next.js router instead of hard redirect
+        router.push('/customer/login')
+      }
     }
   }, [isAuthenticated, loading, router])
 

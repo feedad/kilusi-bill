@@ -219,6 +219,23 @@ class CustomerPortalAPI {
     }
   }
 
+  // Account Switching
+  async switchAccount(targetAccountId: number): Promise<CustomerPortalResponse<any>> {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('customer_token') : null
+
+    if (!token) {
+      throw new Error('Authentication token required')
+    }
+
+    return this.request('/api/v1/customer-auth/switch-account', {
+      method: 'POST',
+      body: {
+        targetAccountId,
+        token
+      }
+    })
+  }
+
   // Broadcast Messages
   async getActiveBroadcastMessages(params?: {
     customer_id?: number

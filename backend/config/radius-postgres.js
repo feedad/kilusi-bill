@@ -112,7 +112,8 @@ async function initializeRadiusTables() {
                 username VARCHAR(64) NOT NULL,
                 groupname VARCHAR(64) NOT NULL REFERENCES radgroup(groupname) ON DELETE CASCADE,
                 priority INTEGER DEFAULT 1,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(username, groupname)
             )
         `);
 

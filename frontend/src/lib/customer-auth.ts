@@ -15,6 +15,7 @@ export interface Customer {
   ssid?: string
   password?: string
   customer_id?: string
+  accounts?: Customer[] // Linked accounts for multi-service
 }
 
 export interface AuthState {
@@ -34,6 +35,7 @@ export interface TokenValidation {
 class CustomerAuth {
   private static readonly TOKEN_KEY = 'customer_token'
   private static readonly CUSTOMER_KEY = 'customer_data'
+  private static readonly ACCOUNTS_KEY = 'customer_accounts'
   private static readonly API_BASE = process.env.NEXT_PUBLIC_API_URL || ''
 
   /**
@@ -95,6 +97,11 @@ class CustomerAuth {
 
         if (data.success && data.data) {
           console.log('✅ Auth Library: Login token valid, storing auth data')
+          // Preserve existing accounts if not returned
+          const existingAccounts = this.getAccounts()
+          if (!data.data.customer.accounts && existingAccounts.length > 0) {
+            data.data.customer.accounts = existingAccounts
+          }
           this.setAuthData(data.data.customer, data.data.sessionToken)
           return {
             valid: true,
@@ -320,6 +327,11 @@ class CustomerAuth {
         if (!storedToken || !storedCustomer) {
           console.error('❌ CustomerAuth: FAILED TO STORE DATA IN LOCAL STORAGE!')
         }
+
+        // Store accounts separately if available
+        if (customer.accounts && customer.accounts.length > 0) {
+          this.setAccounts(customer.accounts)
+        }
       } catch (error) {
         console.error('💥 CustomerAuth: Error storing in localStorage:', error)
       }
@@ -368,6 +380,35 @@ class CustomerAuth {
   }
 
   /**
+   * Store customer accounts list
+   */
+  static setAccounts(accounts: Customer[]): void {
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(this.ACCOUNTS_KEY, JSON.stringify(accounts))
+        console.log('✅ CustomerAuth: Accounts list stored, count:', accounts.length)
+      } catch (error) {
+        console.error('💥 CustomerAuth: Error storing accounts:', error)
+      }
+    }
+  }
+
+  /**
+   * Get stored accounts list
+   */
+  static getAccounts(): Customer[] {
+    if (typeof window === 'undefined') return []
+
+    try {
+      const accountsStr = localStorage.getItem(this.ACCOUNTS_KEY)
+      return accountsStr ? JSON.parse(accountsStr) : []
+    } catch (error) {
+      console.error('Error reading stored accounts:', error)
+      return []
+    }
+  }
+
+  /**
    * Check if user is authenticated
    */
   static isAuthenticated(): boolean {
@@ -398,6 +439,7 @@ class CustomerAuth {
     if (typeof window !== 'undefined') {
       localStorage.removeItem(this.TOKEN_KEY)
       localStorage.removeItem(this.CUSTOMER_KEY)
+      localStorage.removeItem(this.ACCOUNTS_KEY)
     }
   }
 

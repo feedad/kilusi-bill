@@ -161,7 +161,8 @@ export default function IntegratedBillingPage() {
       const response = await adminApi.get(`${endpoints.admin.billing}/invoices?${params}`)
 
       if (response.data.success) {
-        const invoices = response.data.data.invoices || []
+        // API returns invoices array directly in data field (not data.invoices)
+        const invoices = response.data.data || []
         setBillingRecords(invoices)
 
         // Calculate stats from invoice data
@@ -172,8 +173,8 @@ export default function IntegratedBillingPage() {
           unpaidCount: invoices.filter((r: any) => r.status === 'unpaid').length,
           overdueCount: invoices.filter((r: any) => r.status === 'overdue').length,
           cancelledCount: invoices.filter((r: any) => r.status === 'cancelled').length,
-          totalRevenue: invoices.filter((r: any) => r.status === 'paid').reduce((sum: number, r: any) => sum + r.amount, 0),
-          pendingRevenue: [...invoices.filter((r: any) => r.status === 'sent'), ...invoices.filter((r: any) => r.status === 'unpaid'), ...invoices.filter((r: any) => r.status === 'overdue')].reduce((sum: number, r: any) => sum + r.amount, 0),
+          totalRevenue: invoices.filter((r: any) => r.status === 'paid').reduce((sum: number, r: any) => sum + parseFloat(r.amount || 0), 0),
+          pendingRevenue: [...invoices.filter((r: any) => r.status === 'sent'), ...invoices.filter((r: any) => r.status === 'unpaid'), ...invoices.filter((r: any) => r.status === 'overdue')].reduce((sum: number, r: any) => sum + parseFloat(r.amount || 0), 0),
         })
       }
     } catch (err: any) {

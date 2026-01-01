@@ -27,8 +27,8 @@ class CustomerService {
         try {
             if (customer.active_date) {
                 const isolirDate = await BillingCycleService.calculateIsolirDate(
-                    customer.id, 
-                    customer.active_date, 
+                    customer.id,
+                    customer.active_date,
                     customer.profile_period || null
                 );
                 customer.calculated_isolir_date = isolirDate.toISOString().split('T')[0];
@@ -208,9 +208,9 @@ class CustomerService {
         // Get the last created customer ID that matches 5-digit format
         // We filter for numeric IDs to avoid legacy format issues if mixed
         const lastCustomer = await query("SELECT id FROM customers WHERE id ~ '^[0-9]{5}$' ORDER BY id DESC LIMIT 1");
-        
+
         let nextId = 1;
-        
+
         if (lastCustomer.rows.length > 0) {
             const lastId = lastCustomer.rows[0].id;
             const currentNum = parseInt(lastId);
@@ -259,7 +259,7 @@ class CustomerService {
             // Check if ID already exists
             const existingId = await query('SELECT id FROM customers WHERE id = $1', [customerId]);
             if (existingId.rows.length > 0) {
-                 throw { code: 'RESOURCE_CONFLICT', message: 'ID Pelanggan sudah digunakan', field: 'id' };
+                throw { code: 'RESOURCE_CONFLICT', message: 'ID Pelanggan sudah digunakan', field: 'id' };
             }
         } else {
             // 2. Generate Auto ID if not provided
@@ -327,7 +327,7 @@ class CustomerService {
             const countRes = await dbClient.query('SELECT COUNT(*) as total FROM services WHERE customer_id = $1', [customerId]);
             const nextIndex = parseInt(countRes.rows[0].total) + 1;
             const indexStr = String(nextIndex).padStart(2, '0');
-            
+
             // Ensure Customer ID part is simple
             const serviceNumber = `${yy}${mm}${customerId}${indexStr}`;
 
@@ -340,8 +340,8 @@ class CustomerService {
             if (pppoe_username) {
                 const existingUsername = await dbClient.query('SELECT id FROM technical_details WHERE pppoe_username = $1', [pppoe_username]);
                 if (existingUsername.rows.length > 0) {
-                     // If conflicts, throw. (Frontend usually checks this, but for auto-gen safety)
-                     throw { code: 'RESOURCE_CONFLICT', message: 'Username PPPoE sudah terdaftar', field: 'pppoe_username' };
+                    // If conflicts, throw. (Frontend usually checks this, but for auto-gen safety)
+                    throw { code: 'RESOURCE_CONFLICT', message: 'Username PPPoE sudah terdaftar', field: 'pppoe_username' };
                 }
             }
 
@@ -352,7 +352,7 @@ class CustomerService {
                 RETURNING id
             `;
             const serviceRes = await dbClient.query(insertServiceQuery, [
-                customerId, package_id, status, serviceNumber, 
+                customerId, package_id, status, serviceNumber,
                 active_date, isolir_date || null, siklus || null, billing_type,
                 address_installation, latitude, longitude, finalRegionId, finalArea, nasId
             ]);
@@ -395,7 +395,7 @@ class CustomerService {
         // Post-creation tasks (Invoice, Radius) - usually done outside DB transaction to prevent locking/delays
         // But if client is passed, we assume caller handles transaction. 
         // We will return data needed for post-tasks.
-        
+
         return { serviceId, pppoe_username, billing_type, package_id };
     }
 
@@ -437,7 +437,7 @@ class CustomerService {
         try {
             invoiceResult = await billingService.createCustomerInvoice(customer.id, serviceData.package_id, serviceData.billing_type);
         } catch (e) {
-             logger.error('Failed to create initial invoice', e);
+            logger.error('Failed to create initial invoice', e);
         }
 
         // Update Mikrotik/RADIUS
@@ -477,7 +477,7 @@ class CustomerService {
         } = data;
 
         logger.info(`[UpdateCustomer] ID: ${id}, Payload Lat/Long: ${latitude}/${longitude}, Type: ${typeof latitude}/${typeof longitude}`);
-        
+
         const address_installation = installation_address || address || current.address_installation;
         const nasId = router || null;
 
@@ -488,8 +488,8 @@ class CustomerService {
             if (exist.rows.length > 0) throw { code: 'RESOURCE_CONFLICT', message: 'Nomor telepon sudah terdaftar', field: 'phone' };
         }
         if (pppoe_username && pppoe_username !== current.pppoe_username) {
-             const exist = await query('SELECT id FROM technical_details WHERE pppoe_username = $1', [pppoe_username]);
-             if (exist.rows.length > 0) throw { code: 'RESOURCE_CONFLICT', message: 'Username PPPoE sudah terdaftar', field: 'pppoe_username' };
+            const exist = await query('SELECT id FROM technical_details WHERE pppoe_username = $1', [pppoe_username]);
+            if (exist.rows.length > 0) throw { code: 'RESOURCE_CONFLICT', message: 'Username PPPoE sudah terdaftar', field: 'pppoe_username' };
         }
 
         const finalRegionId = region_id || null;
@@ -500,9 +500,8 @@ class CustomerService {
 
         try {
             await client.query('BEGIN');
-            
-            // 1. Update Identity
-            // 1. Update Identity & Fallback Coordinates
+
+            // 1. Update Identity (customers table - no latitude/longitude here)
             await client.query(`
                 UPDATE customers SET
                     name = COALESCE($1, name),
@@ -510,21 +509,17 @@ class CustomerService {
                     email = COALESCE($3, email),
                     nik = COALESCE($4, nik),
                     address = COALESCE($5, address),
-                    latitude = COALESCE($6, latitude),
-                    longitude = COALESCE($7, longitude),
                     updated_at = CURRENT_TIMESTAMP
-                WHERE id = $8
-            `, [name, phone, email, nik, address, latitude, longitude, id]);
-            // Note: address, latitude, longitude removed from customers table update here, 
-            // as they are now service-specific. If legacy data remains in customers, 
-            // it will stay there but won't be updated via this flow.
+                WHERE id = $6
+            `, [name, phone, email, nik, address, id]);
+            // Note: latitude and longitude are stored in services table, not customers table
 
             // 2. Update Service & Technical
             // Get Service ID
             const srvRes = await client.query('SELECT id FROM services WHERE customer_id = $1', [id]);
             if (srvRes.rows.length > 0) {
                 const serviceId = srvRes.rows[0].id;
-                
+
                 await client.query(`
                     UPDATE services SET
                          package_id = COALESCE($1, package_id),
@@ -551,7 +546,7 @@ class CustomerService {
                     WHERE service_id = $3
                 `, [pppoe_username, pppoe_password, serviceId]);
 
-                 await client.query(`
+                await client.query(`
                     UPDATE network_infrastructure SET
                         odp_code = COALESCE($1, odp_code),
                         port_number = COALESCE($2, port_number),
@@ -563,7 +558,7 @@ class CustomerService {
             }
 
             await client.query('COMMIT');
-            
+
             // Fetch updated view
             const reload = await client.query('SELECT * FROM customers_view WHERE id = $1', [id]);
             updatedCustomer = reload.rows[0];
