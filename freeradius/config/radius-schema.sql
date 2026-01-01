@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS radcheck (
     op VARCHAR(2) NOT NULL DEFAULT ':=',
     value VARCHAR(253) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(username, attribute, op, value)
 );
 
 -- Index for radcheck
@@ -101,7 +102,8 @@ CREATE TABLE IF NOT EXISTS radusergroup (
     groupname VARCHAR(64) NOT NULL,
     priority INTEGER DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(username, groupname)
 );
 
 -- Index for radusergroup
