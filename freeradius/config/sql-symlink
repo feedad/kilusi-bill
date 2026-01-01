@@ -1,0 +1,68 @@
+# =====================================================================
+# FreeRADIUS SQL Module Configuration for Kilusi Bill
+# =====================================================================
+# PostgreSQL configuration with custom queries for multi-NAS support
+# =====================================================================
+
+sql {
+    # Database dialect and driver
+    dialect = "postgresql"
+    driver = "rlm_sql_${dialect}"
+
+    # PostgreSQL-specific settings
+    postgresql {
+        send_application_name = yes
+    }
+
+    # Connection info - using environment variables
+    server = $ENV{DB_HOST}
+    port = $ENV{DB_PORT}
+    login = $ENV{DB_USER}
+    password = $ENV{DB_PASSWORD}
+    radius_db = $ENV{DB_NAME}
+
+    # Connection pool settings
+    pool {
+        start = 5
+        min = 4
+        max = 10
+        spare = 3
+        uses = 0
+        lifetime = 0
+        idle_timeout = 60
+    }
+
+    # Read clients (NAS) from database - MULTI-NAS SUPPORT
+    read_clients = yes
+    
+    # Custom client query to match our nas table schema
+    # Our schema uses: id, nasname, shortname, type, secret, (no 'server' column)
+    client_query = "SELECT id, nasname, shortname, type, secret, NULL as server FROM nas WHERE is_active = true"
+
+    # Group membership attribute
+    group_attribute = "SQL-Group"
+
+    # Delete stale sessions on restart
+    delete_stale_sessions = yes
+
+    # SQL User-Name - for lookups
+    sql_user_name = "%{User-Name}"
+
+    # Table names (required by queries.conf)
+    authcheck_table = "radcheck"
+    authreply_table = "radreply"
+    groupcheck_table = "radgroupcheck"
+    groupreply_table = "radgroupreply"
+    usergroup_table = "radusergroup"
+    
+    acct_table1 = "radacct"
+    acct_table2 = "radacct"
+    
+    postauth_table = "radpostauth"
+    
+    # Client/NAS table (for read_clients)
+    client_table = "nas"
+
+    # Include the default queries for this dialect
+    $INCLUDE ${modconfdir}/sql/main/${dialect}/queries.conf
+}

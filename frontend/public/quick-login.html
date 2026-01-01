@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quick Login - Customer Portal</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 500px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .card {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .btn {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+            margin: 10px 0;
+        }
+        .btn:hover {
+            background: #2563eb;
+        }
+        .btn.secondary {
+            background: #6b7280;
+        }
+        .btn.secondary:hover {
+            background: #4b5563;
+        }
+        .input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            margin: 8px 0;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        .success {
+            background: #d1fae5;
+            color: #065f46;
+            padding: 12px;
+            border-radius: 6px;
+            margin: 10px 0;
+        }
+        .error {
+            background: #fee2e2;
+            color: #991b1b;
+            padding: 12px;
+            border-radius: 6px;
+            margin: 10px 0;
+        }
+        .info {
+            background: #dbeafe;
+            color: #1e40af;
+            padding: 12px;
+            border-radius: 6px;
+            margin: 10px 0;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>🚀 Quick Login Setup</h1>
+        <p>Halaman ini untuk setup test authentication customer portal.</p>
+
+        <div class="info">
+            <strong>Test Customers Available:</strong><br><br>
+            <strong>Ferry Adhitya (ID: 3):</strong><br>
+            Phone: 628115345333<br>
+            CustomerID: 25110100001<br>
+            Status: Active<br>
+            Package: Paket Premium (Rp 250,000)<br><br>
+            <strong>Test Customer (ID: 6):</strong><br>
+            Phone: 628123456789<br>
+            CustomerID: CUS00006<br>
+            Status: Active<br>
+            Package: Test Package (Rp 100,000)
+        </div>
+
+        <button class="btn" onclick="setupFerryAuth()">
+            🔑 Setup Ferry Adhitya (ID: 3)
+        </button>
+
+        <button class="btn secondary" onclick="setupTestAuth()">
+            🧪 Setup Test Customer (ID: 6)
+        </button>
+
+        <button class="btn secondary" onclick="goToPortal()">
+            🌐 Go to Customer Portal
+        </button>
+
+        <button class="btn secondary" onclick="goToBilling()">
+            💳 Go to Billing Page
+        </button>
+
+        <button class="btn secondary" onclick="testAuthState()">
+            🔍 Test Auth State
+        </button>
+
+        <button class="btn secondary" onclick="clearAuth()">
+            🗑️ Clear Authentication
+        </button>
+
+        <div id="status"></div>
+    </div>
+
+    <script>
+        // Real valid token for Ferry Adhitya (customer with ID=3, phone=628115345333)
+        const ferryToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MywicGhvbmUiOiI2MjgxMTUzNDUzMzMiLCJuYW1lIjoiRmVycnkgQWRoaXR5YSIsInR5cGUiOiJjdXN0b21lciIsImlhdCI6MTc2NDgzNzk1NCwiZXhwIjoxNzY0OTI0MzU0fQ.Cswt7X7xisCb7KBHYVA0iXCJP3TXRcfaat4yiJGVLxQ';
+
+        // Token for Test Customer (ID=6)
+        const testToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6NiwicGhvbmUiOiI2MjgxMjM0NTY3ODkiLCJuYW1lIjoiVGVzdCBDdXN0b21lciBVcGRhdGVkIiwidHlwZSI6ImN1c3RvbWVyIiwiaWF0IjoxNzY0ODY1NDAwLCJleHAiOjE3NjU0NzAyMDB9.exampleTokenReplaceWithReal';
+
+        const ferryData = {
+            id: 3,
+            name: 'Ferry Adhitya',
+            phone: '628115345333',
+            status: 'active',
+            package_name: 'Paket Premium',
+            package_price: 250000,
+            customer_id: '25110100001',
+            address: 'Jl. Merdeka No. 123',
+            email: 'ferry@example.com'
+        };
+
+        const customerData = {
+            id: 6,
+            name: 'Test Customer Updated',
+            phone: '628123456789',
+            status: 'active',
+            package_name: 'Test Package',
+            package_price: 100000,
+            customer_id: 'CUS00006',
+            address: 'Test Address',
+            email: 'test@example.com'
+        };
+
+        function showStatus(message, type = 'success') {
+            const status = document.getElementById('status');
+            status.innerHTML = `<div class="${type}">${message}</div>`;
+        }
+
+        function setupFerryAuth() {
+            try {
+                console.log('🔐 Quick Login: Setting up Ferry Adhitya authentication...');
+                localStorage.setItem('customer_token', ferryToken);
+                localStorage.setItem('customer_data', JSON.stringify(ferryData));
+
+                console.log('💾 Quick Login: Ferry data stored in localStorage');
+                console.log('📢 Quick Login: Dispatching auth:updated event');
+
+                // Force multiple dispatch attempts to ensure it works
+                const authData = { customer: ferryData, token: ferryToken };
+
+                // Method 1: Custom event
+                window.dispatchEvent(new CustomEvent('auth:updated', {
+                    detail: authData
+                }));
+
+                // Method 2: Storage event for token
+                window.dispatchEvent(new StorageEvent('storage', {
+                    key: 'customer_token',
+                    newValue: ferryToken
+                }));
+
+                // Method 3: Storage event for customer data
+                window.dispatchEvent(new StorageEvent('storage', {
+                    key: 'customer_data',
+                    newValue: JSON.stringify(ferryData)
+                }));
+
+                // Method 4: Force page reload context (with delay)
+                setTimeout(() => {
+                    console.log('🔄 Quick Login: Triggering forced context update...');
+                    window.dispatchEvent(new CustomEvent('storage', {
+                        key: 'customer_token',
+                        newValue: ferryToken
+                    }));
+                }, 100);
+
+                showStatus('✅ Ferry Adhitya authentication setup successful! <br>Open billing page in new tab to test.');
+                console.log('✅ Quick Login: Ferry setup complete');
+            } catch (error) {
+                console.error('💥 Quick Login: Ferry setup error:', error);
+                showStatus('❌ Error setting up Ferry authentication: ' + error.message, 'error');
+            }
+        }
+
+        function setupTestAuth() {
+            try {
+                console.log('🔐 Quick Login: Setting up Test Customer authentication...');
+                localStorage.setItem('customer_token', testToken);
+                localStorage.setItem('customer_data', JSON.stringify(customerData));
+
+                console.log('💾 Quick Login: Test Customer data stored in localStorage');
+                console.log('📢 Quick Login: Dispatching auth:updated event');
+
+                // Trigger auth event
+                window.dispatchEvent(new CustomEvent('auth:updated', {
+                    detail: { customer: customerData, token: testToken }
+                }));
+
+                // Also trigger storage event for cross-tab compatibility
+                window.dispatchEvent(new StorageEvent('storage', {
+                    key: 'customer_token',
+                    newValue: testToken
+                }));
+
+                showStatus('✅ Test Customer authentication setup successful! Customer data saved to localStorage.');
+                console.log('✅ Quick Login: Test Customer setup complete');
+            } catch (error) {
+                console.error('💥 Quick Login: Test Customer setup error:', error);
+                showStatus('❌ Error setting up Test Customer authentication: ' + error.message, 'error');
+            }
+        }
+
+        function goToPortal() {
+            window.location.href = '/customer/portal';
+        }
+
+        function goToBilling() {
+            window.location.href = '/customer/billing';
+        }
+
+        function testAuthState() {
+            const token = localStorage.getItem('customer_token');
+            const customer = localStorage.getItem('customer_data');
+            const mainPage = window.parent.location.pathname;
+
+            // Clear previous status
+            const status = document.getElementById('status');
+            status.innerHTML = '';
+
+            // Check if we're on Next.js main page
+            if (mainPage === '/') {
+                showStatus('⚠️ Please access this from the main Next.js app (port 3001), not from root path.', 'info');
+                return;
+            }
+
+            // Detailed auth state check
+            const authInfo = {
+                hasToken: !!token,
+                hasCustomer: !!customer,
+                tokenLength: token ? token.length : 0,
+                customerName: customer ? JSON.parse(customer).name : null,
+                currentPage: mainPage,
+                localStorageKeys: Object.keys(localStorage)
+            };
+
+            showStatus('📊 Auth State Details:<br>' +
+                      'Token exists: ' + authInfo.hasToken + '<br>' +
+                      'Customer exists: ' + authInfo.hasCustomer + '<br>' +
+                      'Token length: ' + authInfo.tokenLength + '<br>' +
+                      'Customer name: ' + (authInfo.customerName || 'N/A') + '<br>' +
+                      'Current page: ' + authInfo.currentPage + '<br>' +
+                      'Storage keys: [' + authInfo.localStorageKeys.join(', ') + ']', 'info');
+
+            // Trigger auth updated event to test
+            if (authInfo.hasToken && authInfo.hasCustomer) {
+                const customerData = JSON.parse(customer);
+                console.log('📢 Quick Login: Triggering auth:updated event');
+                window.dispatchEvent(new CustomEvent('auth:updated', {
+                    detail: { customer: customerData, token }
+                }));
+
+                showStatus('✅ Auth test complete! Event dispatched.', 'success');
+            } else {
+                showStatus('⚠️ No auth data found. Setup authentication first.', 'error');
+            }
+        }
+
+        function clearAuth() {
+            localStorage.removeItem('customer_token');
+            localStorage.removeItem('customer_data');
+            showStatus('🗑️ Authentication cleared from localStorage.');
+
+            // Trigger auth expired event to test logout
+            window.dispatchEvent(new CustomEvent('auth:expired', {
+                detail: { reason: 'Manual logout' }
+            }));
+        }
+
+        // Check current auth status on load
+        window.onload = function() {
+            const token = localStorage.getItem('customer_token');
+            const customer = localStorage.getItem('customer_data');
+
+            if (token && customer) {
+                showStatus('✅ Authentication already exists in localStorage.', 'info');
+            } else {
+                showStatus('ℹ️ No authentication found in localStorage. Click "Setup Authentication" to begin.', 'info');
+            }
+        };
+    </script>
+</body>
+</html>

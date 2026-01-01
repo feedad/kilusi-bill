@@ -1,0 +1,22 @@
+{
+    "Servers": {
+        "1": {
+            "Name": "Kilusi Bill - Main Database",
+            "Group": "Kilusi Bill",
+            "Port": 5432,
+            "Username": "kilusi_user",
+            "Host": "postgres",
+            "SSLMode": "prefer",
+            "MaintenanceDB": "kilusi_bill"
+        },
+        "2": {
+            "Name": "Kilusi Bill - RADIUS Database",
+            "Group": "Kilusi Bill",
+            "Port": 5432,
+            "Username": "kilusi_user",
+            "Host": "postgres",
+            "SSLMode": "prefer",
+            "MaintenanceDB": "radius"
+        }
+    }
+}

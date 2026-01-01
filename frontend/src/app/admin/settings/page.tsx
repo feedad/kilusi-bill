@@ -1,0 +1,1441 @@
+'use client'
+
+import React, { useState, useEffect } from 'react'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui'
+import {
+  Settings,
+  Building,
+  Wifi,
+  Bell,
+  Shield,
+  Database,
+  Save,
+  Loader2,
+  Mail,
+  Smartphone,
+  Server,
+  Radio,
+  Activity,
+  HardDrive,
+  Palette,
+  Upload,
+  Image,
+} from 'lucide-react'
+import { Button } from '@/components/ui'
+import { Input } from '@/components/ui'
+import { adminApi, endpoints } from '@/lib/api-clients'
+import { toast } from 'react-hot-toast'
+
+interface SupportContact {
+  id: string
+  label: string
+  number: string
+}
+
+interface SystemSettings {
+  company: {
+    name: string
+    address: string
+    phone: string
+    email: string
+    website: string
+    logo: string
+    supportContacts: SupportContact[]
+  }
+  network: {
+    mikrotik: {
+      enabled: boolean
+      monitor_mode: 'api' | 'snmp'
+      snmp: {
+        host: string
+        community: string
+        version: string
+        port: number
+      }
+      host: string
+      port: number
+      username: string
+      password: string
+    }
+    radius: {
+      enabled: boolean
+      host: string
+      port: number
+      secret: string
+    }
+    hotspot: {
+      enabled: boolean
+      loginPage: string
+      welcomePage: string
+    }
+  }
+  notifications: {
+    email: {
+      enabled: boolean
+      smtpHost: string
+      smtpPort: number
+      smtpUsername: string
+      smtpPassword: string
+      smtpSecure: boolean
+    }
+    sms: {
+      enabled: boolean
+      provider: string
+      apiKey: string
+      senderId: string
+    }
+  }
+  security: {
+    sessionTimeout: number
+    passwordMinLength: number
+    twoFactorEnabled: boolean
+    loginAttempts: number
+    ipWhitelist: string[]
+  }
+  backup: {
+    autoBackup: boolean
+    backupFrequency: string
+    backupRetention: number
+    backupLocation: string
+  }
+  database: {
+    host: string
+    port: number
+    name: string
+    user: string
+    password: string
+    poolMax: number
+    idleTimeout: number
+    connectionTimeout: number
+  }
+  monitoring: {
+    rxPowerWarning: number
+    rxPowerCritical: number
+    rxPowerNotificationEnable: boolean
+    rxpowerRecapEnable: boolean
+    rxpowerRecapInterval: number
+    offlineNotificationEnable: boolean
+    offlineNotificationInterval: number
+  }
+  branding: {
+    siteTitle: string
+    titleType: 'text' | 'logo'
+    logoUrl: string
+    faviconUrl: string
+  }
+}
+
+export default function SettingsPage() {
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [activeTab, setActiveTab] = useState('branding')
+  const [hasChanges, setHasChanges] = useState(false)
+  const [settings, setSettings] = useState<SystemSettings>({
+    company: {
+      name: '',
+      address: '',
+      phone: '',
+      email: '',
+      website: '',
+      logo: '',
+      supportContacts: [],
+    },
+    network: {
+      mikrotik: {
+        enabled: false,
+        monitor_mode: 'api',
+        snmp: { host: '', community: 'public', version: '2c', port: 161 },
+        host: '',
+        port: 8728,
+        username: '',
+        password: '',
+      },
+      radius: {
+        enabled: false,
+        host: 'localhost',
+        port: 1812,
+        secret: '',
+      },
+      hotspot: {
+        enabled: false,
+        loginPage: '',
+        welcomePage: '',
+      },
+    },
+    notifications: {
+      email: {
+        enabled: false,
+        smtpHost: '',
+        smtpPort: 587,
+        smtpUsername: '',
+        smtpPassword: '',
+        smtpSecure: true,
+      },
+      sms: {
+        enabled: false,
+        provider: '',
+        apiKey: '',
+        senderId: '',
+      },
+    },
+    security: {
+      sessionTimeout: 30,
+      passwordMinLength: 8,
+      twoFactorEnabled: false,
+      loginAttempts: 5,
+      ipWhitelist: [],
+    },
+    backup: {
+      autoBackup: true,
+      backupFrequency: 'daily',
+      backupRetention: 30,
+      backupLocation: '/backups',
+    },
+    database: {
+      host: 'localhost',
+      port: 5432,
+      name: 'kilusi_bill',
+      user: '',
+      password: '',
+      poolMax: 20,
+      idleTimeout: 30000,
+      connectionTimeout: 5000,
+    },
+    monitoring: {
+      rxPowerWarning: -26,
+      rxPowerCritical: -30,
+      rxPowerNotificationEnable: true,
+      rxpowerRecapEnable: true,
+      rxpowerRecapInterval: 6,
+      offlineNotificationEnable: true,
+      offlineNotificationInterval: 12,
+    },
+    branding: {
+      siteTitle: 'Kilusi Bill',
+      titleType: 'text',
+      logoUrl: '',
+      faviconUrl: '/favicon.ico',
+    },
+  })
+
+  const tabs = [
+    { id: 'branding', name: 'Branding', icon: Palette },
+    { id: 'company', name: 'Perusahaan', icon: Building },
+    { id: 'database', name: 'Database', icon: HardDrive },
+    { id: 'monitoring', name: 'Monitoring', icon: Activity },
+    { id: 'network', name: 'Jaringan', icon: Wifi },
+    { id: 'notifications', name: 'Notifikasi', icon: Bell },
+    { id: 'security', name: 'Keamanan', icon: Shield },
+    { id: 'backup', name: 'Backup', icon: Database },
+  ]
+
+  useEffect(() => {
+    fetchSettings()
+  }, [])
+
+  const fetchSettings = async () => {
+    try {
+      setLoading(true)
+      const response = await adminApi.get(endpoints.admin.settings)
+      if (response.data.success) {
+        const fetchedSettings = response.data.data?.settings || {}
+        setSettings(prev => ({
+          ...prev,
+          company: { ...prev.company, ...fetchedSettings.company },
+          network: {
+            ...prev.network,
+            ...fetchedSettings.network,
+            mikrotik: { ...prev.network.mikrotik, ...fetchedSettings.network?.mikrotik },
+            radius: { ...prev.network.radius, ...fetchedSettings.network?.radius },
+            hotspot: { ...prev.network.hotspot, ...fetchedSettings.network?.hotspot },
+          },
+          notifications: {
+            ...prev.notifications,
+            ...fetchedSettings.notifications,
+            email: { ...prev.notifications.email, ...fetchedSettings.notifications?.email },
+            sms: { ...prev.notifications.sms, ...fetchedSettings.notifications?.sms },
+          },
+          security: { ...prev.security, ...fetchedSettings.security },
+          backup: { ...prev.backup, ...fetchedSettings.backup },
+        }))
+      }
+    } catch (error) {
+      console.error('Error fetching settings:', error)
+      toast.error('Gagal memuat pengaturan')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      const response = await adminApi.put(endpoints.admin.settings, { settings })
+      if (response.data.success) {
+        toast.success('Pengaturan berhasil disimpan')
+        setHasChanges(false)
+      } else {
+        toast.error('Gagal menyimpan pengaturan')
+      }
+    } catch (error) {
+      console.error('Error saving settings:', error)
+      toast.error('Gagal menyimpan pengaturan')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'branding':
+        const handleFileUpload = async (type: 'logo' | 'favicon', file: File) => {
+          try {
+            const formData = new FormData()
+            formData.append('file', file)
+            
+            const response = await adminApi.post(`/api/v1/branding/upload/${type}`, formData, {
+              headers: { 'Content-Type': 'multipart/form-data' }
+            })
+            
+            if (response.data.success) {
+              const url = response.data.data.url
+              setSettings({
+                ...settings,
+                branding: {
+                  ...settings.branding,
+                  [type === 'logo' ? 'logoUrl' : 'faviconUrl']: url
+                }
+              })
+              setHasChanges(true)
+              toast.success(`${type === 'logo' ? 'Logo' : 'Favicon'} berhasil diupload`)
+            }
+          } catch (error: any) {
+            toast.error(error.response?.data?.message || 'Gagal upload file')
+          }
+        }
+
+        return (
+          <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Palette className="h-5 w-5" />
+                  Pengaturan Branding
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* Site Title Type */}
+                <div className="space-y-4">
+                  <label className="text-sm font-medium">Tampilan Header</label>
+                  <div className="flex gap-4">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="titleType"
+                        value="text"
+                        checked={settings.branding.titleType === 'text'}
+                        onChange={() => {
+                          setSettings({
+                            ...settings,
+                            branding: { ...settings.branding, titleType: 'text' }
+                          })
+                          setHasChanges(true)
+                        }}
+                        className="text-primary"
+                      />
+                      <span className="text-sm">Text</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="titleType"
+                        value="logo"
+                        checked={settings.branding.titleType === 'logo'}
+                        onChange={() => {
+                          setSettings({
+                            ...settings,
+                            branding: { ...settings.branding, titleType: 'logo' }
+                          })
+                          setHasChanges(true)
+                        }}
+                        className="text-primary"
+                      />
+                      <span className="text-sm">Logo/Gambar</span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Site Title - Text */}
+                {settings.branding.titleType === 'text' && (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Judul Situs</label>
+                    <Input
+                      value={settings.branding.siteTitle}
+                      onChange={(e) => {
+                        setSettings({
+                          ...settings,
+                          branding: { ...settings.branding, siteTitle: e.target.value }
+                        })
+                        setHasChanges(true)
+                      }}
+                      placeholder="Kilusi Bill"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Text yang akan ditampilkan di header dan browser tab
+                    </p>
+                  </div>
+                )}
+
+                {/* Site Logo - Upload */}
+                {settings.branding.titleType === 'logo' && (
+                  <div className="space-y-3">
+                    <label className="text-sm font-medium flex items-center gap-2">
+                      <Upload className="h-4 w-4" />
+                      Upload Logo
+                    </label>
+                    
+                    <div className="flex items-center gap-4">
+                      <label className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg cursor-pointer hover:bg-primary/90 transition-colors">
+                        <Upload className="h-4 w-4" />
+                        <span>Pilih File</span>
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/svg+xml"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0]
+                            if (file) handleFileUpload('logo', file)
+                          }}
+                        />
+                      </label>
+                      <span className="text-xs text-muted-foreground">
+                        PNG, JPEG, SVG (Max 2MB)
+                      </span>
+                    </div>
+                    
+                    {settings.branding.logoUrl && (
+                      <div className="p-4 bg-muted/30 rounded-lg">
+                        <p className="text-xs text-muted-foreground mb-2">Logo saat ini:</p>
+                        <div className="flex items-center gap-4">
+                          <img 
+                            src={settings.branding.logoUrl.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${settings.branding.logoUrl}` : settings.branding.logoUrl} 
+                            alt="Logo Preview" 
+                            className="h-10 object-contain bg-white p-1 rounded"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = '/placeholder-logo.png'
+                            }}
+                          />
+                          <span className="text-xs text-muted-foreground">{settings.branding.logoUrl}</span>
+                        </div>
+                      </div>
+                    )}
+                    
+                    <p className="text-xs text-muted-foreground">
+                      Rekomendasi: format PNG dengan tinggi 40px dan background transparan
+                    </p>
+                  </div>
+                )}
+
+                {/* Favicon - Upload */}
+                <div className="space-y-3 pt-4 border-t">
+                  <label className="text-sm font-medium flex items-center gap-2">
+                    <Image className="h-4 w-4" />
+                    Favicon
+                  </label>
+                  
+                  <div className="flex items-center gap-4">
+                    <label className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg cursor-pointer hover:bg-primary/90 transition-colors">
+                      <Upload className="h-4 w-4" />
+                      <span>Pilih File</span>
+                      <input
+                        type="file"
+                        accept="image/png,image/x-icon,image/ico,image/svg+xml"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]
+                          if (file) handleFileUpload('favicon', file)
+                        }}
+                      />
+                    </label>
+                    <span className="text-xs text-muted-foreground">
+                      ICO, PNG, SVG (Max 2MB)
+                    </span>
+                  </div>
+                  
+                  {settings.branding.faviconUrl && (
+                    <div className="flex items-center gap-3 p-3 bg-muted/30 rounded-lg">
+                      <span className="text-xs text-muted-foreground">Favicon saat ini:</span>
+                      <img 
+                        src={settings.branding.faviconUrl.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${settings.branding.faviconUrl}` : settings.branding.faviconUrl} 
+                        alt="Favicon Preview" 
+                        className="h-6 w-6 object-contain"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = 'none'
+                        }}
+                      />
+                      <span className="text-xs text-muted-foreground">{settings.branding.faviconUrl}</span>
+                    </div>
+                  )}
+                  
+                  <p className="text-xs text-muted-foreground">
+                    Rekomendasi: format ICO atau PNG 32x32 atau 64x64 pixels
+                  </p>
+                </div>
+
+                {/* Info */}
+                <div className="p-3 bg-blue-50 dark:bg-blue-950 rounded-lg">
+                  <p className="text-sm text-blue-700 dark:text-blue-300">
+                    <strong>Catatan:</strong> Perubahan branding akan terlihat setelah refresh halaman. File akan disimpan di server lokal.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )
+
+      case 'company':
+        return (
+          <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Informasi Perusahaan</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium">Nama Perusahaan</label>
+                    <Input
+                      value={settings.company.name}
+                      onChange={(e) => {
+                        setSettings({ ...settings, company: { ...settings.company, name: e.target.value } })
+                        setHasChanges(true)
+                      }}
+                      placeholder="Nama perusahaan"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Email</label>
+                    <Input
+                      type="email"
+                      value={settings.company.email}
+                      onChange={(e) => {
+                        setSettings({ ...settings, company: { ...settings.company, email: e.target.value } })
+                        setHasChanges(true)
+                      }}
+                      placeholder="email@perusahaan.com"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Telepon</label>
+                    <Input
+                      value={settings.company.phone}
+                      onChange={(e) => {
+                        setSettings({ ...settings, company: { ...settings.company, phone: e.target.value } })
+                        setHasChanges(true)
+                      }}
+                      placeholder="021-xxxxxxx"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Website</label>
+                    <Input
+                      value={settings.company.website}
+                      onChange={(e) => {
+                        setSettings({ ...settings, company: { ...settings.company, website: e.target.value } })
+                        setHasChanges(true)
+                      }}
+                      placeholder="https://www.perusahaan.com"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Alamat</label>
+                  <Input
+                    value={settings.company.address}
+                    onChange={(e) => {
+                      setSettings({ ...settings, company: { ...settings.company, address: e.target.value } })
+                      setHasChanges(true)
+                    }}
+                    placeholder="Alamat lengkap perusahaan"
+                  />
+                </div>
+
+                {/* Support Contacts */}
+                <div className="pt-4 border-t space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+                      <Smartphone className="h-4 w-4" />
+                      Kontak Support (WhatsApp)
+                    </h4>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        const newContact: SupportContact = {
+                          id: Date.now().toString(),
+                          label: '',
+                          number: ''
+                        }
+                        setSettings({
+                          ...settings,
+                          company: {
+                            ...settings.company,
+                            supportContacts: [...(settings.company.supportContacts || []), newContact]
+                          }
+                        })
+                        setHasChanges(true)
+                      }}
+                    >
+                      <span className="mr-1">+</span> Tambah Kontak
+                    </Button>
+                  </div>
+
+                  {(!settings.company.supportContacts || settings.company.supportContacts.length === 0) ? (
+                    <div className="text-center py-6 text-muted-foreground border border-dashed rounded-lg">
+                      <Smartphone className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                      <p className="text-sm">Belum ada kontak support</p>
+                      <p className="text-xs">Klik &quot;Tambah Kontak&quot; untuk menambahkan nomor CS, Technical Support, dll.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {settings.company.supportContacts.map((contact, index) => (
+                        <div key={contact.id} className="flex items-center gap-3 p-3 border rounded-lg bg-muted/30">
+                          <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div>
+                              <label className="text-xs font-medium text-muted-foreground">Label</label>
+                              <select
+                                value={contact.label}
+                                onChange={(e) => {
+                                  const updated = [...settings.company.supportContacts]
+                                  updated[index] = { ...contact, label: e.target.value }
+                                  setSettings({ ...settings, company: { ...settings.company, supportContacts: updated } })
+                                  setHasChanges(true)
+                                }}
+                                className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                              >
+                                <option value="">Pilih Label</option>
+                                <option value="Customer Service">Customer Service</option>
+                                <option value="Technical Support">Technical Support</option>
+                                <option value="Konfirmasi Pembayaran">Konfirmasi Pembayaran</option>
+                                <option value="Sales">Sales</option>
+                                <option value="Pengaduan">Pengaduan</option>
+                                <option value="Lainnya">Lainnya</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="text-xs font-medium text-muted-foreground">Nomor WhatsApp</label>
+                              <Input
+                                value={contact.number}
+                                onChange={(e) => {
+                                  const updated = [...settings.company.supportContacts]
+                                  updated[index] = { ...contact, number: e.target.value }
+                                  setSettings({ ...settings, company: { ...settings.company, supportContacts: updated } })
+                                  setHasChanges(true)
+                                }}
+                                placeholder="628123456789"
+                                className="mt-1"
+                              />
+                            </div>
+                          </div>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="text-red-500 hover:text-red-700 hover:bg-red-100"
+                            onClick={() => {
+                              const updated = settings.company.supportContacts.filter(c => c.id !== contact.id)
+                              setSettings({ ...settings, company: { ...settings.company, supportContacts: updated } })
+                              setHasChanges(true)
+                            }}
+                          >
+                            <span className="text-lg">×</span>
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <p className="text-xs text-muted-foreground">
+                    Format: internasional tanpa + (contoh: 628123456789). Akan ditampilkan sebagai link <code className="bg-muted px-1 rounded">wa.me/nomor</code>
+                  </p>
+
+                  {/* Payment Settings Link */}
+                  <div className="p-3 bg-blue-50 dark:bg-blue-950 rounded-lg">
+                    <p className="text-sm font-medium text-blue-700 dark:text-blue-300 flex items-center gap-2">
+                      <Mail className="h-4 w-4" />
+                      Rekening Bank & E-Wallet
+                    </p>
+                    <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                      Kelola akun bank dan e-wallet di halaman <a href="/admin/payment-settings" className="underline font-medium">Setting Pembayaran</a>
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )
+
+      case 'network':
+        return (
+          <div className="space-y-6">
+            {/* Mikrotik */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Server className="h-5 w-5" />
+                  Mikrotik Configuration
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    checked={settings.network.mikrotik.enabled}
+                    onChange={(e) => {
+                      setSettings({
+                        ...settings,
+                        network: { ...settings.network, mikrotik: { ...settings.network.mikrotik, enabled: e.target.checked } }
+                      })
+                      setHasChanges(true)
+                    }}
+                  />
+                  <label className="text-sm font-medium">Aktifkan Mikrotik</label>
+                </div>
+                {settings.network.mikrotik.enabled && (
+                  <div className="space-y-4 p-4 bg-muted/30 rounded-lg">
+                    <div>
+                      <label className="text-sm font-medium">Mode Monitor</label>
+                      <select
+                        value={settings.network.mikrotik.monitor_mode}
+                        onChange={(e) => {
+                          setSettings({
+                            ...settings,
+                            network: { ...settings.network, mikrotik: { ...settings.network.mikrotik, monitor_mode: e.target.value as 'api' | 'snmp' } }
+                          })
+                          setHasChanges(true)
+                        }}
+                        className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      >
+                        <option value="api">API</option>
+                        <option value="snmp">SNMP</option>
+                      </select>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-sm font-medium">Host</label>
+                        <Input
+                          value={settings.network.mikrotik.host}
+                          onChange={(e) => {
+                            setSettings({
+                              ...settings,
+                              network: { ...settings.network, mikrotik: { ...settings.network.mikrotik, host: e.target.value } }
+                            })
+                            setHasChanges(true)
+                          }}
+                          placeholder="192.168.1.1"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium">Port</label>
+                        <Input
+                          type="number"
+                          value={settings.network.mikrotik.port}
+                          onChange={(e) => {
+                            setSettings({
+                              ...settings,
+                              network: { ...settings.network, mikrotik: { ...settings.network.mikrotik, port: parseInt(e.target.value) } }
+                            })
+                            setHasChanges(true)
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium">Username</label>
+                        <Input
+                          value={settings.network.mikrotik.username}
+                          onChange={(e) => {
+                            setSettings({
+                              ...settings,
+                              network: { ...settings.network, mikrotik: { ...settings.network.mikrotik, username: e.target.value } }
+                            })
+                            setHasChanges(true)
+                          }}
+                          placeholder="admin"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium">Password</label>
+                        <Input
+                          type="password"
+                          value={settings.network.mikrotik.password}
+                          onChange={(e) => {
+                            setSettings({
+                              ...settings,
+                              network: { ...settings.network, mikrotik: { ...settings.network.mikrotik, password: e.target.value } }
+                            })
+                            setHasChanges(true)
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* RADIUS */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Radio className="h-5 w-5" />
+                  RADIUS Server
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    checked={settings.network.radius.enabled}
+                    onChange={(e) => {
+                      setSettings({
+                        ...settings,
+                        network: { ...settings.network, radius: { ...settings.network.radius, enabled: e.target.checked } }
+                      })
+                      setHasChanges(true)
+                    }}
+                  />
+                  <label className="text-sm font-medium">Aktifkan RADIUS</label>
+                </div>
+                {settings.network.radius.enabled && (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-muted/30 rounded-lg">
+                    <div>
+                      <label className="text-sm font-medium">Host</label>
+                      <Input
+                        value={settings.network.radius.host}
+                        onChange={(e) => {
+                          setSettings({
+                            ...settings,
+                            network: { ...settings.network, radius: { ...settings.network.radius, host: e.target.value } }
+                          })
+                          setHasChanges(true)
+                        }}
+                        placeholder="localhost"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">Port</label>
+                      <Input
+                        type="number"
+                        value={settings.network.radius.port}
+                        onChange={(e) => {
+                          setSettings({
+                            ...settings,
+                            network: { ...settings.network, radius: { ...settings.network.radius, port: parseInt(e.target.value) } }
+                          })
+                          setHasChanges(true)
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">Secret</label>
+                      <Input
+                        type="password"
+                        value={settings.network.radius.secret}
+                        onChange={(e) => {
+                          setSettings({
+                            ...settings,
+                            network: { ...settings.network, radius: { ...settings.network.radius, secret: e.target.value } }
+                          })
+                          setHasChanges(true)
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )
+
+      case 'notifications':
+        return (
+          <div className="space-y-6">
+            {/* Email */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Mail className="h-5 w-5" />
+                  Email (SMTP)
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    checked={settings.notifications.email.enabled}
+                    onChange={(e) => {
+                      setSettings({
+                        ...settings,
+                        notifications: { ...settings.notifications, email: { ...settings.notifications.email, enabled: e.target.checked } }
+                      })
+                      setHasChanges(true)
+                    }}
+                  />
+                  <label className="text-sm font-medium">Aktifkan Email</label>
+                </div>
+                {settings.notifications.email.enabled && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-muted/30 rounded-lg">
+                    <div>
+                      <label className="text-sm font-medium">SMTP Host</label>
+                      <Input
+                        value={settings.notifications.email.smtpHost}
+                        onChange={(e) => {
+                          setSettings({
+                            ...settings,
+                            notifications: { ...settings.notifications, email: { ...settings.notifications.email, smtpHost: e.target.value } }
+                          })
+                          setHasChanges(true)
+                        }}
+                        placeholder="smtp.gmail.com"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">Port</label>
+                      <Input
+                        type="number"
+                        value={settings.notifications.email.smtpPort}
+                        onChange={(e) => {
+                          setSettings({
+                            ...settings,
+                            notifications: { ...settings.notifications, email: { ...settings.notifications.email, smtpPort: parseInt(e.target.value) } }
+                          })
+                          setHasChanges(true)
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">Username</label>
+                      <Input
+                        value={settings.notifications.email.smtpUsername}
+                        onChange={(e) => {
+                          setSettings({
+                            ...settings,
+                            notifications: { ...settings.notifications, email: { ...settings.notifications.email, smtpUsername: e.target.value } }
+                          })
+                          setHasChanges(true)
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">Password</label>
+                      <Input
+                        type="password"
+                        value={settings.notifications.email.smtpPassword}
+                        onChange={(e) => {
+                          setSettings({
+                            ...settings,
+                            notifications: { ...settings.notifications, email: { ...settings.notifications.email, smtpPassword: e.target.value } }
+                          })
+                          setHasChanges(true)
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* SMS */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Smartphone className="h-5 w-5" />
+                  SMS Gateway
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    checked={settings.notifications.sms.enabled}
+                    onChange={(e) => {
+                      setSettings({
+                        ...settings,
+                        notifications: { ...settings.notifications, sms: { ...settings.notifications.sms, enabled: e.target.checked } }
+                      })
+                      setHasChanges(true)
+                    }}
+                  />
+                  <label className="text-sm font-medium">Aktifkan SMS</label>
+                </div>
+                {settings.notifications.sms.enabled && (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-muted/30 rounded-lg">
+                    <div>
+                      <label className="text-sm font-medium">Provider</label>
+                      <select
+                        value={settings.notifications.sms.provider}
+                        onChange={(e) => {
+                          setSettings({
+                            ...settings,
+                            notifications: { ...settings.notifications, sms: { ...settings.notifications.sms, provider: e.target.value } }
+                          })
+                          setHasChanges(true)
+                        }}
+                        className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      >
+                        <option value="">Pilih Provider</option>
+                        <option value="twilio">Twilio</option>
+                        <option value="nexmo">Nexmo</option>
+                        <option value="zenziva">Zenziva</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">API Key</label>
+                      <Input
+                        type="password"
+                        value={settings.notifications.sms.apiKey}
+                        onChange={(e) => {
+                          setSettings({
+                            ...settings,
+                            notifications: { ...settings.notifications, sms: { ...settings.notifications.sms, apiKey: e.target.value } }
+                          })
+                          setHasChanges(true)
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">Sender ID</label>
+                      <Input
+                        value={settings.notifications.sms.senderId}
+                        onChange={(e) => {
+                          setSettings({
+                            ...settings,
+                            notifications: { ...settings.notifications, sms: { ...settings.notifications.sms, senderId: e.target.value } }
+                          })
+                          setHasChanges(true)
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )
+
+      case 'security':
+        return (
+          <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Pengaturan Keamanan</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium">Session Timeout (menit)</label>
+                    <Input
+                      type="number"
+                      value={settings.security.sessionTimeout}
+                      onChange={(e) => {
+                        setSettings({ ...settings, security: { ...settings.security, sessionTimeout: parseInt(e.target.value) } })
+                        setHasChanges(true)
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Min. Password Length</label>
+                    <Input
+                      type="number"
+                      value={settings.security.passwordMinLength}
+                      onChange={(e) => {
+                        setSettings({ ...settings, security: { ...settings.security, passwordMinLength: parseInt(e.target.value) } })
+                        setHasChanges(true)
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Max Login Attempts</label>
+                    <Input
+                      type="number"
+                      value={settings.security.loginAttempts}
+                      onChange={(e) => {
+                        setSettings({ ...settings, security: { ...settings.security, loginAttempts: parseInt(e.target.value) } })
+                        setHasChanges(true)
+                      }}
+                    />
+                  </div>
+                  <div className="flex items-center space-x-2 pt-6">
+                    <input
+                      type="checkbox"
+                      checked={settings.security.twoFactorEnabled}
+                      onChange={(e) => {
+                        setSettings({ ...settings, security: { ...settings.security, twoFactorEnabled: e.target.checked } })
+                        setHasChanges(true)
+                      }}
+                    />
+                    <label className="text-sm font-medium">Two-Factor Authentication</label>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )
+
+      case 'backup':
+        return (
+          <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Pengaturan Backup</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    checked={settings.backup.autoBackup}
+                    onChange={(e) => {
+                      setSettings({ ...settings, backup: { ...settings.backup, autoBackup: e.target.checked } })
+                      setHasChanges(true)
+                    }}
+                  />
+                  <label className="text-sm font-medium">Auto Backup</label>
+                </div>
+                {settings.backup.autoBackup && (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-muted/30 rounded-lg">
+                    <div>
+                      <label className="text-sm font-medium">Frekuensi</label>
+                      <select
+                        value={settings.backup.backupFrequency}
+                        onChange={(e) => {
+                          setSettings({ ...settings, backup: { ...settings.backup, backupFrequency: e.target.value } })
+                          setHasChanges(true)
+                        }}
+                        className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      >
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">Retention (hari)</label>
+                      <Input
+                        type="number"
+                        value={settings.backup.backupRetention}
+                        onChange={(e) => {
+                          setSettings({ ...settings, backup: { ...settings.backup, backupRetention: parseInt(e.target.value) } })
+                          setHasChanges(true)
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">Lokasi Backup</label>
+                      <Input
+                        value={settings.backup.backupLocation}
+                        onChange={(e) => {
+                          setSettings({ ...settings, backup: { ...settings.backup, backupLocation: e.target.value } })
+                          setHasChanges(true)
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )
+
+      case 'database':
+        return (
+          <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <HardDrive className="h-5 w-5" />
+                  Pengaturan Database PostgreSQL
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="p-3 bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                  <p className="text-sm font-medium text-yellow-700 dark:text-yellow-300">⚠️ Hati-hati</p>
+                  <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-1">
+                    Perubahan pada pengaturan database memerlukan restart aplikasi.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="text-sm font-medium">Host</label>
+                    <Input
+                      value={settings.database?.host || ''}
+                      onChange={(e) => {
+                        setSettings({ ...settings, database: { ...settings.database, host: e.target.value } })
+                        setHasChanges(true)
+                      }}
+                      placeholder="localhost"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Port</label>
+                    <Input
+                      type="number"
+                      value={settings.database?.port || 5432}
+                      onChange={(e) => {
+                        setSettings({ ...settings, database: { ...settings.database, port: parseInt(e.target.value) } })
+                        setHasChanges(true)
+                      }}
+                      placeholder="5432"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Nama Database</label>
+                    <Input
+                      value={settings.database?.name || ''}
+                      onChange={(e) => {
+                        setSettings({ ...settings, database: { ...settings.database, name: e.target.value } })
+                        setHasChanges(true)
+                      }}
+                      placeholder="kilusi_bill"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium">Username</label>
+                    <Input
+                      value={settings.database?.user || ''}
+                      onChange={(e) => {
+                        setSettings({ ...settings, database: { ...settings.database, user: e.target.value } })
+                        setHasChanges(true)
+                      }}
+                      placeholder="postgres"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Password</label>
+                    <Input
+                      type="password"
+                      value={settings.database?.password || ''}
+                      onChange={(e) => {
+                        setSettings({ ...settings, database: { ...settings.database, password: e.target.value } })
+                        setHasChanges(true)
+                      }}
+                      placeholder="••••••••"
+                    />
+                  </div>
+                </div>
+                <div className="pt-4 border-t">
+                  <h4 className="text-sm font-semibold text-muted-foreground mb-3">Connection Pool</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="text-sm font-medium">Max Connections</label>
+                      <Input
+                        type="number"
+                        value={settings.database?.poolMax || 20}
+                        onChange={(e) => {
+                          setSettings({ ...settings, database: { ...settings.database, poolMax: parseInt(e.target.value) } })
+                          setHasChanges(true)
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">Idle Timeout (ms)</label>
+                      <Input
+                        type="number"
+                        value={settings.database?.idleTimeout || 30000}
+                        onChange={(e) => {
+                          setSettings({ ...settings, database: { ...settings.database, idleTimeout: parseInt(e.target.value) } })
+                          setHasChanges(true)
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">Connection Timeout (ms)</label>
+                      <Input
+                        type="number"
+                        value={settings.database?.connectionTimeout || 5000}
+                        onChange={(e) => {
+                          setSettings({ ...settings, database: { ...settings.database, connectionTimeout: parseInt(e.target.value) } })
+                          setHasChanges(true)
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )
+
+      case 'monitoring':
+        return (
+          <div className="space-y-6">
+            {/* RX Power Monitoring */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Activity className="h-5 w-5" />
+                  Monitoring RX Power (OLT)
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium">Threshold Warning (dBm)</label>
+                    <Input
+                      type="number"
+                      value={settings.monitoring?.rxPowerWarning || -26}
+                      onChange={(e) => {
+                        setSettings({ ...settings, monitoring: { ...settings.monitoring, rxPowerWarning: parseFloat(e.target.value) } })
+                        setHasChanges(true)
+                      }}
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">Contoh: -26</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Threshold Critical (dBm)</label>
+                    <Input
+                      type="number"
+                      value={settings.monitoring?.rxPowerCritical || -30}
+                      onChange={(e) => {
+                        setSettings({ ...settings, monitoring: { ...settings.monitoring, rxPowerCritical: parseFloat(e.target.value) } })
+                        setHasChanges(true)
+                      }}
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">Contoh: -30</p>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    checked={settings.monitoring?.rxPowerNotificationEnable ?? true}
+                    onChange={(e) => {
+                      setSettings({ ...settings, monitoring: { ...settings.monitoring, rxPowerNotificationEnable: e.target.checked } })
+                      setHasChanges(true)
+                    }}
+                  />
+                  <label className="text-sm font-medium">Aktifkan Notifikasi RX Power</label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    checked={settings.monitoring?.rxpowerRecapEnable ?? true}
+                    onChange={(e) => {
+                      setSettings({ ...settings, monitoring: { ...settings.monitoring, rxpowerRecapEnable: e.target.checked } })
+                      setHasChanges(true)
+                    }}
+                  />
+                  <label className="text-sm font-medium">Aktifkan Rekap RX Power</label>
+                </div>
+                {settings.monitoring?.rxpowerRecapEnable && (
+                  <div className="p-4 bg-muted/30 rounded-lg">
+                    <label className="text-sm font-medium">Interval Rekap (jam)</label>
+                    <Input
+                      type="number"
+                      value={settings.monitoring?.rxpowerRecapInterval || 6}
+                      onChange={(e) => {
+                        setSettings({ ...settings, monitoring: { ...settings.monitoring, rxpowerRecapInterval: parseInt(e.target.value) } })
+                        setHasChanges(true)
+                      }}
+                      className="mt-1 max-w-xs"
+                    />
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Offline Monitoring */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Monitoring Pelanggan Offline</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    checked={settings.monitoring?.offlineNotificationEnable ?? true}
+                    onChange={(e) => {
+                      setSettings({ ...settings, monitoring: { ...settings.monitoring, offlineNotificationEnable: e.target.checked } })
+                      setHasChanges(true)
+                    }}
+                  />
+                  <label className="text-sm font-medium">Aktifkan Notifikasi Pelanggan Offline</label>
+                </div>
+                {settings.monitoring?.offlineNotificationEnable && (
+                  <div className="p-4 bg-muted/30 rounded-lg">
+                    <label className="text-sm font-medium">Interval Notifikasi (jam)</label>
+                    <Input
+                      type="number"
+                      value={settings.monitoring?.offlineNotificationInterval || 12}
+                      onChange={(e) => {
+                        setSettings({ ...settings, monitoring: { ...settings.monitoring, offlineNotificationInterval: parseInt(e.target.value) } })
+                        setHasChanges(true)
+                      }}
+                      className="mt-1 max-w-xs"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">Kirim notifikasi setiap X jam untuk pelanggan offline</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )
+
+      default:
+        return null
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-3xl font-bold flex items-center gap-2">
+            <Settings className="h-8 w-8" />
+            Pengaturan Sistem
+          </h1>
+          <p className="text-muted-foreground">
+            Kelola pengaturan sistem, jaringan, dan aplikasi
+          </p>
+        </div>
+        {hasChanges && (
+          <Button onClick={handleSave} disabled={saving}>
+            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+            Simpan Perubahan
+          </Button>
+        )}
+      </div>
+
+      {/* Tabs */}
+      <div className="flex flex-wrap gap-2 border-b pb-4">
+        {tabs.map((tab) => {
+          const IconComponent = tab.icon
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === tab.id
+                ? 'bg-primary text-primary-foreground'
+                : 'bg-muted hover:bg-muted/80'
+                }`}
+            >
+              <IconComponent className="h-4 w-4" />
+              {tab.name}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Content */}
+      {renderTabContent()}
+    </div>
+  )
+}

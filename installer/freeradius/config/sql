@@ -1,0 +1,355 @@
+# ===========================================
+# FreeRADIUS SQL Module Configuration
+# ===========================================
+# This module connects FreeRADIUS to a PostgreSQL database
+# for user authentication, authorization, and accounting.
+#
+# This configuration is designed to work with the Kilusi Bill
+# ISP billing system database schema.
+# ===========================================
+
+sql {
+    # Database driver
+    # For PostgreSQL, use: rlm_sql_postgresql
+    # For MySQL, use: rlm_sql_mysql
+    driver = "rlm_sql_postgresql"
+
+    # Database connection information
+    # These will be replaced by the installer script
+    server = "DB_HOST"
+    port = DB_PORT
+    login = "DB_USER"
+    password = "DB_PASSWORD"
+    radius_db = "DB_NAME"
+
+    # Table configuration
+    # These tables should exist in your PostgreSQL database
+    # See radius-schema.sql for table definitions
+
+    # Accounting tables
+    # If you want both stop and start records logged to the
+    # same SQL table, leave this as is. If you want them in
+    # different tables, put the start table in acct_table1
+    # and the stop table in acct_table2
+    acct_table1 = "radacct"
+    acct_table2 = "radacct"
+
+    # Allow for reading from the radacct table for Simultaneous-Use checking
+    # and for start-stop times accounting
+    postauth_table = "radpostauth"
+
+    # Authentication tables
+    authcheck_table = "radcheck"
+    authreply_table = "radreply"
+
+    # Group tables
+    groupcheck_table = "radgroupcheck"
+    groupreply_table = "radgroupreply"
+    usergroup_table = "radusergroup"
+
+    # NAS (Network Access Server) table
+    nas_table = "nas"
+
+    # Delete all stale sessions if the SQL server is marked dead
+    delete_stale_sessions = yes
+
+    # Set to 'yes' to enable query logging for debugging
+    sqltrace = no
+    sqltracefile = ${logdir}/sqltrace.sql
+
+    # Connection pool settings
+    # The number of SQL connections to keep open
+    num_sql_socks = 5
+
+    # How many seconds to wait for a response from the SQL server
+    connect_timeout = 3
+
+    # Lifetime of an SQL connection. After this many seconds,
+    # the connection will be closed. 0 = infinite lifetime
+    lifetime = 0
+
+    # How many seconds between pool re-tries (not used in v3.x)
+    max_queries = 0
+
+    # Set to 'yes' to read database clients from the database (nas table)
+    # This allows you to add NAS clients in the database instead of clients.conf
+    read_clients = yes
+
+    # Read groups from the database (for group checking)
+    read_groups = yes
+
+    # Remove stale session if checkrad does not see a double login
+    deletestalesessions = yes
+
+    # Print all SQL statements when in debug mode (-x)
+    debug = 0
+
+    # ===========================================
+    # SQL Queries
+    # ===========================================
+    # These queries define how FreeRADIUS interacts with the database
+    # Modify them carefully if you need to customize the behavior
+
+    # Authentication query
+    # This query is used to authenticate users
+    authenticate_query = "SELECT id, username, attribute, value, op \
+        FROM ${authcheck_table} \
+        WHERE username = '%{SQL-User-Name}' \
+        ORDER BY id"
+
+    # Authorization queries
+    # These queries are used to authorize users
+
+    # Check attributes query
+    # Returns check items for the user
+    authorize_check_query = "SELECT id, username, attribute, value, op \
+        FROM ${authcheck_table} \
+        WHERE username = '%{SQL-User-Name}' \
+        ORDER BY id"
+
+    # Reply attributes query
+    # Returns reply items for the user
+    authorize_reply_query = "SELECT id, username, attribute, value, op \
+        FROM ${authreply_table} \
+        WHERE username = '%{SQL-User-Name}' \
+        ORDER BY id"
+
+    # Group check query
+    # Returns check items for the user's groups
+    authorize_group_check_query = "SELECT id, groupname, attribute, \
+        value, op \
+        FROM ${groupcheck_table} \
+        WHERE groupname = '%{Sql-Group}' \
+        ORDER BY id"
+
+    # Group reply query
+    # Returns reply items for the user's groups
+    authorize_group_reply_query = "SELECT id, groupname, attribute, \
+        value, op \
+        FROM ${groupreply_table} \
+        WHERE groupname = '%{Sql-Group}' \
+        ORDER BY id"
+
+    # ===========================================
+    # Accounting Queries
+    # ===========================================
+
+    # Accounting on/off query
+    # This query is called when a NAS sends an Accounting-On or Accounting-Off packet
+    accounting_onoff_query = "UPDATE ${acct_table1} \
+        SET acctstoptime = ('%S'::timestamp), \
+        acctsessiontime = (EXTRACT(EPOCH FROM ('%S'::timestamp - acctstarttime::timestamp)))::bigint, \
+        acctterminatecause = '%{Acct-Terminate-Cause}', \
+        acctstopdelay = %{%{Acct-Delay-Time}:-0}, \
+        connectinfo_stop = '%{Connect-Info}' \
+        WHERE acctsessionid = '%{Acct-Session-Id}' AND username = '%{SQL-User-Name}' \
+        AND acctstoptime IS NULL"
+
+    # Accounting update query
+    # This query is called for interim updates
+    accounting_update_query = "UPDATE ${acct_table1} \
+        SET framedipaddress = '%{Framed-IP-Address}', \
+        acctsessiontime = (EXTRACT(EPOCH FROM ('%S'::timestamp - acctstarttime::timestamp)))::bigint, \
+        acctinputoctets = %{%{Acct-Input-Octets}:-0}, \
+        acctoutputoctets = %{%{Acct-Output-Octets}:-0}, \
+        acctinputgigawords = %{%{Acct-Input-Gigawords}:-0}, \
+        acctoutputgigawords = %{%{Acct-Output-Gigawords}:-0} \
+        WHERE acctsessionid = '%{Acct-Session-Id}' AND username = '%{SQL-User-Name}' \
+        AND acctstoptime IS NULL"
+
+    # Accounting update query alternative
+    # This query is used if the update query doesn't find a matching session
+    accounting_update_query_alt = "INSERT INTO ${acct_table1} \
+        (acctsessionid, acctuniqueid, username, realm, nasipaddress, nasportid, \
+        nasporttype, acctstarttime, acctupdatetime, acctsessiontime, \
+        acctauthentic, connectinfo_start, acctinputoctets, acctoutputoctets, \
+        calledstationid, callingstationid, acctterminatecause, servicetype, \
+        framedprotocol, framedipaddress, acctinputgigawords, acctoutputgigawords) \
+        VALUES ('%{Acct-Session-Id}', '%{Acct-Unique-Session-Id}', \
+        '%{SQL-User-Name}', '%{Realm}', '%{NAS-IP-Address}', '%{NAS-Port}', \
+        '%{NAS-Port-Type}', '%S'::timestamp, '%S'::timestamp, \
+        '0', '%{Acct-Authentic}', '%{Connect-Info}', \
+        '%{%{Acct-Input-Octets}:-0}', '%{%{Acct-Output-Octets}:-0}', \
+        '%{Called-Station-Id}', '%{Calling-Station-Id}', '', \
+        '%{Service-Type}', '%{Framed-Protocol}', '%{Framed-IP-Address}', \
+        '%{%{Acct-Input-Gigawords}:-0}', '%{%{Acct-Output-Gigawords}:-0}')"
+
+    # Accounting start query
+    # This query is called when a session starts
+    # (Note: In v3.x, start packets are handled by the accounting_update_query_alt)
+
+    # Accounting stop query
+    # This query is called when a session ends
+    # (Note: In v3.x, stop packets are handled by the accounting_onoff_query)
+
+    # ===========================================
+    # Simultaneous-Use Checking
+    # ===========================================
+
+    # Simultaneous-Use count query
+    # Returns the number of active sessions for a user
+    simul_count_query = "SELECT COUNT(*) \
+        FROM ${acct_table1} \
+        WHERE username = '%{SQL-User-Name}' \
+        AND acctstoptime IS NULL"
+
+    # Simultaneous-Use verification query
+    # Returns details of active sessions for a user
+    simul_verify_query = "SELECT radacctid, acctsessionid, username, \
+        nasipaddress, nasportid, framedipaddress, \
+        callingstationid, framedprotocol \
+        FROM ${acct_table1} \
+        WHERE username = '%{SQL-User-Name}' \
+        AND acctstoptime IS NULL"
+
+    # ===========================================
+    # Group Membership Queries
+    # ===========================================
+
+    # Group membership query
+    # Returns groups that a user is a member of
+    group_membership_query = "SELECT groupname \
+        FROM ${usergroup_table} \
+        WHERE username = '%{SQL-User-Name}' \
+        ORDER BY priority"
+
+    # ===========================================
+    # Post-Authentication Queries
+    # ===========================================
+
+    # Post-Authentication query
+    # Logs authentication attempts to the database
+    postauth_query = "INSERT INTO ${postauth_table} \
+        (username, pass, reply, authdate) \
+        VALUES ('%{SQL-User-Name}', '%{%{User-Password}:-%{Chap-Password}}', \
+        '%{reply:Packet-Type}', '%S')"
+
+    # ===========================================
+    # Client Queries
+    # ===========================================
+
+    # Client query
+    # Returns NAS client information from the database
+    # Used when read_clients = yes
+    client_query = "SELECT nasname, shortname, type, secret, \
+        COALESCE(NULLIF(server, ''), ''), COALESCE(NULLIF(ports, ''), ''), \
+        COALESCE(NULLIF(community, ''), '') \
+        FROM ${nas_table} \
+        WHERE nasname = '%{Client-IP-Address}' \
+        OR nasname = '%{Client-IPv6-Address}'"
+
+    # ===========================================
+    # Additional Custom Queries
+    # ===========================================
+    # You can add custom queries here for special functionality
+    # For example, to implement custom billing integration
+
+    # Example: Query to check if user has paid their bill
+    # This could be used to deny access to unpaid customers
+    # UNCOMMENT AND MODIFY AS NEEDED
+    #
+    # custom_check_query = "SELECT COUNT(*) FROM invoices i \
+    #     JOIN customers c ON i.customer_id = c.id \
+    #     WHERE c.username = '%{SQL-User-Name}' \
+    #     AND i.status = 'unpaid' \
+    #     AND i.due_date < CURRENT_DATE"
+
+    # Example: Query to get user's current package information
+    # This could be used to apply package-specific attributes
+    # UNCOMMENT AND MODIFY AS NEEDED
+    #
+    # package_query = "SELECT p.speed, p.price, p.name \
+    #     FROM packages p \
+    #     JOIN customers c ON c.package_id = p.id \
+    #     WHERE c.username = '%{SQL-User-Name}'"
+
+    # ===========================================
+    # Performance Optimizations
+    # ===========================================
+
+    # PostgreSQL-specific optimizations
+    # These settings are specific to PostgreSQL
+
+    # Use connection pooling
+    # Ensure PostgreSQL has enough max_connections configured
+    # Recommended: max_connections = 100 + num_sql_socks * 2
+
+    # Use appropriate indexes
+    # The radius-schema.sql creates necessary indexes
+    # Additional indexes may be needed based on query patterns
+
+    # Consider partitioning radacct table for large deployments
+    # Example partition by month:
+    # CREATE TABLE radacct_y2024m01 PARTITION OF radacct
+    #     FOR VALUES FROM ('2024-01-01') TO ('2024-02-01');
+
+    # Use prepared statements for better performance
+    # This is automatically handled by the PostgreSQL driver
+
+    # ===========================================
+    # Security Considerations
+    # ===========================================
+
+    # 1. Use strong database passwords
+    # 2. Restrict database access to the RADIUS server IP
+    # 3. Use SSL/TLS for database connections if possible
+    # 4. Regularly rotate database passwords
+    # 5. Use least privilege principle for database user
+    # 6. Enable PostgreSQL logging for monitoring
+
+    # SSL Configuration (uncomment to enable)
+    # ca_file = "/path/to/ca-file"
+    # cert_file = "/path/to/cert-file"
+    # key_file = "/path/to/key-file"
+
+    # ===========================================
+    # Troubleshooting
+    # ===========================================
+
+    # To enable SQL debugging:
+    # 1. Set sqltrace = yes
+    # 2. Run FreeRADIUS with -X flag
+    # 3. Check sqltracefile for detailed SQL logs
+
+    # Common issues and solutions:
+    #
+    # 1. Connection failed:
+    #    - Check database server is running
+    #    - Verify connection parameters
+    #    - Check firewall rules
+    #    - Ensure database user has proper permissions
+    #
+    # 2. Authentication failed:
+    #    - Check radcheck table for user
+    #    - Verify password attribute and operator
+    #    - Check SQL logs for actual queries
+    #
+    # 3. Accounting not working:
+    #    - Check radacct table exists
+    #    - Verify NAS is sending accounting packets
+    #    - Check SQL INSERT permissions
+    #
+    # 4. Groups not working:
+    #    - Check radusergroup table has entries
+    #    - Verify radgroupcheck/radgroupreply tables
+    #    - Ensure read_groups = yes
+}
+
+# ===========================================
+# Additional Configuration
+# ===========================================
+
+# Pool configuration (for connection pooling)
+# Uncomment and configure if using connection pooling
+#
+# pool {
+#     start = ${thread[pool].start_servers}
+#     min = ${thread[pool].min_servers}
+#     max = ${thread[pool].max_servers}
+#     spare = ${thread[pool].spare_servers}
+#     uses = 0
+#     retry_delay = 30
+#     lifetime = 0
+#     cleanup_interval = 30
+#     idle_timeout = 60
+# }

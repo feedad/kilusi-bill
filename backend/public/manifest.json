@@ -1,0 +1,65 @@
+{
+  "name": "Kilusi Mobile",
+  "short_name": "Kilusi",
+  "description": "Portal pelanggan Kilusi untuk manajemen layanan ISP",
+  "start_url": "/mobile-customer",
+  "scope": "/",
+  "id": "/kilusi-mobile",
+  "display": "standalone",
+  "background_color": "#0b1437",
+  "theme_color": "#0b1437",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "/img/logo.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/img/logo.png", "sizes": "256x256", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/img/logo.png", "sizes": "384x384", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/img/logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "categories": ["business", "productivity", "utilities"],
+  "screenshots": [
+    {
+      "src": "/img/screenshot-dashboard.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Dashboard Pelanggan",
+      "short_name": "Dashboard",
+      "description": "Buka beranda pelanggan",
+      "url": "/mobile-customer",
+      "icons": [
+        {
+          "src": "/img/icon-dashboard.png",
+          "sizes": "96x96"
+        }
+      ]
+    },
+    {
+      "name": "Tagihan",
+      "short_name": "Tagihan",
+      "description": "Lihat informasi tagihan",
+      "url": "/customer/billing",
+      "icons": [
+        {
+          "src": "/img/icon-analytics.png",
+          "sizes": "96x96"
+        }
+      ]
+    },
+    {
+      "name": "Laporan Gangguan",
+      "short_name": "Gangguan",
+      "description": "Buat laporan gangguan",
+      "url": "/customer/trouble/simple",
+      "icons": [
+        {
+          "src": "/img/icon-trouble.png",
+          "sizes": "96x96"
+        }
+      ]
+    }
+  ]
+}

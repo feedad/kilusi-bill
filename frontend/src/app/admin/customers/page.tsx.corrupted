@@ -1,0 +1,1512 @@
+'use client'
+
+import React, { useState, useEffect } from 'react'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui'
+import {
+  Users,
+  Search,
+  Plus,
+  Download,
+  Filter,
+  Eye,
+  Edit,
+  Trash2,
+  MoreHorizontal,
+  Phone,
+  Mail,
+  MapPin,
+  Activity,
+  DollarSign,
+  X,
+  Loader2,
+  Save,
+  User,
+  Calendar,
+  Package,
+  Globe,
+  Shield,
+  CreditCard,
+  AlertCircle,
+  ChevronUp,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+} from 'lucide-react'
+import { Button } from '@/components/ui'
+import { Input } from '@/components/ui'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
+import { formatCurrency } from '@/lib/utils'
+import { api, endpoints } from '@/lib/api'
+
+interface Customer {
+  id: string
+  customer_id?: string
+  name: string
+  phone: string
+  nik?: string
+  address?: string
+  package_name?: string
+  package_price?: number
+  package_speed?: string
+  status: 'active' | 'inactive' | 'suspended'
+  package_id?: string
+  pppoe_username?: string
+  pppoe_password?: string
+  billing_type?: 'prepaid' | 'postpaid'
+  billing_cycle?: 'profile' | 'tetap' | 'bulan'
+  router?: string
+  region?: string
+  billing_status?: 'paid' | 'pending' | 'overdue'
+  created_at: string
+  updated_at: string
+  last_invoice_date?: string
+  is_online?: boolean
+  install_date?: string
+  active_date?: string
+  isolir_date?: string
+}
+
+interface Package {
+  id: string
+  name: string
+  price: number
+  speed: string
+  description?: string
+  is_active: boolean
+}
+
+interface FormData {
+  name: string
+  phone: string
+  nik: string
+  address: string
+  package_id: string
+  pppoe_username: string
+  pppoe_password: string
+  billing_type: string
+  billing_cycle: string
+  router: string
+  region: string
+  status: string
+}
+
+interface CustomerStats {
+  totalCustomers: number
+  activeCustomers: number
+  inactiveCustomers: number
+  suspendedCustomers: number
+  totalRevenue: number
+  outstandingBalance: number
+}
+
+export default function CustomersPage() {
+  const [customers, setCustomers] = useState<Customer[]>([])
+  const [packages, setPackages] = useState<Package[]>([])
+  const [stats, setStats] = useState<CustomerStats | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive' | 'suspended'>('all')
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
+  const [showDetailModal, setShowDetailModal] = useState(false)
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
+  const [totalItems, setTotalItems] = useState(0)
+  const [sortField, setSortField] = useState<'customer_id' | 'isolir_date' | 'region' | null>(null)
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
+  const [formData, setFormData] = useState<FormData>({
+    name: '',
+    phone: '',
+    nik: '',
+    address: '',
+    package_id: '',
+    pppoe_username: '',
+    pppoe_password: '',
+    billing_type: 'postpaid',
+    billing_cycle: 'tetap',
+    router: 'all',
+    region: '',
+    status: 'active'
+  })
+  const [submitting, setSubmitting] = useState(false)
+
+  useEffect(() => {
+    fetchCustomers()
+    fetchPackages()
+  }, [currentPage, pageSize, searchQuery, filterStatus, sortField, sortDirection])
+
+  const fetchCustomers = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+
+      console.log('Fetching customers via API')
+
+      const params = new URLSearchParams({
+        page: currentPage.toString(),
+        limit: pageSize.toString(),
+        search: searchQuery,
+        status: filterStatus === 'all' ? '' : filterStatus,
+        sort_field: sortField || '',
+        sort_direction: sortDirection,
+      })
+
+      const response = await api.get(`${endpoints.customers.list}?${params}`)
+
+      if (response.data.success) {
+        setCustomers(response.data.data.customers || [])
+        const pagination = response.data.data.pagination || {}
+        setTotalPages(pagination.totalPages || 1)
+        setTotalItems(pagination.total || 0)
+
+        // Calculate stats from customer data
+        const customerList = response.data.data.customers || []
+        setStats({
+          totalCustomers: customerList.length,
+          activeCustomers: customerList.filter(c => c.status === 'active').length,
+          inactiveCustomers: customerList.filter(c => c.status === 'inactive').length,
+          suspendedCustomers: customerList.filter(c => c.status === 'suspended').length,
+          totalRevenue: customerList.reduce((sum, c) => sum + (c.package_price || 0), 0),
+          outstandingBalance: 0,
+        })
+      }
+    } catch (err: any) {
+      console.error('Error fetching customers:', err)
+      setError(err.message || 'Failed to load customers')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fetchPackages = async () => {
+    try {
+      const response = await api.get(endpoints.packages.list)
+      if (response.data.success) {
+        setPackages(response.data.data.packages || [])
+      }
+    } catch (err: any) {
+      console.error('Error fetching packages:', err)
+    }
+  }
+
+  const filteredCustomers = customers.filter((customer) => {
+    const matchesSearch = customer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         customer.phone.includes(searchQuery) ||
+                         (customer.nik && customer.nik.includes(searchQuery)) ||
+                         (customer.pppoe_username && customer.pppoe_username.toLowerCase().includes(searchQuery.toLowerCase())) ||
+                         (customer.customer_id && customer.customer_id.includes(searchQuery))
+    const matchesFilter = filterStatus === 'all' || customer.status === filterStatus
+    return matchesSearch && matchesFilter
+  }).sort((a, b) => {
+    if (!sortField) return 0
+
+    let aValue: any
+    let bValue: any
+
+    switch (sortField) {
+      case 'customer_id':
+        aValue = a.customer_id || ''
+        bValue = b.customer_id || ''
+        // For customer_id, compare as numbers
+        const aNum = parseInt(aValue.replace(/\D/g, '')) || 0
+        const bNum = parseInt(bValue.replace(/\D/g, '')) || 0
+        return sortDirection === 'asc' ? aNum - bNum : bNum - aNum
+
+      case 'isolir_date':
+        aValue = a.isolir_date ? new Date(a.isolir_date).getTime() : 0
+        bValue = b.isolir_date ? new Date(b.isolir_date).getTime() : 0
+        return sortDirection === 'asc' ? aValue - bValue : bValue - aValue
+
+      case 'region':
+        aValue = a.region || ''
+        bValue = b.region || ''
+        return sortDirection === 'asc'
+          ? aValue.localeCompare(bValue)
+          : bValue.localeCompare(aValue)
+
+      default:
+        return 0
+    }
+  })
+
+  const handleSort = (field: 'customer_id' | 'isolir_date' | 'region') => {
+    if (sortField === field) {
+      // Toggle direction if same field
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
+    } else {
+      // Set new field and default to asc
+      setSortField(field)
+      setSortDirection('asc')
+    }
+  }
+
+  const handleCreateCustomer = async () => {
+    try {
+      setSubmitting(true)
+
+      const response = await api.post(endpoints.customers.create, {
+        name: formData.name,
+        phone: formData.phone,
+        nik: formData.nik || undefined,
+        address: formData.address || undefined,
+        package_id: formData.package_id || undefined,
+        pppoe_username: formData.pppoe_username || undefined,
+        pppoe_password: formData.pppoe_password || undefined,
+        billing_type: formData.billing_type || undefined,
+        billing_cycle: formData.billing_cycle || undefined,
+        router: formData.router || undefined,
+        region: formData.region || undefined,
+        status: formData.status
+      })
+
+      if (response.data.success) {
+        setShowCreateModal(false)
+        resetForm()
+        fetchCustomers()
+        alert('Pelanggan berhasil ditambahkan')
+      }
+    } catch (err: any) {
+      console.error('Error creating customer:', err)
+      alert(err.response?.data?.message || 'Gagal menambah pelanggan')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleUpdateCustomer = async () => {
+    if (!selectedCustomer) return
+
+    try {
+      setSubmitting(true)
+
+      const response = await api.put(endpoints.customers.update(selectedCustomer.id), {
+        name: formData.name,
+        phone: formData.phone,
+        nik: formData.nik || undefined,
+        address: formData.address || undefined,
+        package_id: formData.package_id || undefined,
+        pppoe_username: formData.pppoe_username || undefined,
+        pppoe_password: formData.pppoe_password || undefined,
+        billing_type: formData.billing_type || undefined,
+        billing_cycle: formData.billing_cycle || undefined,
+        router: formData.router || undefined,
+        region: formData.region || undefined,
+        status: formData.status
+      })
+
+      if (response.data.success) {
+        setShowEditModal(false)
+        resetForm()
+        fetchCustomers()
+        alert('Pelanggan berhasil diperbarui')
+      }
+    } catch (err: any) {
+      console.error('Error updating customer:', err)
+      alert(err.response?.data?.message || 'Gagal memperbarui pelanggan')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleDeleteCustomer = async (customer: Customer) => {
+    if (!confirm(`Hapus pelanggan ${customer.name}? Data tidak dapat dikembalikan!`)) return
+
+    try {
+      const response = await api.delete(endpoints.customers.delete(customer.id))
+
+      if (response.data.success) {
+        fetchCustomers()
+        alert('Pelanggan berhasil dihapus')
+      }
+    } catch (err: any) {
+      console.error('Error deleting customer:', err)
+      alert(err.response?.data?.message || 'Gagal menghapus pelanggan')
+    }
+  }
+
+  const resetForm = () => {
+    setFormData({
+      name: '',
+      phone: '',
+      nik: '',
+      address: '',
+      package_id: '',
+      pppoe_username: '',
+      pppoe_password: '',
+      billing_type: 'postpaid',
+      billing_cycle: 'tetap',
+      router: 'all',
+      region: '',
+      status: 'active'
+    })
+    setSelectedCustomer(null)
+  }
+
+  const openEditModal = (customer: Customer) => {
+    setSelectedCustomer(customer)
+    setFormData({
+      name: customer.name,
+      phone: customer.phone,
+      nik: customer.nik || '',
+      address: customer.address || '',
+      package_id: customer.package_id || '',
+      pppoe_username: customer.pppoe_username || '',
+      pppoe_password: customer.pppoe_password || '',
+      billing_type: customer.billing_type || 'postpaid',
+      billing_cycle: customer.billing_cycle || 'tetap',
+      router: customer.router || 'all',
+      region: customer.region || '',
+      status: customer.status
+    })
+    setShowEditModal(true)
+  }
+
+  const formatDate = (dateString: string) => {
+    if (dateString === '-') return '-'
+    return new Date(dateString).toLocaleDateString('id-ID', {
+      year: '2-digit',
+      month: 'short',
+      day: '2-digit'
+    })
+  }
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'active':
+        return 'text-success bg-success/10'
+      case 'inactive':
+        return 'text-error bg-error/10'
+      case 'suspended':
+        return 'text-warning bg-warning/10'
+      default:
+        return 'text-muted bg-muted'
+    }
+  }
+
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case 'active':
+        return 'Aktif'
+      case 'inactive':
+        return 'Tidak Aktif'
+      case 'suspended':
+        return 'Ditangguh'
+      default:
+        return status
+    }
+  }
+
+  const getBillingStatusColor = (status?: string) => {
+    switch (status) {
+      case 'paid':
+        return 'text-success bg-success/10'
+      case 'pending':
+        return 'text-warning bg-warning/10'
+      case 'overdue':
+        return 'text-error bg-error/10'
+      default:
+        return 'text-muted bg-muted'
+    }
+  }
+
+  const getBillingStatusText = (status?: string) => {
+    switch (status) {
+      case 'paid':
+        return 'Lunas'
+      case 'pending':
+        return 'Menunggu'
+      case 'overdue':
+        return 'Jatuh Tempo'
+      default:
+        return '-'
+    }
+  }
+
+  const getBillingTypeText = (type?: string) => {
+    switch (type) {
+      case 'prepaid':
+        return 'Prabayar'
+      case 'postpaid':
+        return 'Pascabayar'
+      default:
+        return '-'
+    }
+  }
+
+  const getBillingCycleText = (cycle?: string) => {
+    switch (cycle) {
+      case 'profile':
+        return 'Profile'
+      case 'tetap':
+        return 'Tetap'
+      case 'bulan':
+        return 'Bulanan'
+      default:
+        return '-'
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-semibold text-foreground">Pelanggan</h1>
+          <div className="flex items-center space-x-2">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span className="text-sm text-muted-foreground">Loading...</span>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => (
+            <Card key={i} className="animate-pulse">
+              <CardHeader className="pb-2">
+                <div className="h-4 bg-muted rounded w-3/4"></div>
+              </CardHeader>
+              <CardContent>
+                <div className="h-8 bg-muted rounded w-1/2 mb-2"></div>
+                <div className="h-3 bg-muted rounded w-full"></div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="space-y-4">
+              {[...Array(5)].map((_, i) => (
+                <div key={i} className="flex items-center space-x-4 animate-pulse">
+                  <div className="h-12 w-12 bg-muted rounded"></div>
+                  <div className="flex-1 space-y-2">
+                    <div className="h-4 bg-muted rounded w-3/4"></div>
+                    <div className="h-3 bg-muted rounded w-1/2"></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-semibold text-foreground">Pelanggan</h1>
+        </div>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="text-center text-destructive">
+              <p className="mb-2">Error loading customers data</p>
+              <p className="text-sm text-muted-foreground mb-4">{error}</p>
+              <button
+                onClick={fetchCustomers}
+                className="px-4 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90"
+              >
+                Retry
+              </button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Page Header */}
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold text-foreground">Pelanggan</h1>
+        <div className="flex items-center space-x-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="hidden sm:flex items-center space-x-2"
+          >
+            <Download className="h-4 w-4" />
+            Export
+          </Button>
+          <Button
+            className="flex items-center space-x-2"
+            onClick={() => {
+              resetForm()
+              setShowCreateModal(true)
+            }}
+          >
+            <Plus className="h-4 w-4" />
+            Tambah Pelanggan
+          </Button>
+        </div>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-foreground">Total Pelanggan</CardTitle>
+            <Users className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="text-2xl font-bold text-foreground">{stats?.totalCustomers || 0}</div>
+            <p className="text-xs text-muted-foreground">Total registrasi</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-foreground">Pelanggan Aktif</CardTitle>
+            <Activity className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="text-2xl font-bold text-success">
+              {stats?.activeCustomers || 0}
+            </div>
+            <p className="text-xs text-muted-foreground">Sedang aktif</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-foreground">Total Pendapatan</CardTitle>
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="text-2xl font-bold text-foreground">
+              {formatCurrency(stats?.totalRevenue || 0)}
+            </div>
+            <p className="text-xs text-muted-foreground">Semua waktu</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-foreground">Tagihan Menunggak</CardTitle>
+            <Trash2 className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="text-2xl font-bold text-error">
+              {stats?.suspendedCustomers || 0}
+            </div>
+            <p className="text-xs text-muted-foreground">Perlu ditagih</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Filters and Search */}
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex flex-col sm:flex-row gap-4">
+            <div className="flex-1">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Cari pelanggan (nama, telepon, NIK, ID Pelanggan, PPPoE)..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+            </div>
+            <div className="flex items-center space-x-2">
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value as any)}
+                className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+              >
+                <option value="all">Semua Status</option>
+                <option value="active">Aktif</option>
+                <option value="inactive">Tidak Aktif</option>
+                <option value="suspended">Ditangguh</option>
+              </select>
+              <Button variant="outline" size="icon">
+                <Filter className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Customers Table */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle>Daftar Pelanggan</CardTitle>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Tampilkan:</span>
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(parseInt(e.target.value))
+                  setCurrentPage(1) // Reset to first page when changing page size
+                }}
+                className="rounded-md border border-input bg-background px-3 py-1 text-sm"
+              >
+                <option value={10}>10 data</option>
+                <option value={25}>25 data</option>
+                <option value={50}>50 data</option>
+                <option value={100}>100 data</option>
+              </select>
+              <span className="text-sm text-muted-foreground">
+                dari {totalItems} total data
+              </span>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="border-b bg-muted/50">
+                  <th className="text-center p-3 font-semibold text-foreground whitespace-nowrap w-12"></th>
+                  <th
+                    className="text-left p-3 font-semibold text-foreground whitespace-nowrap cursor-pointer hover:bg-muted/50 transition-colors"
+                    onClick={() => handleSort('customer_id')}
+                  >
+                    <div className="flex items-center gap-1">
+                      ID Pelanggan
+                      {sortField === 'customer_id' && (
+                        sortDirection === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />
+                      )}
+                    </div>
+                  </th>
+                  <th className="text-left p-3 font-semibold text-foreground whitespace-nowrap">Nama Pelanggan</th>
+                  <th className="text-left p-3 font-semibold text-foreground whitespace-nowrap">NIK</th>
+                  <th className="text-left p-3 font-semibold text-foreground whitespace-nowrap">Nomor Telepon</th>
+                  <th className="text-left p-3 font-semibold text-foreground whitespace-nowrap">Alamat</th>
+                  <th className="text-left p-3 font-semibold text-foreground whitespace-nowrap w-32">Paket</th>
+                  <th className="text-left p-3 font-semibold text-foreground whitespace-nowrap">Tagihan</th>
+                  <th className="text-left p-3 font-semibold text-foreground whitespace-nowrap">Siklus</th>
+                  <th className="text-left p-3 font-semibold text-foreground whitespace-nowrap">Router</th>
+                  <th
+                    className="text-left p-3 font-semibold text-foreground whitespace-nowrap cursor-pointer hover:bg-muted/50 transition-colors"
+                    onClick={() => handleSort('region')}
+                  >
+                    <div className="flex items-center gap-1">
+                      Wilayah
+                      {sortField === 'region' && (
+                        sortDirection === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />
+                      )}
+                    </div>
+                  </th>
+                  <th className="text-left p-3 font-semibold text-foreground whitespace-nowrap">PPPoE Username</th>
+                  <th className="text-left p-3 font-semibold text-foreground whitespace-nowrap">Tanggal Daftar</th>
+                  <th className="text-left p-3 font-semibold text-foreground whitespace-nowrap">Tanggal Aktif</th>
+                  <th
+                    className="text-left p-3 font-semibold text-foreground whitespace-nowrap cursor-pointer hover:bg-muted/50 transition-colors"
+                    onClick={() => handleSort('isolir_date')}
+                  >
+                    <div className="flex items-center gap-1">
+                      Tanggal Isolir
+                      {sortField === 'isolir_date' && (
+                        sortDirection === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />
+                      )}
+                    </div>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredCustomers.length > 0 ? (
+                  filteredCustomers.map((customer) => (
+                    <tr
+                      key={customer.id}
+                      className="border-b hover:bg-muted/30 transition-colors cursor-pointer hover:shadow-sm"
+                      onClick={() => {
+                        setSelectedCustomer(customer)
+                        setShowDetailModal(true)
+                      }}
+                    >
+                      <td className="p-3 text-center">
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center ${
+                          customer.status === 'active' ? 'bg-success/20 text-success' :
+                          customer.status === 'suspended' || customer.status === 'inactive' ? 'bg-error/20 text-error' :
+                          customer.is_online ? 'bg-warning/20 text-warning' :
+                          'bg-muted/20 text-muted-foreground'
+                        } mx-auto`}>
+                          <div className={`w-3 h-3 rounded-full ${
+                            customer.status === 'active' ? 'bg-success' :
+                            customer.status === 'suspended' || customer.status === 'inactive' ? 'bg-error' :
+                            customer.is_online ? 'bg-warning' :
+                            'bg-muted'
+                          }`}></div>
+                        </div>
+                      </td>
+                      <td className="p-3">
+                        <div className="font-mono text-sm font-medium text-foreground">
+                          {customer.customer_id || '-'}
+                        </div>
+                      </td>
+                      <td className="p-3">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-foreground">{customer.name}</span>
+                        </div>
+                      </td>
+                      <td className="p-3">
+                        <span className="text-sm text-foreground">
+                          {customer.nik || '-'}
+                        </span>
+                      </td>
+                      <td className="p-3">
+                        <span className="text-sm text-blue-600 hover:bg-blue-50 px-2 py-1 transition-colors">
+                          {customer.phone}
+                        </span>
+                      </td>
+                      <td className="p-3">
+                        <div className="max-w-xs">
+                          <p className="text-sm text-foreground truncate" title={customer.address}>
+                            {customer.address || '-'}
+                          </p>
+                        </div>
+                      </td>
+                      <td className="p-3">
+                        <div className="text-sm text-foreground whitespace-nowrap overflow-hidden text-ellipsis" title={customer.package_name}>
+                          {customer.package_name || '-'}
+                        </div>
+                      </td>
+                      <td className="p-3">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          customer.billing_type === 'prepaid' ? 'bg-blue-100 text-blue-800' :
+                          customer.billing_type === 'postpaid' ? 'bg-green-100 text-green-800' :
+                          'bg-gray-100 text-gray-800'
+                        }`}>
+                          {getBillingTypeText(customer.billing_type)}
+                        </span>
+                      </td>
+                      <td className="p-3">
+                        <span className="text-sm text-foreground">
+                          {getBillingCycleText(customer.billing_cycle)}
+                        </span>
+                      </td>
+                      <td className="p-3">
+                        <span className="text-sm text-foreground">
+                          {customer.router === 'all' ? 'All Router' : (customer.router || '-')}
+                        </span>
+                      </td>
+                      <td className="p-3">
+                        <span className="text-sm text-foreground">
+                          {customer.region || '-'}
+                        </span>
+                      </td>
+                      <td className="p-3">
+                        <span className="text-sm text-foreground">
+                          {customer.pppoe_username || '-'}
+                        </span>
+                      </td>
+                      <td className="p-3">
+                        <span className="text-sm text-foreground">{formatDate(customer.created_at)}</span>
+                      </td>
+                      <td className="p-3">
+                        <span className="text-sm text-foreground">{formatDate(customer.active_date || customer.install_date || '-')}</span>
+                      </td>
+                      <td className="p-3">
+                        <span className={`text-sm ${customer.isolir_date || customer.status === 'suspended' || customer.status === 'inactive' ? 'text-error font-medium' : 'text-foreground'}`}>
+                          {formatDate(customer.isolir_date || '-')}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={15} className="p-12 text-center text-muted-foreground">
+                      <div className="flex flex-col items-center space-y-2">
+                        <Users className="h-12 w-12" />
+                        <p>Tidak ada pelanggan ditemukan</p>
+                        <p className="text-sm">Coba ubah kriteria pencarian atau filter</p>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="px-6 py-4 border-t border-border">
+            <div className="flex items-center justify-between">
+              <div className="text-sm text-muted-foreground">
+                Menampilkan {((currentPage - 1) * pageSize) + 1} hingga {Math.min(currentPage * pageSize, totalItems)} dari {totalItems} data
+              </div>
+              <div className="flex items-center space-x-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(1)}
+                  disabled={currentPage === 1}
+                  className="h-8 w-8 p-0"
+                >
+                  <ChevronsLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  disabled={currentPage === 1}
+                  className="h-8 w-8 p-0"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+
+                {/* Page Numbers */}
+                <div className="flex items-center space-x-1">
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    let pageNum
+                    if (totalPages <= 5) {
+                      pageNum = i + 1
+                    } else if (currentPage <= 3) {
+                      pageNum = i + 1
+                    } else if (currentPage >= totalPages - 2) {
+                      pageNum = totalPages - 4 + i
+                    } else {
+                      pageNum = currentPage - 2 + i
+                    }
+
+                    return (
+                      <Button
+                        key={pageNum}
+                        variant={currentPage === pageNum ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => setCurrentPage(pageNum)}
+                        className="h-8 w-8 p-0"
+                      >
+                        {pageNum}
+                      </Button>
+                    )
+                  })}
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                  disabled={currentPage === totalPages}
+                  className="h-8 w-8 p-0"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(totalPages)}
+                  disabled={currentPage === totalPages}
+                  className="h-8 w-8 p-0"
+                >
+                  <ChevronsRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {/* Customer Detail Modal */}
+      {showDetailModal && selectedCustomer && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowDetailModal(false)
+            }
+          }}
+        >
+          <div
+            className="bg-card rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6 border-b">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold text-foreground">Detail Pelanggan</h2>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setShowDetailModal(false)}
+                >
+                  <X className="h-6 w-6" />
+                </Button>
+              </div>
+            </div>
+            <div className="p-6 space-y-6">
+              {/* Informasi Dasar */}
+              <div>
+                <h3 className="text-lg font-semibold text-foreground mb-4">Informasi Dasar</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-muted-foreground">ID Pelanggan</p>
+                    <p className="font-medium text-foreground font-mono">{selectedCustomer.customer_id || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Nama Lengkap</p>
+                    <p className="font-medium text-foreground">{selectedCustomer.name}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">NIK</p>
+                    <p className="font-medium text-foreground">{selectedCustomer.nik || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Telepon</p>
+                    <p className="font-medium text-foreground text-blue-600">{selectedCustomer.phone}</p>
+                  </div>
+                  <div className="md:col-span-2">
+                    <p className="text-sm text-muted-foreground">Alamat</p>
+                    <p className="font-medium text-foreground">{selectedCustomer.address || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Status</p>
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(selectedCustomer.status)}`}>
+                      {getStatusText(selectedCustomer.status)}
+                    </span>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Wilayah</p>
+                    <p className="font-medium text-foreground">{selectedCustomer.region || '-'}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Informasi Layanan */}
+              <div>
+                <h3 className="text-lg font-semibold text-foreground mb-4">Informasi Layanan</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Paket Layanan</p>
+                    <p className="font-medium text-foreground">{selectedCustomer.package_name || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Router</p>
+                    <p className="font-medium text-foreground">{selectedCustomer.router === 'all' ? 'All Router' : (selectedCustomer.router || '-')}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">PPPoE Username</p>
+                    <p className="font-medium text-foreground font-mono text-sm">{selectedCustomer.pppoe_username || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">PPPoE Password</p>
+                    <p className="font-medium text-foreground font-mono text-sm">{selectedCustomer.pppoe_password || '-'}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Informasi Billing */}
+              <div>
+                <h3 className="text-lg font-semibold text-foreground mb-4">Informasi Billing</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Jenis Tagihan</p>
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                      selectedCustomer.billing_type === 'prepaid' ? 'bg-blue-100 text-blue-800' :
+                      selectedCustomer.billing_type === 'postpaid' ? 'bg-green-100 text-green-800' :
+                      'bg-gray-100 text-gray-800'
+                    }`}>
+                      {getBillingTypeText(selectedCustomer.billing_type)}
+                    </span>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Siklus Billing</p>
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                      {getBillingCycleText(selectedCustomer.billing_cycle)}
+                    </span>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Harga Paket</p>
+                    <p className="font-medium text-foreground">{selectedCustomer.package_price ? formatCurrency(selectedCustomer.package_price) : '-'}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Informasi Tanggal */}
+              <div>
+                <h3 className="text-lg font-semibold text-foreground mb-4">Informasi Tanggal</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Tanggal Daftar</p>
+                    <p className="font-medium text-foreground">{formatDate(selectedCustomer.created_at)}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Tanggal Aktif</p>
+                    <p className="font-medium text-foreground">{formatDate(selectedCustomer.active_date || selectedCustomer.install_date || '-')}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Tanggal Isolir</p>
+                    <p className={`font-medium ${selectedCustomer.isolir_date || selectedCustomer.status === 'suspended' || selectedCustomer.status === 'inactive' ? 'text-red-600' : 'text-foreground'}`}>
+                      {formatDate(selectedCustomer.isolir_date || '-')}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Informasi Tambahan */}
+              <div className="border-t pt-4">
+                <h3 className="text-lg font-semibold text-foreground mb-4">Informasi Tambahan</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-muted-foreground">ID Pelanggan (Sistem)</p>
+                    <p className="font-medium text-foreground font-mono">{selectedCustomer.id}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">ID Paket (Sistem)</p>
+                    <p className="font-medium text-foreground font-mono">{selectedCustomer.package_id || '-'}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="border-t pt-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm text-muted-foreground">
+                    ID: {selectedCustomer.customer_id || selectedCustomer.id}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        openEditModal(selectedCustomer)
+                        setShowDetailModal(false)
+                      }}
+                      className="flex items-center gap-2"
+                    >
+                      <Edit className="h-4 w-4" />
+                      Edit Pelanggan
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      onClick={() => {
+                        handleDeleteCustomer(selectedCustomer)
+                        setShowDetailModal(false)
+                      }}
+                      className="flex items-center gap-2"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Hapus Pelanggan
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Customer Modal */}
+      <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center space-x-2">
+              <Plus className="h-5 w-5" />
+              <span>Tambah Pelanggan Baru</span>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="create-name">Nama Lengkap *</Label>
+                <Input
+                  id="create-name"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="Masukkan nama lengkap"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="create-phone">Nomor Telepon *</Label>
+                <Input
+                  id="create-phone"
+                  value={formData.phone}
+                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  placeholder="081234567890"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="create-nik">NIK</Label>
+                <Input
+                  id="create-nik"
+                  value={formData.nik}
+                  onChange={(e) => setFormData({ ...formData, nik: e.target.value })}
+                  placeholder="Nomor KTP (16 digit)"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="create-region">Wilayah</Label>
+                <Input
+                  id="create-region"
+                  value={formData.region}
+                  onChange={(e) => setFormData({ ...formData, region: e.target.value })}
+                  placeholder="Contoh: Jakarta, Surabaya, Bandung"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="create-address">Alamat Lengkap</Label>
+              <Textarea
+                id="create-address"
+                value={formData.address}
+                onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                placeholder="Masukkan alamat lengkap"
+                rows={2}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="create-package">Paket Layanan</Label>
+                <Select value={formData.package_id} onValueChange={(value) => setFormData({ ...formData, package_id: value })}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih paket" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Tidak ada paket</SelectItem>
+                    {packages.filter(pkg => pkg.is_active).map((pkg) => (
+                      <SelectItem key={pkg.id} value={pkg.id}>
+                        {pkg.name} - {pkg.speed} - {formatCurrency(pkg.price)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Router</Label>
+                <Select value={formData.router} onValueChange={(value) => setFormData({ ...formData, router: value })}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih router" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Router (Bebas)</SelectItem>
+                    <SelectItem value="router1">Router 1</SelectItem>
+                    <SelectItem value="router2">Router 2</SelectItem>
+                    <SelectItem value="router3">Router 3</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Jenis Tagihan</Label>
+                <Select value={formData.billing_type} onValueChange={(value) => setFormData({ ...formData, billing_type: value })}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih jenis tagihan" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="prepaid">Prabayar</SelectItem>
+                    <SelectItem value="postpaid">Pascabayar</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Siklus Billing</Label>
+                <Select value={formData.billing_cycle} onValueChange={(value) => setFormData({ ...formData, billing_cycle: value })}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih siklus billing" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="profile">Profile</SelectItem>
+                    <SelectItem value="tetap">Tetap</SelectItem>
+                    <SelectItem value="bulan">Bulanan</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Informasi PPPoE (Opsional)</Label>
+              <p className="text-xs text-muted-foreground">Kosongkan jika belum ada koneksi PPPoE</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="create-pppoe-user">PPPoE Username</Label>
+                <Input
+                  id="create-pppoe-user"
+                  value={formData.pppoe_username}
+                  onChange={(e) => setFormData({ ...formData, pppoe_username: e.target.value })}
+                  placeholder="username123"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="create-pppoe-pass">PPPoE Password</Label>
+                <Input
+                  id="create-pppoe-pass"
+                  type="password"
+                  value={formData.pppoe_password}
+                  onChange={(e) => setFormData({ ...formData, pppoe_password: e.target.value })}
+                  placeholder="1234567"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Status Pelanggan</Label>
+              <Select value={formData.status} onValueChange={(value) => setFormData({ ...formData, status: value })}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Pilih status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Aktif</SelectItem>
+                  <SelectItem value="inactive">Tidak Aktif</SelectItem>
+                  <SelectItem value="suspended">Ditangguh</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCreateModal(false)}>
+              Batal
+            </Button>
+            <Button onClick={handleCreateCustomer} disabled={submitting}>
+              {submitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Menyimpan...
+                </>
+              ) : (
+                <>
+                  <Save className="mr-2 h-4 w-4" />
+                  Simpan
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Customer Modal */}
+      <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center space-x-2">
+              <Edit className="h-5 w-5" />
+              <span>Edit Pelanggan</span>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-name">Nama Lengkap *</Label>
+                <Input
+                  id="edit-name"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="Masukkan nama lengkap"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-phone">Nomor Telepon *</Label>
+                <Input
+                  id="edit-phone"
+                  value={formData.phone}
+                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  placeholder="081234567890"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-nik">NIK</Label>
+                <Input
+                  id="edit-nik"
+                  value={formData.nik}
+                  onChange={(e) => setFormData({ ...formData, nik: e.target.value })}
+                  placeholder="Nomor KTP (16 digit)"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-region">Wilayah</Label>
+                <Input
+                  id="edit-region"
+                  value={formData.region}
+                  onChange={(e) => setFormData({ ...formData, region: e.target.value })}
+                  placeholder="Contoh: Jakarta, Surabaya, Bandung"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-address">Alamat Lengkap</Label>
+              <Textarea
+                id="edit-address"
+                value={formData.address}
+                onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                placeholder="Masukkan alamat lengkap"
+                rows={2}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-package">Paket Layanan</Label>
+                <Select value={formData.package_id} onValueChange={(value) => setFormData({ ...formData, package_id: value })}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih paket" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Tidak ada paket</SelectItem>
+                    {packages.filter(pkg => pkg.is_active).map((pkg) => (
+                      <SelectItem key={pkg.id} value={pkg.id}>
+                        {pkg.name} - {pkg.speed} - {formatCurrency(pkg.price)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Router</Label>
+                <Select value={formData.router} onValueChange={(value) => setFormData({ ...formData, router: value })}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih router" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Router (Bebas)</SelectItem>
+                    <SelectItem value="router1">Router 1</SelectItem>
+                    <SelectItem value="router2">Router 2</SelectItem>
+                    <SelectItem value="router3">Router 3</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Jenis Tagihan</Label>
+                <Select value={formData.billing_type} onValueChange={(value) => setFormData({ ...formData, billing_type: value })}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih jenis tagihan" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="prepaid">Prabayar</SelectItem>
+                    <SelectItem value="postpaid">Pascabayar</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Siklus Billing</Label>
+                <Select value={formData.billing_cycle} onValueChange={(value) => setFormData({ ...formData, billing_cycle: value })}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih siklus billing" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="profile">Profile</SelectItem>
+                    <SelectItem value="tetap">Tetap</SelectItem>
+                    <SelectItem value="bulan">Bulanan</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Informasi PPPoE</Label>
+              <p className="text-xs text-muted-foreground">Update kredensial PPPoE jika berubah</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-pppoe-user">PPPoE Username</Label>
+                <Input
+                  id="edit-pppoe-user"
+                  value={formData.pppoe_username}
+                  onChange={(e) => setFormData({ ...formData, pppoe_username: e.target.value })}
+                  placeholder="username123"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-pppoe-pass">PPPoE Password</Label>
+                <Input
+                  id="edit-pppoe-pass"
+                  type="password"
+                  value={formData.pppoe_password}
+                  onChange={(e) => setFormData({ ...formData, pppoe_password: e.target.value })}
+                  placeholder="1234567"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Status Pelanggan</Label>
+              <Select value={formData.status} onValueChange={(value) => setFormData({ ...formData, status: value })}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Pilih status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Aktif</SelectItem>
+                  <SelectItem value="inactive">Tidak Aktif</SelectItem>
+                  <SelectItem value="suspended">Ditangguh</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+                  <SelectContent>
+                    <SelectItem value="">Tidak ada paket</SelectItem>
+                    {packages.filter(pkg => pkg.is_active).map((pkg) => (
+                      <SelectItem key={pkg.id} value={pkg.id}>
+                        {pkg.name} - {pkg.speed} - {formatCurrency(pkg.price)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Informasi PPPoE</Label>
+                <p className="text-xs text-muted-foreground">Update kredensial PPPoE jika berubah</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-pppoe-user">PPPoE Username</Label>
+                <Input
+                  id="edit-pppoe-user"
+                  value={formData.pppoe_username}
+                  onChange={(e) => setFormData({ ...formData, pppoe_username: e.target.value })}
+                  placeholder="username123"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-pppoe-pass">PPPoE Password</Label>
+                <Input
+                  id="edit-pppoe-pass"
+                  type="password"
+                  value={formData.pppoe_password}
+                  onChange={(e) => setFormData({ ...formData, pppoe_password: e.target.value })}
+                  placeholder="1234567"
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEditModal(false)}>
+              Batal
+            </Button>
+            <Button onClick={handleUpdateCustomer} disabled={submitting}>
+              {submitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Memperbarui...
+                </>
+              ) : (
+                <>
+                  <Save className="mr-2 h-4 w-4" />
+                  Perbarui
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}

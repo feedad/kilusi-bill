@@ -1,0 +1,34 @@
+[Unit]
+Description=Kilusi Bill Frontend Service
+Documentation=https://github.com/your-org/kilusi-bill
+After=network.target kilusi-bill-backend.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kilusi
+Group=kilusi
+WorkingDirectory=/opt/kilusi-bill/frontend
+Environment=NODE_ENV=production
+EnvironmentFile=/opt/kilusi-bill/frontend/.env.local
+ExecStart=/usr/bin/npm start
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=10
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=kilusi-bill-frontend
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/kilusi-bill/frontend/.next
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,40 @@
+# ===========================================
+# FreeRADIUS Users File
+# ===========================================
+# This file contains the users and their configuration
+
+# Default user for testing
+# This will authenticate with the password 'test123'
+testuser    Cleartext-Password := "test123"
+            Reply-Message := "Hello, %{User-Name}!"
+
+# Fallback user for testing
+# This will authenticate any user with password 'test'
+DEFAULT     Auth-Type := Accept
+            Cleartext-Password := "test"
+            Reply-Message := "Default user authenticated"
+
+# Example of a user with specific attributes
+# user1    Cleartext-Password := "password1"
+#          Service-Type = Framed-User,
+#          Framed-Protocol = PPP,
+#          Framed-IP-Address = 192.168.1.100,
+#          Framed-IP-Netmask = 255.255.255.0
+
+# Example of a user with time restrictions
+# user2    Cleartext-Password := "password2"
+#          Service-Type = Framed-User,
+#          Framed-Protocol = PPP,
+#          Login-Time = "Mon0900-1700, Tue0900-1700, Wed0900-1700, Thu0900-1700, Fri0900-1700"
+
+# Example of a user with bandwidth limitations
+# user3    Cleartext-Password := "password3"
+#          Service-Type = Framed-User,
+#          Framed-Protocol = PPP,
+#          WISPr-Bandwidth-Max-Up := 1000000,
+#          WISPr-Bandwidth-Max-Down := 2000000
+
+# This is a special entry that will be used if the user
+# is not found in the database
+DEFAULT    Auth-Type := Reject
+           Reply-Message = "User not found in database"

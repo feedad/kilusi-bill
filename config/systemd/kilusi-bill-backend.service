@@ -1,0 +1,35 @@
+[Unit]
+Description=Kilusi Bill Backend Service
+Documentation=https://github.com/your-org/kilusi-bill
+After=network.target docker.service postgresql.service
+Wants=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=kilusi
+Group=kilusi
+WorkingDirectory=/opt/kilusi-bill/backend
+Environment=NODE_ENV=production
+EnvironmentFile=/opt/kilusi-bill/.env
+ExecStart=/usr/bin/node app.js
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=10
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=kilusi-bill-backend
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/kilusi-bill/backend/logs /opt/kilusi-bill/backend/uploads /var/log/kilusi-bill
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target

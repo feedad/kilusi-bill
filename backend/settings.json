@@ -1,0 +1,23 @@
+{
+  "admin_username": "admin",
+  "admin_password": "admin",
+  "genieacs_url": "http://172.22.10.30:7557",
+  "genieacs_username": "admin",
+  "genieacs_password": "admin",
+  "mikrotik_host": "192.168.1.1",
+  "mikrotik_port": "8728",
+  "mikrotik_user": "admin",
+  "mikrotik_password": "password",
+  "main_interface": "ether1",
+  "company_header": "ISP Monitor",
+  "footer_info": "Powered by Kilusi",
+  "server_port": "3001",
+  "server_host": "localhost",
+  "customerPortalOtp": "false",
+  "otp_length": "6",
+  "pppoe_monitor_enable": "true",
+  "rx_power_warning": "-37",
+  "rx_power_critical": "-40",
+  "whatsapp_keep_alive": "true",
+  "user_auth_mode": "mikrotik"
+}

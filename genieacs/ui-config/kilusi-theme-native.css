@@ -1,0 +1,74 @@
+/* Kilusi Bill Native Theme (Variable Override) */
+:root {
+    /* 
+       Mapping Kilusi/Default Variables to Kilusi Dark Theme 
+       Original: Beige (#ebe0bf), Teal (#046380), Dark Green (#002f2f)
+    */
+
+    /* Header Background & Accent (Was Beige) */
+    --color1: #111927 !important;
+
+    /* Borders & Secondary Elements (Was Darker Beige) */
+    --color2: #2F3A4D !important;
+
+    /* Main Page Background (Was Light Beige) */
+    --color3: #1C2536 !important;
+
+    /* Primary Action Color / Links (Was Teal) */
+    --color4: #5D87FF !important;
+
+    /* Text Color (Was Dark Green) */
+    --color5: #F2F4F7 !important;
+
+    /* Base Font settings */
+    --base-font-size: 13px;
+    --base-line-height: 1.5;
+
+    /* Transition speeds */
+    --fade: 0.2s;
+
+    /* Status Colors (Keep or tweak) */
+    --status-red: 0 80% 60%;
+    --status-green: 145 70% 50%;
+    --status-gray: 210 20% 60%;
+    --status-yellow: 45 90% 60%;
+}
+
+/* Force specific elements that might not use vars correctly */
+body,
+html {
+    background-color: var(--color3) !important;
+    color: var(--color5) !important;
+}
+
+#header {
+    background-color: var(--color1) !important;
+    border-bottom: 1px solid var(--color2) !important;
+}
+
+.sidebar,
+aside {
+    background-color: var(--color3) !important;
+    border-right: 1px solid var(--color2) !important;
+}
+
+/* Fix input fields visibility in dark mode */
+input,
+select,
+textarea {
+    background-color: #212B3E !important;
+    /* Lighter card bg */
+    color: #F2F4F7 !important;
+    border: 1px solid var(--color2) !important;
+}
+
+/* Fix table rows striping */
+.table-striped>tbody>tr:nth-of-type(odd) {
+    background-color: rgba(255, 255, 255, 0.03) !important;
+}
+
+/* Link Hover */
+a:hover {
+    color: #ffffff !important;
+    background-color: var(--color4) !important;
+}

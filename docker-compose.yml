@@ -1,0 +1,301 @@
+# =====================================================================
+# Kilusi Bill - Docker Compose Configuration
+# =====================================================================
+# This file supports multiple deployment scenarios:
+# 1. All-in-one: PostgreSQL + FreeRADIUS + Backend + Frontend
+# 2. Database separate: Use external PostgreSQL
+# 3. FreeRADIUS separate: Use external FreeRADIUS
+#
+# Copy .env.docker.example to .env and configure as needed
+# =====================================================================
+
+# version: '3.8'  # Removed as it's obsolete in newer Docker Compose versions
+
+services:
+  # ===================================================================
+  # PostgreSQL Database Service
+  # ===================================================================
+  # Uncomment this service if you want to run PostgreSQL in Docker
+  # Comment out if using external PostgreSQL server
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: kilusi-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DATABASE:-kilusi_bill}
+      POSTGRES_USER: ${POSTGRES_USER:-kilusi_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kilusi1234}
+      POSTGRES_HOST_AUTH_METHOD: md5
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/master-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./scripts/02-views.sql:/docker-entrypoint-initdb.d/02-views.sql:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    networks:
+      - kilusi-network
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kilusi_user} -d ${POSTGRES_DATABASE:-kilusi_bill}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  # ===================================================================
+  # FreeRADIUS Service
+  # ===================================================================
+  # Uncomment this service if you want to run FreeRADIUS in Docker
+  # Comment out if using native FreeRADIUS installation or external server
+
+  freeradius:
+    build:
+      context: ./freeradius
+      dockerfile: Dockerfile
+    container_name: kilusi-freeradius
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Database connection (passed to SQL module)
+      DB_HOST: ${POSTGRES_HOST:-postgres}
+      DB_PORT: ${POSTGRES_PORT:-5432}
+      DB_NAME: ${POSTGRES_DATABASE:-kilusi_bill}
+      DB_USER: ${POSTGRES_USER:-kilusi_user}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-kilusi1234}
+
+      # RADIUS settings
+      RADIUS_SECRET: ${RADIUS_SECRET:-testing123}
+    volumes:
+      # Mount FreeRADIUS configuration (Alpine image uses /opt/etc/raddb/)
+      - ./freeradius/config/mods-available/sql:/opt/etc/raddb/mods-available/sql:ro
+      - ./freeradius/config/sql-symlink:/opt/etc/raddb/mods-enabled/sql:ro
+      - ./freeradius/config/default:/opt/etc/raddb/sites-available/default:ro
+      - ./freeradius/config/default:/opt/etc/raddb/sites-enabled/default:ro
+      - ./freeradius/config/clients.conf:/opt/etc/raddb/clients.conf:ro
+      - freeradius_logs:/var/log/freeradius
+    ports:
+      - "1812:1812/udp" # RADIUS Authentication
+      - "1813:1813/udp" # RADIUS Accounting
+      - "18120:18120" # RADIUS Status (optional)
+    networks:
+      - kilusi-network
+    command: freeradius -f -l stdout -X
+    healthcheck:
+      test: [ "CMD", "pgrep", "radiusd" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===================================================================
+  # GenieACS Services
+  # ===================================================================
+  mongo:
+    image: mongo:4.4
+    container_name: genieacs-mongo
+    restart: always
+    volumes:
+      - genieacs-mongo-data:/data/db
+    networks:
+      - kilusi-network
+
+  genieacs-cwmp:
+    image: drumsergio/genieacs:latest
+    container_name: genieacs-cwmp
+    restart: always
+    command: "dist/bin/genieacs-cwmp"
+    env_file:
+      - ./genieacs/genieacs.env
+    ports:
+      - "7547:7547"
+    depends_on:
+      - mongo
+    networks:
+      - kilusi-network
+
+  genieacs-nbi:
+    image: drumsergio/genieacs:latest
+    container_name: genieacs-nbi
+    restart: always
+    command: "dist/bin/genieacs-nbi"
+    env_file:
+      - ./genieacs/genieacs.env
+    ports:
+      - "7557:7557"
+    depends_on:
+      - mongo
+    networks:
+      - kilusi-network
+
+  genieacs-fs:
+    image: drumsergio/genieacs:latest
+    container_name: genieacs-fs
+    restart: always
+    command: "dist/bin/genieacs-fs"
+    env_file:
+      - ./genieacs/genieacs.env
+    ports:
+      - "7567:7567"
+    depends_on:
+      - mongo
+    networks:
+      - kilusi-network
+
+  genieacs-ui:
+    image: drumsergio/genieacs:latest
+    container_name: genieacs-ui
+    restart: always
+    command: "dist/bin/genieacs-ui"
+    env_file:
+      - ./genieacs/genieacs.env
+    ports:
+      - "3002:3000"
+    volumes:
+      - ./genieacs/ui-config/kilusi-theme-native.css:/opt/genieacs/public/kilusi-theme-native.css
+      - ./genieacs/ui-config/logo.svg:/opt/genieacs/public/logo.svg
+      - ./genieacs/provisions:/opt/genieacs/provisions
+    depends_on:
+      - mongo
+    networks:
+      - kilusi-network
+
+  # ===================================================================
+  # Backend API Service
+  # ===================================================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: kilusi-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: ${BACKEND_PORT:-3001}
+
+      # Admin
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+
+      # Database
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE:-kilusi_bill}
+      POSTGRES_USER: ${POSTGRES_USER:-kilusi_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kilusi1234}
+
+      # FreeRADIUS (for checking connection status)
+      RADIUS_HOST: ${RADIUS_HOST:-freeradius}
+      RADIUS_SECRET: ${RADIUS_SECRET:-testing123}
+
+      # Session
+      SESSION_SECRET: ${SESSION_SECRET:-change-this-in-production}
+
+      # WhatsApp (optional)
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+
+      # Payment Gateway (optional)
+      TRIPAY_API_KEY: ${TRIPAY_API_KEY:-}
+      TRIPAY_PRIVATE_KEY: ${TRIPAY_PRIVATE_KEY:-}
+      TRIPAY_MERCHANT_CODE: ${TRIPAY_MERCHANT_CODE:-}
+    volumes:
+      - ./backend:/app
+      - backend_node_modules:/app/node_modules
+      - backend_logs:/app/logs
+    ports:
+      - "${BACKEND_PORT:-3001}:3001"
+    networks:
+      - kilusi-network
+    healthcheck:
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===================================================================
+  # Frontend Service (Next.js standalone)
+  # ===================================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:3001
+    container_name: kilusi-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      BACKEND_URL: http://backend:3001
+      PORT: 80
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    networks:
+      - kilusi-network
+    healthcheck:
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+# =====================================================================
+# Networks
+# =====================================================================
+networks:
+  kilusi-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# =====================================================================
+# Volumes
+# =====================================================================
+volumes:
+  postgres_data:
+    driver: local
+  freeradius_logs:
+    driver: local
+  backend_node_modules:
+    driver: local
+  backend_logs:
+    driver: local
+
+  # =====================================================================
+  # Usage Instructions
+  # =====================================================================
+  #
+  # 1. FULL DOCKER DEPLOYMENT (All services in Docker):
+  #    docker-compose up -d
+  #
+  # 2. EXTERNAL POSTGRESQL (Use existing PostgreSQL server):
+  #    - Comment out 'postgres' service above
+  #    - Set POSTGRES_HOST in .env to your PostgreSQL server IP
+  #    - Run: docker-compose up -d freeradius backend frontend
+  #
+  # 3. EXTERNAL FREERADIUS (Use native FreeRADIUS installation):
+  #    - Comment out 'freeradius' service above
+  #    - Configure native FreeRADIUS to use the nas table
+  #    - Run: docker-compose up -d postgres backend frontend
+  #
+  # 4. SEPARATE SERVERS (PostgreSQL and FreeRADIUS on different machines):
+  #    - Comment out both 'postgres' and 'freeradius' services
+  #    - Set POSTGRES_HOST and RADIUS_HOST in .env
+  #    - Run: docker-compose up -d backend frontend
+  #
+  # 5. MONITORING:
+  #    docker-compose logs -f
+  #    docker-compose ps
+  #
+  # 6. STOP:
+  #    docker-compose down
+  #
+  # 7. RESET (WARNING: Deletes all data):
+  #    docker-compose down -v
+  #
+  # =====================================================================
+  genieacs-mongo-data:

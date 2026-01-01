@@ -1,0 +1,290 @@
+# =====================================================================
+# Kilusi Bill - Git Ignore File
+# =====================================================================
+
+# ===================================================================== 
+# Development Archive (Local Only)
+# =====================================================================
+_dev-archive/
+_dev/
+.dev/
+
+# ===================================================================== 
+# Dependencies
+# =====================================================================
+node_modules/
+backend/node_modules/
+frontend/node_modules/
+frontend/.next/
+frontend/.cache/
+backend/dist/
+backend/build/
+
+# =====================================================================
+# Environment & Configuration
+# =====================================================================
+.env
+.env.local
+.env.*.local
+.env.production
+*.env
+!.env.example
+!.env.docker.example
+
+# Database credentials
+backend/.env
+backend/.env.local
+backend/.env.production
+
+# =====================================================================
+# Logs & Temporary Files
+# =====================================================================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+backend/logs/*.log
+backend/logs/**/*.log
+
+# PM2 logs
+.pm2/
+pm2.log
+*.pm2.log
+
+# =====================================================================
+# Database Files
+# =====================================================================
+*.sql.backup
+*.sql.bak
+backup_*.sql
+*_backup_*.sql
+full_backup_*.tar.gz
+*.dump
+*.sqlite
+*.sqlite3
+*.db
+
+# Backend backups
+backend/backups/**/*
+!backend/backups/.gitkeep
+
+# Keep these SQL files
+!scripts/master-schema.sql
+!scripts/database-init.sql
+!backend/migrations/*.sql
+!freeradius/config/radius-schema.sql
+
+# Don't upload large database dumps
+public.sql
+functions.sql
+view_def.sql
+testing-data.sql
+backup*.sql
+import_log.txt
+
+# =====================================================================
+# OS & IDE Files
+# =====================================================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+.claude/
+*.sublime-project
+*.sublime-workspace
+
+# =====================================================================
+# Build & Distribution
+# =====================================================================
+dist/
+build/
+out/
+*.tsbuildinfo
+frontend/.next/
+frontend/out/
+frontend/build/
+
+# =====================================================================
+# Testing & Coverage
+# =====================================================================
+coverage/
+.nyc_output/
+*.lcov
+.jest/
+
+# =====================================================================
+# SSL Certificates & Keys
+# =====================================================================
+*.pem
+*.key
+*.crt
+*.cert
+*.p12
+*.pfx
+ssl/
+certs/
+!ssl/.gitkeep
+!certs/.gitkeep
+
+# =====================================================================
+# Uploads & User Data
+# =====================================================================
+uploads/
+tmp/
+temp/
+*.tmp
+!uploads/.gitkeep
+!tmp/.gitkeep
+
+# =====================================================================
+# Docker & System
+# =====================================================================
+.docker/
+docker-compose.override.yml
+*.pid
+*.seed
+*.pid.lock
+
+# =====================================================================
+# Package Manager
+# =====================================================================
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+.pnpm-store/
+.yarn/
+.pnp.*
+
+# =====================================================================
+# Archives & Compressed Files
+# =====================================================================
+*.tar
+*.tar.gz
+*.zip
+*.rar
+*.7z
+
+# =====================================================================
+# Legacy & Backup Files
+# =====================================================================
+backend/_legacy*/
+frontend/_legacy*/
+*_legacy_backup_*/
+*.old
+*.bak
+*.backup
+
+# Documentation backups
+*_OLD.md
+*_BACKUP.md
+
+# =====================================================================
+# Special Cases - Keep These
+# =====================================================================
+# Keep example environment files
+!.env.example
+!.env.docker.example
+!backend/.env.example
+
+# Keep important documentation
+!README.md
+!README-SETUP.md
+!INSTALLATION.md
+!CHANGELOG.md
+!LICENSE
+
+# Keep Docker files
+!Dockerfile
+!docker-compose.yml
+!.dockerignore
+
+# Keep installation scripts
+!install.sh
+
+# =====================================================================
+# Personal Notes & Temporary Markdown
+# =====================================================================
+CLAUDE.md
+DEV-SOLUTION.md
+AUTH-SOLUTION.md
+SERVER_STATUS.md
+IMPLEMENTATION_PLAN.md
+*-TODO.md
+*_NOTES.md
+*_PLAN.md
+*_GUIDE.md
+DEBUG_*.md
+PROGRESS-*.md
+REORGANIZATION_*.md
+PROJECT_STRUCTURE.md
+DEVELOPMENT_*.md
+ODP_*.md
+CUSTOMER_*.md
+
+# Internal documentation (not for public)
+TRIPAY_CONFIGURATION.md
+BROADCAST_SYSTEM_DOCUMENTATION.md
+API-STANDARDIZATION-*.md
+RESTFUL_API_*.md
+SESSION_DOCUMENTATION*.md
+CLAUDE_REMINDERS.md
+
+# Keep important public documentation md files
+!README.md
+!README-SETUP.md
+!CHANGELOG.md
+!LICENSE
+!CONTRIBUTING.md
+!docs/README.md
+
+# =====================================================================
+# Images (exclude large images, allow icons/logos)
+# =====================================================================
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+!public/logo.png
+!public/favicon.ico
+!frontend/public/logo.png
+!frontend/public/favicon.ico
+!docs/images/*.png
+!docs/images/*.jpg
+
+# =====================================================================
+# Miscellaneous
+# =====================================================================
+.cache/
+.temp/
+*.cache
+*.pid
+*.seed
+*.pid.lock
+.eslintcache
+.stylelintcache
+!genieacs/genieacs.env
