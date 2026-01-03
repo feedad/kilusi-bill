@@ -29,6 +29,11 @@ interface PaymentMethod {
   maximum_amount?: number;
   instructions?: string[];
   active: boolean;
+  logo?: string;
+  // Manual transfer specific fields
+  bank_name?: string;
+  account_number?: string;
+  account_holder?: string;
 }
 
 interface PaymentMethodSelectorProps {
@@ -59,7 +64,13 @@ export default function PaymentMethodSelector({
       qris: methodsList.filter(m => m.method === 'QRIS'),
       ewallet: methodsList.filter(m => ['DANA', 'GOPAY', 'OVO', 'SHOPEEPAY'].includes(m.method)),
       bank_transfer: methodsList.filter(m => m.type === 'bank' || m.type === 'va'),
-      other: methodsList.filter(m => !['QRIS', 'DANA', 'GOPAY', 'OVO', 'SHOPEEPAY'].includes(m.method) && m.type !== 'bank' && m.type !== 'va')
+      manual_transfer: methodsList.filter(m => m.type === 'manual_transfer'),
+      other: methodsList.filter(m =>
+        !['QRIS', 'DANA', 'GOPAY', 'OVO', 'SHOPEEPAY'].includes(m.method) &&
+        m.type !== 'bank' &&
+        m.type !== 'va' &&
+        m.type !== 'manual_transfer'
+      )
     };
   };
 
@@ -70,9 +81,13 @@ export default function PaymentMethodSelector({
     // Filter by amount if provided
     if (amount) {
       filtered = filtered.filter(method => {
-        const minAmount = method.minimum_amount || 0;
-        const maxAmount = method.maximum_amount || Infinity;
-        return amount >= minAmount && amount <= maxAmount;
+        // Ensure inputs are numbers for safe comparison
+        const amountNum = Number(amount);
+        const minAmount = method.minimum_amount ? Number(method.minimum_amount) : 0;
+        const maxAmount = method.maximum_amount ? Number(method.maximum_amount) : Infinity;
+
+        const inRange = amountNum >= minAmount && amountNum <= maxAmount;
+        return inRange;
       });
     }
 
@@ -86,8 +101,8 @@ export default function PaymentMethodSelector({
 
     // Sort by fee amount (lowest first)
     return filtered.sort((a, b) => {
-      const feeA = parseFloat(a.fee_customer?.replace(/[^\d]/g, '') || 0);
-      const feeB = parseFloat(b.fee_customer?.replace(/[^\d]/g, '') || 0);
+      const feeA = parseFloat(a.fee_customer?.replace(/[^\d]/g, '') || '0');
+      const feeB = parseFloat(b.fee_customer?.replace(/[^\d]/g, '') || '0');
       return feeA - feeB;
     });
   };
@@ -99,7 +114,15 @@ export default function PaymentMethodSelector({
         setLoadingMethods(true);
         setError('');
 
-        const response = await fetch(`/api/v1/customer-payments/methods${amount ? `?amount=${amount}` : ''}`);
+        // Get customer token from localStorage
+        const customerToken = localStorage.getItem('customer_token');
+
+        const response = await fetch(`/api/v1/customer-payments/methods${amount ? `?amount=${amount}` : ''}`, {
+          headers: {
+            'Authorization': `Bearer ${customerToken}`,
+            'Content-Type': 'application/json'
+          }
+        });
 
         if (!response.ok) {
           throw new Error('Failed to fetch payment methods');
@@ -127,37 +150,42 @@ export default function PaymentMethodSelector({
   const getMethodIcon = (iconName: string) => {
     switch (iconName) {
       case 'bi-qr-code':
-        return <QrCodeIcon className="w-5 h-5" />;
+        return <QrCodeIcon className="w-6 h-6" />;
       case 'bi-wallet2':
       case 'bi-wallet':
-        return <WalletIcon className="w-5 h-5" />;
+        return <WalletIcon className="w-6 h-6" />;
       case 'bi-phone':
-        return <SmartphoneIcon className="w-5 h-5" />;
+        return <SmartphoneIcon className="w-6 h-6" />;
       case 'bi-bank':
-        return <BanknoteIcon className="w-5 h-5" />;
+        return <BanknoteIcon className="w-6 h-6" />;
       case 'bi-bag':
-        return <ShoppingBagIcon className="w-5 h-5" />;
+        return <ShoppingBagIcon className="w-6 h-6" />;
       default:
-        return <WalletIcon className="w-5 h-5" />;
+        return <WalletIcon className="w-6 h-6" />;
     }
   };
 
   const getMethodColor = (color: string) => {
+    // Adjusted for dark mode compatibility (lighter/brighter for contrast or dark variants)
+    // We'll primarily rely on the white logo container, but these are for non-logo fallbacks and accents
     switch (color) {
-      case 'info': return 'text-blue-600 bg-blue-50 border-blue-200';
-      case 'success': return 'text-green-600 bg-green-50 border-green-200';
-      case 'warning': return 'text-yellow-600 bg-yellow-50 border-yellow-200';
-      case 'danger': return 'text-red-600 bg-red-50 border-red-200';
-      case 'dark': return 'text-gray-600 bg-gray-50 border-gray-200';
-      case 'secondary': return 'text-purple-600 bg-purple-50 border-purple-200';
-      default: return 'text-gray-600 bg-gray-50 border-gray-200';
+      case 'info': return 'text-cyan-400 bg-cyan-900/30 border-cyan-700/50';
+      case 'success': return 'text-emerald-400 bg-emerald-900/30 border-emerald-700/50';
+      case 'warning': return 'text-amber-400 bg-amber-900/30 border-amber-700/50';
+      case 'danger': return 'text-rose-400 bg-rose-900/30 border-rose-700/50';
+      case 'secondary': return 'text-violet-400 bg-violet-900/30 border-violet-700/50';
+      default: return 'text-slate-400 bg-slate-800 border-slate-700';
     }
   };
 
   const getFeeDisplay = (fee: string) => {
-    if (fee === 'Gratis') return 'Gratis';
-    if (fee.includes('%')) return `${fee} transaksi`;
-    return `Rp ${parseInt(fee).toLocaleString('id-ID')}`;
+    if (!fee || fee === 'Gratis') return 'Gratis';
+    if (typeof fee === 'string' && fee.includes('%')) return `${fee} transaksi`;
+    // Clean up "Rp " prefix if double present or format nicely
+    const cleanFee = fee.replace(/[^\d]/g, '');
+    const numFee = parseInt(cleanFee);
+    if (isNaN(numFee) || numFee === 0) return 'Gratis';
+    return `Rp ${numFee.toLocaleString('id-ID')}`;
   };
 
   const PaymentMethodCard = ({ method, groupKey }: { method: PaymentMethod; groupKey: string }) => {
@@ -165,48 +193,91 @@ export default function PaymentMethodSelector({
     const colorClass = getMethodColor(method.color);
 
     return (
-      <Card
+      <div
         key={`${groupKey}-${method.method}`}
-        className={`cursor-pointer transition-all hover:shadow-md ${
-          isSelected ? 'ring-2 ring-blue-500 border-blue-500' : 'border-gray-200'
-        } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+        className={`group relative cursor-pointer rounded-xl border p-4 transition-all duration-300 overflow-hidden
+          ${isSelected
+            ? 'bg-blue-900/20 border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.15)] ring-1 ring-blue-500/50'
+            : 'bg-slate-800/50 border-slate-700 hover:bg-slate-800 hover:border-slate-600 hover:shadow-lg'
+          } ${disabled ? 'opacity-50 cursor-not-allowed grayscale' : ''}`}
         onClick={() => !disabled && onMethodSelect(method)}
       >
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className={`p-2 rounded-lg ${colorClass}`}>
-                {getMethodIcon(method.icon)}
-              </div>
-              <div>
-                <h3 className="font-semibold text-gray-900">{method.name}</h3>
-                <div className="flex items-center space-x-2 mt-1">
-                  <Badge variant="outline" className="text-xs">
-                    {method.type.toUpperCase()}
-                  </Badge>
-                  <span className="text-xs text-gray-500">
-                    Biaya: {getFeeDisplay(method.fee_customer)}
-                  </span>
-                </div>
-              </div>
-            </div>
-            {isSelected && (
-              <div className="w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center">
-                <Check className="w-4 h-4 text-white" />
-              </div>
+        <div className="flex items-start gap-4">
+          {/* Logo / Icon Container - Always White for proper logo display */}
+          <div className={`w-14 h-14 shrink-0 flex items-center justify-center rounded-lg overflow-hidden transition-colors ${method.logo ? 'bg-white p-1.5' : `${colorClass} p-3`
+            }`}>
+            {method.logo ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={method.logo}
+                alt={method.name}
+                className="w-full h-full object-contain"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                  e.currentTarget.parentElement?.classList.add('fallback-icon');
+                }}
+              />
+            ) : (
+              getMethodIcon(method.icon)
             )}
           </div>
 
-          {method.minimum_amount && amount && amount < method.minimum_amount && (
-            <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-700">
-              <div className="flex items-center">
-                <Info className="w-3 h-3 mr-1" />
-                Minimum: Rp {method.minimum_amount.toLocaleString('id-ID')}
-              </div>
+          {/* Content */}
+          <div className="flex-1 min-w-0">
+            <div className="flex justify-between items-start gap-2">
+              <h3 className={`font-semibold text-sm truncate pr-1 ${isSelected ? 'text-blue-100' : 'text-slate-200 group-hover:text-white'}`} title={method.name}>
+                {method.name}
+              </h3>
+              {isSelected && (
+                <div className="w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center shrink-0 shadow-lg shadow-blue-500/50">
+                  <Check className="w-3 h-3 text-white" />
+                </div>
+              )}
             </div>
-          )}
-        </CardContent>
-      </Card>
+
+            <div className="flex flex-col gap-1.5 mt-2">
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary" className="text-[10px] h-5 px-1.5 font-medium bg-slate-700/50 text-slate-400 border border-slate-600 block w-fit">
+                  {method.type === 'manual_transfer' ? 'MANUAL' : method.type.toUpperCase()}
+                </Badge>
+              </div>
+
+              <p className="text-xs font-medium flex items-center gap-1.5">
+                <span className="text-slate-500">Biaya:</span>
+                <span className={method.fee_customer === 'Gratis' ? 'text-emerald-400' : 'text-amber-400'}>
+                  {getFeeDisplay(method.fee_customer)}
+                </span>
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Show minimum amount warning */}
+        {method.minimum_amount && amount && amount < method.minimum_amount && (
+          <div className="mt-3 p-2 bg-amber-900/20 border border-amber-700/50 rounded text-xs text-amber-400 flex items-center">
+            <Info className="w-3 h-3 mr-1 shrink-0" />
+            Minimum: Rp {method.minimum_amount.toLocaleString('id-ID')}
+          </div>
+        )}
+
+        {/* Show bank details for manual transfer */}
+        {method.type === 'manual_transfer' && isSelected && (
+          <div className="mt-3 p-3 bg-blue-900/20 border border-blue-700/50 rounded-lg">
+            <p className="text-sm font-semibold text-blue-200 mb-2">Detail Rekening:</p>
+            <div className="space-y-1 text-sm text-blue-300">
+              <p><span className="font-medium">Bank:</span> {method.bank_name}</p>
+              <p><span className="font-medium">No. Rekening:</span> {method.account_number}</p>
+              <p><span className="font-medium">Atas Nama:</span> {method.account_holder}</p>
+            </div>
+            <p className="text-xs text-blue-400 mt-2 italic">
+              Setelah transfer, upload bukti pembayaran untuk verifikasi.
+            </p>
+          </div>
+        )}
+
+        {/* Selected Highlight Overlay */}
+        {isSelected && <div className="absolute inset-0 bg-blue-500/5 pointer-events-none" />}
+      </div>
     );
   };
 
@@ -214,9 +285,9 @@ export default function PaymentMethodSelector({
     if (methods.length === 0) return null;
 
     return (
-      <div>
-        <h3 className="text-lg font-semibold text-gray-900 mb-3">{title}</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3 px-1">{title}</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-4">
           {methods.map(method => (
             <PaymentMethodCard key={method.method} method={method} groupKey={groupKey} />
           ))}
@@ -227,29 +298,25 @@ export default function PaymentMethodSelector({
 
   if (loadingMethods || loading) {
     return (
-      <Card>
-        <CardContent className="p-8">
-          <div className="flex flex-col items-center justify-center">
-            <Loader2 className="w-8 h-8 animate-spin text-blue-500 mb-3" />
-            <p className="text-gray-500">Loading payment methods...</p>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="border border-slate-700 rounded-xl p-12 bg-slate-800/30">
+        <div className="flex flex-col items-center justify-center">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-500 mb-3" />
+          <p className="text-slate-500 animate-pulse">Loading payment methods...</p>
+        </div>
+      </div>
     );
   }
 
   if (error) {
     return (
-      <Card>
-        <CardContent className="p-8">
-          <div className="text-center">
-            <p className="text-red-500 mb-2">Error loading payment methods</p>
-            <Button variant="outline" onClick={() => window.location.reload()}>
-              Try Again
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="border border-red-900/50 rounded-xl p-8 bg-red-950/20">
+        <div className="text-center">
+          <p className="text-red-400 mb-4">{error}</p>
+          <Button variant="outline" onClick={() => window.location.reload()} className="border-red-800 text-red-400 hover:bg-red-950 hover:text-red-300">
+            Coba Lagi
+          </Button>
+        </div>
+      </div>
     );
   }
 
@@ -257,26 +324,26 @@ export default function PaymentMethodSelector({
   const filteredGroups = groupMethods(filteredMethods);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* Search Bar */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+      <div className="relative group">
+        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500 w-4 h-4 group-focus-within:text-blue-500 transition-colors" />
         <Input
           type="text"
-          placeholder="Search payment methods..."
+          placeholder="Cari metode pembayaran..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          className="pl-10"
+          className="pl-10 bg-slate-900/50 border-slate-700 text-slate-200 placeholder:text-slate-600 focus:border-blue-500/50 focus:ring-blue-500/20 h-12 rounded-xl transition-all"
           disabled={disabled}
         />
       </div>
 
-      {/* Amount Display */}
+      /* Amount Display */
       {amount && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-5 backdrop-blur-sm">
           <div className="flex justify-between items-center">
-            <span className="text-gray-700">Amount to Pay:</span>
-            <span className="text-2xl font-bold text-blue-600">
+            <span className="text-slate-400 font-medium">Total Pembayaran</span>
+            <span className="text-2xl font-bold text-white tracking-tight">
               Rp {amount.toLocaleString('id-ID')}
             </span>
           </div>
@@ -285,7 +352,7 @@ export default function PaymentMethodSelector({
 
       {/* Popular Methods */}
       <MethodSection
-        title="🌟 Popular Methods"
+        title="✨ Popular Methods"
         methods={filteredGroups.popular}
         groupKey="popular"
       />
@@ -320,12 +387,21 @@ export default function PaymentMethodSelector({
         />
       )}
 
+      {/* Manual Transfer */}
+      {filteredGroups.manual_transfer?.length > 0 && (
+        <MethodSection
+          title="🏦 Transfer Manual"
+          methods={filteredGroups.manual_transfer}
+          groupKey="manual_transfer"
+        />
+      )}
+
       {/* No Methods Found */}
       {filteredMethods.length === 0 && (
-        <Card>
+        <Card className="bg-slate-800 border-slate-700">
           <CardContent className="p-8 text-center">
-            <p className="text-gray-500">
-              No payment methods available for this amount
+            <p className="text-slate-400">
+              Tidak ada metode pembayaran yang tersedia untuk jumlah ini
               {amount && ` (Rp ${amount.toLocaleString('id-ID')})`}
             </p>
           </CardContent>
@@ -334,24 +410,22 @@ export default function PaymentMethodSelector({
 
       {/* Selected Method Summary */}
       {selectedMethod && (
-        <Card className="bg-green-50 border-green-200">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600">Selected Payment Method:</p>
-                <p className="font-semibold text-gray-900">
-                  {methods.find(m => m.method === selectedMethod)?.name}
-                </p>
-              </div>
-              <div className="text-right">
-                <p className="text-sm text-gray-600">Fee:</p>
-                <p className="font-semibold text-gray-900">
-                  {getFeeDisplay(methods.find(m => m.method === selectedMethod)?.fee_customer || 'Gratis')}
-                </p>
-              </div>
+        <div className="bg-blue-900/20 border border-blue-800 rounded-xl p-4 mt-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-blue-300 mb-1">Metode Terpilih:</p>
+              <p className="font-semibold text-white text-lg">
+                {methods.find(m => m.method === selectedMethod)?.name}
+              </p>
             </div>
-          </CardContent>
-        </Card>
+            <div className="text-right">
+              <p className="text-sm text-blue-300 mb-1">Biaya Layanan:</p>
+              <Badge variant="outline" className="border-blue-700 text-blue-200 bg-blue-900/50">
+                {getFeeDisplay(methods.find(m => m.method === selectedMethod)?.fee_customer || 'Gratis')}
+              </Badge>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

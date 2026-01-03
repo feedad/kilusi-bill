@@ -84,6 +84,11 @@ interface SystemSettings {
       apiKey: string
       senderId: string
     }
+    telegram: {
+      enabled: boolean
+      botToken: string
+      chatId: string
+    }
   }
   security: {
     sessionTimeout: number
@@ -177,6 +182,11 @@ export default function SettingsPage() {
         apiKey: '',
         senderId: '',
       },
+      telegram: {
+        enabled: false,
+        botToken: '',
+        chatId: '',
+      },
     },
     security: {
       sessionTimeout: 30,
@@ -253,7 +263,9 @@ export default function SettingsPage() {
             ...prev.notifications,
             ...fetchedSettings.notifications,
             email: { ...prev.notifications.email, ...fetchedSettings.notifications?.email },
+            email: { ...prev.notifications.email, ...fetchedSettings.notifications?.email },
             sms: { ...prev.notifications.sms, ...fetchedSettings.notifications?.sms },
+            telegram: { ...prev.notifications.telegram, ...fetchedSettings.notifications?.telegram },
           },
           security: { ...prev.security, ...fetchedSettings.security },
           backup: { ...prev.backup, ...fetchedSettings.backup },
@@ -292,11 +304,11 @@ export default function SettingsPage() {
           try {
             const formData = new FormData()
             formData.append('file', file)
-            
+
             const response = await adminApi.post(`/api/v1/branding/upload/${type}`, formData, {
               headers: { 'Content-Type': 'multipart/form-data' }
             })
-            
+
             if (response.data.success) {
               const url = response.data.data.url
               setSettings({
@@ -393,7 +405,7 @@ export default function SettingsPage() {
                       <Upload className="h-4 w-4" />
                       Upload Logo
                     </label>
-                    
+
                     <div className="flex items-center gap-4">
                       <label className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg cursor-pointer hover:bg-primary/90 transition-colors">
                         <Upload className="h-4 w-4" />
@@ -412,14 +424,14 @@ export default function SettingsPage() {
                         PNG, JPEG, SVG (Max 2MB)
                       </span>
                     </div>
-                    
+
                     {settings.branding.logoUrl && (
                       <div className="p-4 bg-muted/30 rounded-lg">
                         <p className="text-xs text-muted-foreground mb-2">Logo saat ini:</p>
                         <div className="flex items-center gap-4">
-                          <img 
-                            src={settings.branding.logoUrl.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${settings.branding.logoUrl}` : settings.branding.logoUrl} 
-                            alt="Logo Preview" 
+                          <img
+                            src={settings.branding.logoUrl.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${settings.branding.logoUrl}` : settings.branding.logoUrl}
+                            alt="Logo Preview"
                             className="h-10 object-contain bg-white p-1 rounded"
                             onError={(e) => {
                               (e.target as HTMLImageElement).src = '/placeholder-logo.png'
@@ -429,7 +441,7 @@ export default function SettingsPage() {
                         </div>
                       </div>
                     )}
-                    
+
                     <p className="text-xs text-muted-foreground">
                       Rekomendasi: format PNG dengan tinggi 40px dan background transparan
                     </p>
@@ -442,7 +454,7 @@ export default function SettingsPage() {
                     <Image className="h-4 w-4" />
                     Favicon
                   </label>
-                  
+
                   <div className="flex items-center gap-4">
                     <label className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg cursor-pointer hover:bg-primary/90 transition-colors">
                       <Upload className="h-4 w-4" />
@@ -461,13 +473,13 @@ export default function SettingsPage() {
                       ICO, PNG, SVG (Max 2MB)
                     </span>
                   </div>
-                  
+
                   {settings.branding.faviconUrl && (
                     <div className="flex items-center gap-3 p-3 bg-muted/30 rounded-lg">
                       <span className="text-xs text-muted-foreground">Favicon saat ini:</span>
-                      <img 
-                        src={settings.branding.faviconUrl.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${settings.branding.faviconUrl}` : settings.branding.faviconUrl} 
-                        alt="Favicon Preview" 
+                      <img
+                        src={settings.branding.faviconUrl.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${settings.branding.faviconUrl}` : settings.branding.faviconUrl}
+                        alt="Favicon Preview"
                         className="h-6 w-6 object-contain"
                         onError={(e) => {
                           (e.target as HTMLImageElement).style.display = 'none'
@@ -476,7 +488,7 @@ export default function SettingsPage() {
                       <span className="text-xs text-muted-foreground">{settings.branding.faviconUrl}</span>
                     </div>
                   )}
-                  
+
                   <p className="text-xs text-muted-foreground">
                     Rekomendasi: format ICO atau PNG 32x32 atau 64x64 pixels
                   </p>
@@ -1014,6 +1026,72 @@ export default function SettingsPage() {
                           setHasChanges(true)
                         }}
                       />
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Telegram Settings */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Smartphone className="h-5 w-5" />
+                  Pengaturan Telegram Notifikasi
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    checked={settings.notifications.telegram?.enabled ?? false}
+                    onChange={(e) => {
+                      setSettings({
+                        ...settings,
+                        notifications: { ...settings.notifications, telegram: { ...settings.notifications.telegram!, enabled: e.target.checked } }
+                      })
+                      setHasChanges(true)
+                    }}
+                  />
+                  <label className="text-sm font-medium">Aktifkan Notifikasi Telegram</label>
+                </div>
+                {settings.notifications.telegram?.enabled && (
+                  <div className="space-y-4 p-4 bg-muted/30 rounded-lg">
+                    <div>
+                      <label className="text-sm font-medium">Bot Token</label>
+                      <Input
+                        type="password"
+                        value={settings.notifications.telegram?.botToken || ''}
+                        onChange={(e) => {
+                          setSettings({
+                            ...settings,
+                            notifications: { ...settings.notifications, telegram: { ...settings.notifications.telegram!, botToken: e.target.value } }
+                          })
+                          setHasChanges(true)
+                        }}
+                        placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">Dapatkan dari @BotFather</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">Chat ID (Admin)</label>
+                      <Input
+                        value={settings.notifications.telegram?.chatId || ''}
+                        onChange={(e) => {
+                          setSettings({
+                            ...settings,
+                            notifications: { ...settings.notifications, telegram: { ...settings.notifications.telegram!, chatId: e.target.value } }
+                          })
+                          setHasChanges(true)
+                        }}
+                        placeholder="-100xxxxxxxxx atau ID user"
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">ID User atau Group tempat bot akan mengirim notifikasi</p>
+                    </div>
+                    <div className="p-3 bg-blue-50 dark:bg-blue-950 rounded-lg">
+                      <p className="text-xs text-blue-700 dark:text-blue-300">
+                        Pastikan bot sudah dimasukkan ke dalam group dan dijadikan admin agar bisa mengirim pesan.
+                      </p>
                     </div>
                   </div>
                 )}

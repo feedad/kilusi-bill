@@ -94,19 +94,21 @@ class CustomerTokenService {
                 return { valid: false, error: 'Invalid token format' };
             }
 
-            // Check in customers table with package join (to get package details)
+            // Check in customers table with package join (via services table)
             const customer = await getOne(
                 `SELECT c.id, c.name, c.phone, c.pppoe_username, c.email, c.status,
-                        c.package_id, c.customer_id, c.address,
+                        s.package_id, c.customer_id, COALESCE(s.address_installation, c.address) as address,
                         p.name as package_name, p.price as package_price
                  FROM customers c
-                 LEFT JOIN packages p ON c.package_id = p.id
-                 WHERE c.portal_access_token = $1 AND c.token_expires_at >= $2`,
+                 LEFT JOIN services s ON s.customer_id = c.id
+                 LEFT JOIN packages p ON s.package_id = p.id
+                 WHERE c.portal_access_token = $1 AND c.token_expires_at >= $2
+                 LIMIT 1`,
                 [token, new Date()]
             );
 
             if (customer) {
-  
+
                 return {
                     valid: true,
                     customer: {
@@ -118,7 +120,7 @@ class CustomerTokenService {
                         status: customer.status,
                         package_id: customer.package_id,
                         package_name: customer.package_name,
-                        package_price: customer.package_price,
+                        package_price: parseFloat(customer.package_price) || 0,
                         customer_id: customer.customer_id,
                         address: customer.address
                     }

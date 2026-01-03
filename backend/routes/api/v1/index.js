@@ -59,12 +59,13 @@ router.use('/system', require('./system'));
 const { router: paymentsRouter, webhookRouter } = require('./payments');
 
 // Webhook routes (no auth required for external payment gateways) - mounted first
-router.use('/payments', webhookRouter);
+router.use('/payments/webhook', webhookRouter);
 
 // Payment routes (with auth for admin operations) - mounted after webhook routes
 router.use('/payments', jwtAuth, paymentsRouter);
 
 router.use('/customer-payments', require('./customer-payments'));
+router.use('/payment-upload', require('./payment-upload'));
 router.use('/payment-test', require('./payment-test'));
 
 // API Management routes (admin only)

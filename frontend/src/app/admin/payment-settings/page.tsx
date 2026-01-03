@@ -155,8 +155,10 @@ export default function PaymentSettingsPage() {
     // Save all settings
     const saveSettings = async () => {
         setSaving(true)
+        toast.loading('Menyimpan...', { id: 'save-toast' });
         try {
-            const response = await adminApi.post('/api/v1/settings', {
+            console.log('Sending settings:', { bankAccounts, eWallets, gateway });
+            const response = await adminApi.put('/api/v1/settings', {
                 settings: {
                     payment_settings: {
                         bank_accounts: bankAccounts,
@@ -166,15 +168,16 @@ export default function PaymentSettingsPage() {
                 }
             })
 
+            console.log('Save response:', response);
             if (response.data.success) {
-                toast.success('Pengaturan pembayaran berhasil disimpan')
+                toast.success('Pengaturan pembayaran berhasil disimpan', { id: 'save-toast' })
                 setHasChanges(false)
             } else {
-                toast.error('Gagal menyimpan pengaturan')
+                toast.error('Gagal menyimpan: ' + (response.data.message || 'Unknown error'), { id: 'save-toast' })
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error saving settings:', error)
-            toast.error('Gagal menyimpan pengaturan')
+            toast.error('Error System: ' + (error.message || JSON.stringify(error)), { id: 'save-toast' })
         } finally {
             setSaving(false)
         }

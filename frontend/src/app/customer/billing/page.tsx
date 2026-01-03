@@ -30,6 +30,7 @@ import { toast } from 'react-hot-toast'
 import Link from 'next/link'
 import { customerAPI } from '@/lib/customer-api'
 import PaymentMethodSelector from '@/components/payments/PaymentMethodSelector'
+import ProofUploadModal from '@/components/payments/ProofUploadModal'
 
 interface Invoice {
   id: string
@@ -82,6 +83,9 @@ export default function CustomerBilling() {
   const [paymentLoading, setPaymentLoading] = useState(false)
   const [paymentResult, setPaymentResult] = useState<any>(null)
   const [showPaymentInstructions, setShowPaymentInstructions] = useState(false)
+  const [showProofUploadModal, setShowProofUploadModal] = useState(false)
+  const [proofUploadInvoice, setProofUploadInvoice] = useState<Invoice | null>(null)
+  const [manualBankDetails, setManualBankDetails] = useState<any>(null)
 
   // Helper function to get customer data consistently (same approach as other standardized pages)
   const getCustomerData = () => {
@@ -357,6 +361,19 @@ export default function CustomerBilling() {
       return
     }
 
+    // Handle manual transfer differently
+    if (selectedPaymentMethod.type === 'manual_transfer') {
+      setManualBankDetails({
+        bank_name: selectedPaymentMethod.bank_name,
+        account_number: selectedPaymentMethod.account_number,
+        account_holder: selectedPaymentMethod.account_holder
+      })
+      setProofUploadInvoice(selectedInvoice)
+      setShowPaymentModal(false)
+      setShowProofUploadModal(true)
+      return
+    }
+
     setPaymentLoading(true)
     try {
       const customerToken = localStorage.getItem('customer_token')
@@ -369,7 +386,11 @@ export default function CustomerBilling() {
         },
         body: JSON.stringify({
           payment_method: selectedPaymentMethod.method,
-          gateway: selectedPaymentMethod.gateway
+          gateway: selectedPaymentMethod.gateway,
+          // Send invoice details for bulk payments (since they don't exist on backend yet)
+          amount: String(selectedInvoice.id).startsWith('bulk-') ? selectedInvoice.amount : undefined,
+          invoice_number: String(selectedInvoice.id).startsWith('bulk-') ? selectedInvoice.invoice_number : undefined,
+          description: String(selectedInvoice.id).startsWith('bulk-') ? selectedInvoice.description : undefined
         })
       })
 
@@ -378,7 +399,14 @@ export default function CustomerBilling() {
       if (data.success) {
         setPaymentResult(data.data)
         setShowPaymentInstructions(true)
-        toast.success('Pembayaran berhasil diproses!')
+        toast.success('Pembayaran berhasil! Mengalihkan...')
+
+        // Auto-redirect to payment page
+        if (data.data.payment_url) {
+          setTimeout(() => {
+            window.location.href = data.data.payment_url
+          }, 1000)
+        }
 
         // Update invoice status in local state
         setInvoices(prev => prev.map(inv =>
@@ -395,6 +423,23 @@ export default function CustomerBilling() {
     } finally {
       setPaymentLoading(false)
     }
+  }
+
+  const handleProofUploadSuccess = (result: any) => {
+    setShowProofUploadModal(false)
+    setProofUploadInvoice(null)
+    setManualBankDetails(null)
+
+    // Update invoice status
+    if (result.invoice_id) {
+      setInvoices(prev => prev.map(inv =>
+        inv.id === result.invoice_id
+          ? { ...inv, status: 'pending' as const, payment_method: 'Manual Transfer' }
+          : inv
+      ))
+    }
+
+    toast.success('Bukti pembayaran berhasil diunggah!')
   }
 
   const closePaymentModal = () => {
@@ -416,8 +461,59 @@ export default function CustomerBilling() {
 
   const calculateBulkPayment = async (months: number) => {
     try {
-      const customerData = getCustomerData()
-      const packagePrice = customerData?.package_price || 0
+      let customerData = getCustomerData()
+      let packagePrice = customerData?.package_price || 0
+
+      // If package_price is missing, try to fetch fresh data from backend
+      if (!packagePrice || packagePrice <= 0) {
+        console.warn('Package price not available, fetching from backend...')
+        try {
+          const customerToken = localStorage.getItem('customer_token')
+          const response = await fetch('/api/v1/customer-auth-nextjs/get-customer-data', {
+            headers: {
+              'Authorization': `Bearer ${customerToken}`,
+              'Content-Type': 'application/json'
+            }
+          })
+
+          if (response.ok) {
+            const data = await response.json()
+            if (data.success && data.data?.customer?.package_price) {
+              packagePrice = parseFloat(data.data.customer.package_price) || 0
+              // Update localStorage with fresh data
+              const updatedCustomer = { ...customerData, ...data.data.customer }
+              localStorage.setItem('customer_data', JSON.stringify(updatedCustomer))
+              console.log('✅ Fetched package_price from backend:', packagePrice)
+            }
+          }
+        } catch (fetchError) {
+          console.error('Failed to fetch fresh customer data:', fetchError)
+        }
+      }
+
+      // Validate package price before making API call
+      if (!packagePrice || packagePrice <= 0) {
+        console.warn('Package price not available for bulk payment calculation')
+        // Return a fallback calculation with zero values
+        const currentDate = new Date()
+        const isolationDate = new Date(currentDate.setMonth(currentDate.getMonth() + months))
+        return {
+          total: 0,
+          originalTotal: 0,
+          discount: 0,
+          discountType: 'none',
+          discountDisplay: 'Harga paket tidak tersedia',
+          isolationDate: isolationDate.toLocaleDateString('id-ID', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+          }),
+          effectiveMonths: months,
+          totalMonthsPaid: months,
+          perMonthEffective: 0,
+          error: 'Harga paket tidak tersedia. Silakan logout dan login ulang.'
+        }
+      }
 
       // Use customer-billing API for bulk payment calculation (requires customer JWT)
       const response = await customerAPI.request('/api/v1/customer-billing/calculate-bulk-payment', {
@@ -578,13 +674,37 @@ export default function CustomerBilling() {
   }
 
   const confirmBulkPayment = async () => {
-    toast.loading('🔄 Menghitung diskon pembayaran...')
     const calculation = await calculateBulkPayment(selectedMonths)
-    toast.dismiss()
 
-    toast.success(`🔄 Memproses pembayaran ${calculation.totalMonthsPaid} bulan sebesar ${formatCurrency(calculation.total)}...`)
+    if (calculation.error) {
+      toast.error(calculation.error)
+      return
+    }
+
+    if (calculation.total <= 0) {
+      toast.error('Total pembayaran tidak valid')
+      return
+    }
+
+    // Create a virtual invoice for bulk payment
+    const bulkInvoice: Invoice = {
+      id: `bulk-${Date.now()}`,
+      invoice_number: `BULK-${Date.now()}`,
+      amount: calculation.total,
+      final_amount: calculation.total,
+      status: 'unpaid',
+      due_date: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      description: `Pembayaran ${selectedMonths} bulan`,
+      package_name: getCustomerData()?.package_name || 'Internet'
+    }
+
+    // Close bulk payment modal and open payment method selection modal
     setShowBulkPaymentModal(false)
-    // TODO: Integrasikan dengan payment gateway
+    setSelectedInvoice(bulkInvoice)
+    setShowPaymentModal(true)
+
+    toast.success(`Silakan pilih metode pembayaran untuk ${formatCurrency(calculation.total)}`)
   }
 
   const monthOptions = bulkPaymentSettings ? [
@@ -627,12 +747,12 @@ export default function CustomerBilling() {
   ]
 
   const filteredInvoices = invoices.filter(invoice =>
-    invoice.invoice_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    invoice.description?.toLowerCase().includes(searchTerm.toLowerCase())
+    (invoice.invoice_number || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (invoice.description || '').toLowerCase().includes(searchTerm.toLowerCase())
   )
 
   const filteredPayments = payments.filter(payment =>
-    payment.invoice_number.toLowerCase().includes(searchTerm.toLowerCase())
+    (payment.invoice_number || '').toLowerCase().includes(searchTerm.toLowerCase())
   )
 
   // Check if bulk payment is enabled
@@ -1144,6 +1264,11 @@ export default function CustomerBilling() {
                       <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mr-2"></div>
                       <span className="text-sm text-gray-600 dark:text-gray-300">Menghitung diskon...</span>
                     </div>
+                  ) : calculationResult?.error ? (
+                    <div className="text-center py-4">
+                      <AlertCircle className="w-8 h-8 text-yellow-500 mx-auto mb-2" />
+                      <p className="text-sm text-yellow-700 dark:text-yellow-400">{calculationResult.error}</p>
+                    </div>
                   ) : (
                     <div className="space-y-2">
                       <div className="flex justify-between text-sm">
@@ -1184,9 +1309,9 @@ export default function CustomerBilling() {
                 <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
                   <div className="text-sm text-blue-800 dark:text-blue-200">
                     <strong>Perpanjangan Layanan:</strong>
-                    {calculationResult ?
-                      ` Sampai ${calculationResult.isolationDate}` :
-                      ` Sampai ${calculateBulkPayment(selectedMonths).then(r => r.isolationDate).catch(() => '...')}`
+                    {calculationResult?.isolationDate
+                      ? ` Sampai ${calculationResult.isolationDate}`
+                      : ' Menghitung...'
                     }
                   </div>
                 </div>
@@ -1210,6 +1335,23 @@ export default function CustomerBilling() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Proof Upload Modal for Manual Transfer */}
+      {proofUploadInvoice && (
+        <ProofUploadModal
+          isOpen={showProofUploadModal}
+          onClose={() => {
+            setShowProofUploadModal(false)
+            setProofUploadInvoice(null)
+            setManualBankDetails(null)
+          }}
+          invoiceId={proofUploadInvoice.id}
+          invoiceNumber={proofUploadInvoice.invoice_number}
+          amount={proofUploadInvoice.final_amount || proofUploadInvoice.amount}
+          bankDetails={manualBankDetails}
+          onUploadSuccess={handleProofUploadSuccess}
+        />
       )}
     </div>
   )

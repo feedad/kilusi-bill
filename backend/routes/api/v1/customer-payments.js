@@ -22,8 +22,11 @@ router.get('/methods', customerJwtAuth, asyncHandler(async (req, res) => {
 
     let methods = [];
 
+    // Ensure gateway is initialized before use
+    await paymentGateway.ensureInitialized();
+
     // Get all available methods from active gateway
-    methods = await paymentGateway.getAvailablePaymentMethods();
+    methods = await paymentGateway.getAvailablePaymentMethods(amount);
 
     // Filter methods based on amount if provided
     if (amount) {
@@ -50,6 +53,8 @@ router.get('/methods', customerJwtAuth, asyncHandler(async (req, res) => {
       bank_transfer: methods.filter(m => m.type === 'bank' || m.type === 'va'),
       other: methods.filter(m => !['QRIS', 'DANA', 'GOPAY', 'OVO', 'SHOPEEPAY'].includes(m.method) && m.type !== 'bank' && m.type !== 'va')
     };
+
+    console.log(`[API] /methods returning ${methods.length} methods to frontend`);
 
     res.json({
       success: true,
@@ -83,7 +88,11 @@ router.get('/invoices', customerJwtAuth, asyncHandler(async (req, res) => {
         CASE
           WHEN i.due_date < CURRENT_DATE AND i.status = 'unpaid' THEN 'overdue'
           ELSE i.status
-        END as display_status
+        END as display_status,
+        CASE
+          WHEN i.status IN ('unpaid', 'overdue') THEN true
+          ELSE false
+        END as can_pay
       FROM invoices i
       LEFT JOIN packages p ON i.package_id = p.id
       WHERE i.customer_id = $1
@@ -178,36 +187,77 @@ router.post('/invoices/:id/pay', customerJwtAuth, asyncHandler(async (req, res) 
   try {
     const { id } = req.params;
     const customerId = getCustomerIdFromToken(req);
-    const { payment_method, gateway = 'tripay', customer_details = {} } = req.body;
+    const { payment_method, gateway = 'tripay', customer_details = {}, amount, invoice_number, description } = req.body;
 
-    // Validate invoice
-    const invoiceResult = await query(`
-      SELECT
-        i.*, c.name as customer_name, c.email as customer_email, c.phone as customer_phone,
-        p.name as package_name
-      FROM invoices i
-      JOIN customers c ON i.customer_id = c.id
-      LEFT JOIN packages p ON i.package_id = p.id
-      WHERE i.id = $1 AND i.customer_id = $2 AND i.status IN ('unpaid', 'overdue')
-    `, [id, customerId]);
+    let invoice;
+    let invoiceId = id;
 
-    if (invoiceResult.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        error: 'Invoice not found or cannot be paid'
-      });
+    // Handle virtual bulk invoices
+    if (id.startsWith('bulk-')) {
+      if (!amount || !invoice_number) {
+        return res.status(400).json({ success: false, error: 'Missing bulk invoice details' });
+      }
+
+      // 1. Get customer's current package from SERVICES table
+      const customerRes = await query(`SELECT package_id FROM services WHERE customer_id = $1 LIMIT 1`, [customerId]);
+      const packageId = customerRes.rows[0]?.package_id;
+
+      // 2. Create real invoice
+      const newInvoiceReq = await query(`
+         INSERT INTO invoices (
+           customer_id, invoice_number, amount, total_amount, 
+           status, due_date, created_at, description, notes, package_id
+         ) VALUES ($1, $2, $3, $3, 'unpaid', NOW(), NOW(), $4, 'Bulk Payment', $5)
+         RETURNING *
+       `, [customerId, invoice_number, amount, description || 'Bulk Payment', packageId]);
+
+      const newInvoice = newInvoiceReq.rows[0];
+      invoiceId = newInvoice.id; // Use the new integer API
+
+      // 3. Fetch full invoice details with joins for consistent object structure
+      const invoiceResult = await query(`
+        SELECT
+          i.*, c.name as customer_name, c.email as customer_email, c.phone as customer_phone,
+          p.name as package_name
+        FROM invoices i
+        JOIN customers c ON i.customer_id = c.id
+        LEFT JOIN packages p ON i.package_id = p.id
+        WHERE i.id = $1 AND i.customer_id = $2
+       `, [invoiceId, customerId]);
+
+      invoice = invoiceResult.rows[0];
+
+    } else {
+      // Standard existing invoice lookup
+      const invoiceResult = await query(`
+          SELECT
+            i.*, c.name as customer_name, c.email as customer_email, c.phone as customer_phone,
+            p.name as package_name
+          FROM invoices i
+          JOIN customers c ON i.customer_id = c.id
+          LEFT JOIN packages p ON i.package_id = p.id
+          WHERE i.id = $1 AND i.customer_id = $2 AND i.status IN ('unpaid', 'overdue')
+        `, [id, customerId]);
+
+      if (invoiceResult.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          error: 'Invoice not found or cannot be paid'
+        });
+      }
+      invoice = invoiceResult.rows[0];
     }
 
-    const invoice = invoiceResult.rows[0];
-
     // Check if there's already a pending payment
+    // Check if there's already a pending payment FOR THIS METHOD
     const existingPaymentResult = await query(`
       SELECT * FROM payment_transactions
       WHERE invoice_id = $1 AND status = 'pending'
       AND expires_at > NOW()
+      AND (payment_method = $2 OR $2 IS NULL)
       ORDER BY created_at DESC
       LIMIT 1
-    `, [id]);
+    `, [invoiceId, payment_method]);
 
     if (existingPaymentResult.rows.length > 0) {
       const existingPayment = existingPaymentResult.rows[0];
@@ -215,7 +265,7 @@ router.post('/invoices/:id/pay', customerJwtAuth, asyncHandler(async (req, res) 
         success: true,
         data: {
           transaction_id: existingPayment.id,
-          invoice_id: id,
+          invoice_id: invoiceId,
           invoice_number: invoice.invoice_number,
           amount: invoice.total_amount,
           payment_method: existingPayment.payment_method,
@@ -231,8 +281,12 @@ router.post('/invoices/:id/pay', customerJwtAuth, asyncHandler(async (req, res) 
     }
 
     // Prepare payment data
+    // Generate unique order_id (merchant_ref) to allow multiple payment methods for same invoice
+    const uniqueOrderId = `INV-${invoice.invoice_number}-${Math.floor(Date.now() / 1000)}`;
+
     const paymentData = {
       invoice_number: invoice.invoice_number,
+      order_id: uniqueOrderId, // Custom unique ref for Gateway
       customer_name: customer_details.name || invoice.customer_name,
       customer_email: customer_details.email || invoice.customer_email,
       customer_phone: customer_details.phone || invoice.customer_phone,
@@ -269,7 +323,7 @@ router.post('/invoices/:id/pay', customerJwtAuth, asyncHandler(async (req, res) 
     const netAmount = invoice.total_amount - feeAmount;
 
     const transactionValues = [
-      id,
+      invoiceId,
       gateway,
       paymentResult.token || paymentResult.gateway_transaction_id,
       paymentResult.order_id,
@@ -304,7 +358,7 @@ router.post('/invoices/:id/pay', customerJwtAuth, asyncHandler(async (req, res) 
       'pending',
       paymentResult.order_id,
       new Date(Date.now() + 24 * 60 * 60 * 1000),
-      id
+      invoiceId
     ]);
 
     logger.info(`✅ Customer payment created: ${transactionId} for invoice ${invoice.invoice_number}`);
@@ -313,7 +367,7 @@ router.post('/invoices/:id/pay', customerJwtAuth, asyncHandler(async (req, res) 
       success: true,
       data: {
         transaction_id: transaction.id,
-        invoice_id: id,
+        invoice_id: invoiceId,
         invoice_number: invoice.invoice_number,
         amount: invoice.total_amount,
         fee_amount: feeAmount,

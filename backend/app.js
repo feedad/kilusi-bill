@@ -223,7 +223,10 @@ const defaultOrigins = [
     'http://127.0.0.1',
     'http://127.0.0.1:3000',
     'http://127.0.0.1:3001',
-    'http://127.0.0.1:8080'
+    'http://127.0.0.1:8080',
+    'https://portal.kilusi.id',
+    'https://www.portal.kilusi.id',
+    'https://api.kilusi.id'
 ];
 
 // Combine default local origins with environment-specified origins
@@ -244,9 +247,12 @@ const corsOptions = {
         if (!origin) return callback(null, true);
 
         // Check against static whitelist
-        if (allowedOrigins.indexOf(origin) !== -1) {
+        if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
             return callback(null, true);
         }
+        // Temporary Debug: Allow all to find the missing one
+        logger.warn(`[CORS] Allowing unknown origin: ${origin}`);
+        return callback(null, true);
 
         // Check against Regex for Local Network IPs (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
         const isLocalNetwork = /^(http|https):\/\/(192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})(:\d+)?$/.test(origin);

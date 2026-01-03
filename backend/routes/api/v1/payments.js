@@ -41,52 +41,110 @@ webhookRouter.post('/:gateway', asyncHandler(async (req, res) => {
     ]);
 
     // Process webhook with payment gateway
-    const webhookResult = await paymentGateway.handleWebhook(req.body, gateway);
+    const webhookResult = await paymentGateway.handleWebhook(req.body, req.headers, gateway);
 
-    if (webhookResult && webhookResult.order_id) {
-      const invoiceNumber = webhookResult.order_id.replace('INV-', '');
-
-      // Update invoice status
-      await query(`
-        UPDATE invoices SET
-          status = $1,
-          payment_method = $2,
-          payment_gateway = $3,
-          payment_gateway_status = $4,
-          payment_gateway_response = $5,
-          payment_date = $6,
-          updated_at = NOW()
-        WHERE invoice_number = $7
-      `, [
-        webhookResult.status === 'success' ? 'paid' : webhookResult.status,
-        webhookResult.payment_method || 'tripay',
-        gateway,
-        webhookResult.status,
-        JSON.stringify(webhookResult),
-        webhookResult.status === 'success' ? new Date() : null,
-        `INV/${invoiceNumber}`
-      ]);
-
-      // Update payment transaction
-      await query(`
-        UPDATE payment_transactions SET
-          status = $1,
-          completed_at = $2,
-          gateway_response = $3,
-          updated_at = NOW()
-        WHERE gateway_reference = $4
-      `, [
-        webhookResult.status,
-        webhookResult.status === 'success' ? new Date() : null,
-        JSON.stringify(webhookResult),
-        webhookResult.reference
-      ]);
-
+    if (webhookResult && webhookResult.reference) { // Changed from order_id to reference for consistency
       if (webhookResult.status === 'success') {
-        logger.info(`💰 Invoice ${webhookResult.order_id} paid via webhook from ${gateway}`);
+        // Find the invoice to get customer details for the message
+        const invoiceCheck = await query(`
+          SELECT i.invoice_number, c.name as customer_name, i.final_amount as total_amount
+          FROM payment_transactions pt
+          JOIN invoices i ON pt.invoice_id = i.id
+          JOIN customers c ON i.customer_id = c.id
+          WHERE pt.gateway_reference = $1
+        `, [webhookResult.reference]);
 
-        // TODO: Send payment confirmation notification
-        // await sendPaymentNotification(webhookResult.order_id);
+        // Update payment transaction
+        const updateResult = await query(`
+          UPDATE payment_transactions
+          SET status = 'success',
+              completed_at = NOW(),
+              gateway_response = $1,
+              updated_at = NOW()
+          WHERE gateway_reference = $2
+          RETURNING *
+        `, [JSON.stringify(webhookResult), webhookResult.reference]);
+
+        if (updateResult.rows.length === 0) {
+          logger.warn(`Webhook received for unknown or already processed transaction: ${webhookResult.reference}`);
+        } else {
+          const transaction = updateResult.rows[0];
+          const invoiceId = transaction.invoice_id;
+
+          // Update invoice status
+          await query(`
+            UPDATE invoices SET
+              status = 'paid',
+              payment_method = $1,
+              payment_gateway = $2,
+              payment_gateway_status = $3,
+              payment_gateway_response = $4,
+              payment_date = NOW(),
+              updated_at = NOW()
+            WHERE id = $5
+          `, [
+            webhookResult.payment_method || 'tripay',
+            gateway,
+            webhookResult.status,
+            JSON.stringify(webhookResult),
+            invoiceId
+          ]);
+
+          logger.info(`💰 Invoice ${invoiceId} paid via webhook from ${gateway}`);
+
+          // Send Telegram Notification
+          if (invoiceCheck.rows.length > 0) {
+            const inv = invoiceCheck.rows[0];
+            const message = `
+✅ *PEMBAYARAN DITERIMA (${gateway.toUpperCase()})*
+
+*Customer:* ${inv.customer_name}
+*Invoice:* ${inv.invoice_number}
+*Jumlah:* Rp ${parseInt(inv.total_amount).toLocaleString('id-ID')}
+*Status:* LUNAS (Paid)
+
+_Pembayaran otomatis via Payment Gateway._
+`;
+            await telegramService.sendMessage(message);
+          }
+        }
+      } else if (webhookResult.status === 'failed' || webhookResult.status === 'expired') {
+        // Update payment transaction status
+        await query(`
+          UPDATE payment_transactions
+          SET status = $1,
+              gateway_response = $2,
+              updated_at = NOW()
+          WHERE gateway_reference = $3
+        `, [
+          webhookResult.status,
+          JSON.stringify(webhookResult),
+          webhookResult.reference
+        ]);
+
+        // Find invoice ID associated with this transaction
+        const txResult = await query(`
+            SELECT invoice_id FROM payment_transactions 
+            WHERE gateway_reference = $1 LIMIT 1
+          `, [webhookResult.reference]);
+
+        if (txResult.rows.length > 0) {
+          const invoiceId = txResult.rows[0].invoice_id;
+          // Update invoice status
+          await query(`
+              UPDATE invoices SET
+                payment_gateway_status = $1,
+                payment_gateway_response = $2,
+                updated_at = NOW()
+              WHERE id = $3
+            `, [
+            webhookResult.status,
+            JSON.stringify(webhookResult),
+            invoiceId
+          ]);
+
+          logger.info(`Payment failed/expired for invoice ${invoiceId} via ${gateway}`);
+        }
       }
     }
 
@@ -95,7 +153,6 @@ webhookRouter.post('/:gateway', asyncHandler(async (req, res) => {
       success: true,
       message: 'Webhook processed successfully'
     });
-
   } catch (error) {
     logger.error('Error processing webhook:', error);
 
@@ -116,13 +173,13 @@ const generateTransactionId = () => {
 const validateInvoice = async (invoiceId, customerId = null) => {
   const invoiceQuery = `
     SELECT i.*, c.name as customer_name, c.email as customer_email, c.phone as customer_phone,
-           p.name as package_name
+          p.name as package_name
     FROM invoices i
     JOIN customers c ON i.customer_id = c.id
     LEFT JOIN packages p ON i.package_id = p.id
     WHERE i.id = $1 AND i.status = 'unpaid'
     ${customerId ? 'AND i.customer_id = $2' : ''}
-  `;
+          `;
 
   const params = customerId ? [invoiceId, customerId] : [invoiceId];
   const result = await query(invoiceQuery, params);
@@ -173,7 +230,7 @@ router.get('/methods', asyncHandler(async (req, res) => {
       const amountNum = parseFloat(amount);
       methods = methods.filter(method => {
         return (!method.minimum_amount || amountNum >= method.minimum_amount) &&
-               (!method.maximum_amount || amountNum <= method.maximum_amount);
+          (!method.maximum_amount || amountNum <= method.maximum_amount);
       });
     }
 
