@@ -1,12 +1,13 @@
 const { logger } = require('./logger');
+const dgram = require('dgram');
+const radius = require('radius');
 
 /**
  * RADIUS Disconnect/CoA (Change of Authorization) Module
  * Handles forcing disconnect of PPPoE users via RADIUS protocol
  *
  * This implementation creates proper RADIUS CoA packets to disconnect users
- * from PPPoE sessions. The disconnect works by sending a CoA-Request to the NAS
- * with appropriate attributes to terminate the user's session.
+ * from PPPoE sessions. The disconnect works by sending a Disconnect-Request (40) to the NAS.
  */
 
 class RadiusDisconnect {
@@ -16,11 +17,12 @@ class RadiusDisconnect {
      * @param {string} params.username - Username to disconnect
      * @param {string} params.nasIp - NAS IP address
      * @param {string} params.nasSecret - NAS secret
-     * @param {string} params.sessionId - Session ID (optional)
+     * @param {string} params.sessionId - Session ID (optional but recommended)
      * @param {string} params.framedIp - Framed IP address (optional)
+     * @param {number} params.coaPort - NAS CoA Port (default 3799)
      */
     async disconnectUser(params) {
-        const { username, nasIp, nasSecret, sessionId, framedIp } = params;
+        const { username, nasIp, nasSecret, sessionId, framedIp, coaPort = 3799 } = params;
 
         if (!username || !nasIp || !nasSecret) {
             throw new Error('Username, NAS IP, and NAS Secret are required');
@@ -28,43 +30,95 @@ class RadiusDisconnect {
 
         return new Promise((resolve, reject) => {
             try {
-                // For production use, this would implement proper RADIUS packet creation
-                // with MD5 authentication and proper attribute handling
-                // For now, we'll simulate the disconnect process with logging
+                // Prepare attributes for Disconnect-Request
+                const attributes = [
+                    ['User-Name', username]
+                ];
 
-                logger.info(`🔄 Sending RADIUS CoA disconnect request for user ${username}`);
-                logger.info(`📡 Target NAS: ${nasIp}`);
-                logger.info(`🆔 Session ID: ${sessionId || 'Not specified'}`);
-                logger.info(`🌐 Framed IP: ${framedIp || 'Not specified'}`);
+                if (sessionId) {
+                    attributes.push(['Acct-Session-Id', sessionId]);
+                }
 
-                // Simulate the RADIUS CoA process
-                // In production, this would:
-                // 1. Create proper RADIUS CoA packet with MD5 authenticator
-                // 2. Include User-Name attribute (1)
-                // 3. Include Acct-Session-Id attribute (44) if available
-                // 4. Include Framed-IP-Address attribute (8) if available
-                // 5. Send UDP packet to NAS on port 3799 (CoA) or 1700 (Disconnect)
-                // 6. Wait for response (CoA-ACK or CoA-NAK)
-                // 7. Parse response and return result
+                if (framedIp) {
+                    attributes.push(['Framed-IP-Address', framedIp]);
+                }
 
-                // Simulate processing time
-                setTimeout(() => {
-                    // Simulate successful disconnect
-                    const success = Math.random() > 0.1; // 90% success rate for simulation
+                // Create RADIUS packet
+                const packet = radius.encode({
+                    code: 'Disconnect-Request',
+                    secret: nasSecret,
+                    identifier: Math.floor(Math.random() * 256),
+                    attributes: attributes
+                });
 
-                    logger.info(`✅ RADIUS CoA disconnect ${success ? 'SUCCESS' : 'FAILED'} for user ${username}`);
+                logger.info(`🔄 Sending RADIUS Disconnect-Request for user ${username} to ${nasIp}:${coaPort}`);
 
+                const client = dgram.createSocket('udp4');
+
+                // Set timeout for response
+                const timeout = setTimeout(() => {
+                    client.close();
+                    logger.warn(`⚠️  RADIUS Disconnect timeout for ${username} (No response from NAS)`);
                     resolve({
-                        success,
-                        message: success
-                            ? `User ${username} disconnected successfully via RADIUS CoA`
-                            : `Failed to disconnect user ${username} - NAS may not support CoA`,
-                        username,
-                        nasIp,
-                        sessionId,
-                        timestamp: new Date().toISOString()
+                        success: false,
+                        message: `Timeout: No response from NAS ${nasIp}`,
+                        username
                     });
-                }, 1500); // Simulate network latency
+                }, 5000);
+
+                client.on('message', (msg, rinfo) => {
+                    clearTimeout(timeout);
+                    client.close();
+
+                    try {
+                        const response = radius.decode({ packet: msg, secret: nasSecret });
+
+                        if (response.code === 'Disconnect-ACK') {
+                            logger.info(`✅ RADIUS Disconnect SUCCESS for user ${username}`);
+                            resolve({
+                                success: true,
+                                message: `User ${username} disconnected successfully`,
+                                username,
+                                coaRes: response
+                            });
+                        } else if (response.code === 'Disconnect-NAK') {
+                            logger.warn(`❌ RADIUS Disconnect NAK for user ${username}: ${JSON.stringify(response.attributes)}`);
+                            resolve({
+                                success: false,
+                                message: `NAS rejected disconnect request (NAK)`,
+                                username,
+                                coaRes: response
+                            });
+                        } else {
+                            logger.warn(`❓ Unknown RADIUS response code: ${response.code}`);
+                            resolve({
+                                success: false,
+                                message: `Unknown response: ${response.code}`,
+                                username
+                            });
+                        }
+                    } catch (err) {
+                        logger.error(`❌ Error decoding RADIUS response: ${err.message}`);
+                        resolve({ success: false, message: `Decode error: ${err.message}` });
+                    }
+                });
+
+                client.on('error', (err) => {
+                    clearTimeout(timeout);
+                    client.close();
+                    logger.error(`❌ UDP Socket error: ${err.message}`);
+                    resolve({ success: false, message: `Socket error: ${err.message}` });
+                });
+
+                // Send packet
+                client.send(packet, 0, packet.length, coaPort, nasIp, (err) => {
+                    if (err) {
+                        clearTimeout(timeout);
+                        client.close();
+                        logger.error(`❌ Failed to send UDP packet: ${err.message}`);
+                        resolve({ success: false, message: `Send error: ${err.message}` });
+                    }
+                });
 
             } catch (error) {
                 logger.error(`❌ Error in RADIUS disconnect process: ${error.message}`);
@@ -78,12 +132,6 @@ class RadiusDisconnect {
      * @param {Object} params - Disconnect parameters
      */
     async disconnectViaMikrotik(params) {
-        const { username, nasIp } = params;
-
-        logger.info(`🔧 Attempting Mikrotik API disconnect for ${username} on ${nasIp}`);
-
-        // This would implement Mikrotik API disconnect if available
-        // For now, fallback to RADIUS CoA
         return this.disconnectUser(params);
     }
 
@@ -93,18 +141,6 @@ class RadiusDisconnect {
     close() {
         logger.info('🔌 RADIUS Disconnect module closed');
     }
-}
-
-/**
- * Helper function to create MD5 hash for RADIUS authenticator
- * @param {string} data - Data to hash
- * @param {string} secret - RADIUS secret
- * @returns {Buffer} MD5 hash
- */
-function createRadiusAuthenticator(data, secret) {
-    const crypto = require('crypto');
-    const combined = Buffer.concat([data, Buffer.from(secret)]);
-    return crypto.createHash('md5').update(combined).digest();
 }
 
 module.exports = new RadiusDisconnect();

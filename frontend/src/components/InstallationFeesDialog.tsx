@@ -50,7 +50,7 @@ export default function InstallationFeesDialog({ open, onOpenChange }: Installat
   const [calculation, setCalculation] = useState<FeeCalculation | null>(null)
   const [selectedBillingType, setSelectedBillingType] = useState<'prepaid' | 'postpaid'>('prepaid')
   const [selectedPackage, setSelectedPackage] = useState<string>('')
-  const [packages, setPackages] = useState<{id: string, name: string}[]>([])
+  const [packages, setPackages] = useState<{ id: string, name: string }[]>([])
   const [formData, setFormData] = useState({
     billing_type: 'prepaid' as 'prepaid' | 'postpaid',
     package_id: '',
@@ -153,7 +153,7 @@ export default function InstallationFeesDialog({ open, onOpenChange }: Installat
       const requestData = {
         billing_type: formData.billing_type,
         package_id: formData.package_id || null,
-        fee_amount: parseFloat(formData.fee_amount),
+        fee_amount: formData.fee_amount ? parseFloat(formData.fee_amount) : 0,
         description: formData.description || null,
         is_active: formData.is_active
       }
@@ -191,7 +191,7 @@ export default function InstallationFeesDialog({ open, onOpenChange }: Installat
       const requestData = {
         billing_type: formData.billing_type,
         package_id: formData.package_id || null,
-        fee_amount: parseFloat(formData.fee_amount),
+        fee_amount: formData.fee_amount ? parseFloat(formData.fee_amount) : 0,
         description: formData.description || null,
         is_active: formData.is_active
       }
@@ -299,7 +299,7 @@ export default function InstallationFeesDialog({ open, onOpenChange }: Installat
     return type === 'prepaid' ? 'default' : 'secondary'
   }
 
-  
+
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
@@ -311,17 +311,17 @@ export default function InstallationFeesDialog({ open, onOpenChange }: Installat
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex justify-between items-center mb-4">
-            <div className="flex space-x-2">
-              <Button onClick={() => setShowCreateDialog(true)}>
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4 sm:gap-0">
+            <div className="flex flex-col sm:flex-row w-full sm:w-auto space-y-2 sm:space-y-0 sm:space-x-2">
+              <Button onClick={() => setShowCreateDialog(true)} className="w-full sm:w-auto">
                 <Plus className="h-4 w-4 mr-2" />
-                Tambah Biaya Instalasi
+                Tambah
               </Button>
-              <Button onClick={() => setShowCalculateDialog(true)} variant="outline" size="sm">
+              <Button onClick={() => setShowCalculateDialog(true)} variant="outline" size="sm" className="w-full sm:w-auto">
                 <Calculator className="h-4 w-4 mr-2" />
                 Test Kalkulasi
               </Button>
-              <Button onClick={fetchFees} variant="outline" size="sm">
+              <Button onClick={fetchFees} variant="outline" size="sm" className="w-full sm:w-auto">
                 <RefreshCw className="h-4 w-4 mr-2" />
                 Refresh
               </Button>
@@ -352,7 +352,7 @@ export default function InstallationFeesDialog({ open, onOpenChange }: Installat
                       <p className="text-sm text-muted-foreground mb-2">
                         {fee.description || 'Tidak ada deskripsi'}
                       </p>
-                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-sm">
                         <div>
                           <span className="font-medium flex items-center">
                             <DollarSign className="h-4 w-4 mr-1" />
@@ -409,32 +409,39 @@ export default function InstallationFeesDialog({ open, onOpenChange }: Installat
           <div className="space-y-4 max-h-96 overflow-y-auto">
             <div>
               <Label htmlFor="edit-billing-type">Tipe Billing</Label>
-              <select
+              <Select
                 value={formData.billing_type}
-                onChange={(e) => setFormData({...formData, billing_type: e.target.value as 'prepaid' | 'postpaid'})}
+                onValueChange={(value) => setFormData({ ...formData, billing_type: value as 'prepaid' | 'postpaid' })}
                 disabled={!!editingFee}
-                className="w-full p-2 border rounded-md"
               >
-                <option value="prepaid">Prabayar</option>
-                <option value="postpaid">Pascabayar</option>
-              </select>
+                <SelectTrigger id="edit-billing-type">
+                  <SelectValue placeholder="Pilih Tipe Billing" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="prepaid">Prabayar</SelectItem>
+                  <SelectItem value="postpaid">Pascabayar</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div>
               <Label htmlFor="edit-package">Paket (opsional)</Label>
-              <select
-                id="edit-package"
-                value={formData.package_id}
-                onChange={(e) => setFormData({...formData, package_id: e.target.value})}
+              <Select
+                value={formData.package_id || 'all'}
+                onValueChange={(value) => setFormData({ ...formData, package_id: value === 'all' ? '' : value })}
                 disabled={packagesLoading}
-                className="w-full p-2 border rounded-md"
               >
-                <option value="">Semua Paket (Default)</option>
-                {packages.map((pkg) => (
-                  <option key={pkg.id} value={pkg.id}>
-                    {pkg.name}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger id="edit-package">
+                  <SelectValue placeholder="Semua Paket (Default)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Semua Paket (Default)</SelectItem>
+                  {packages.map((pkg) => (
+                    <SelectItem key={pkg.id} value={pkg.id}>
+                      {pkg.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div>
               <Label htmlFor="edit-fee-amount">Biaya Instalasi (Rp)</Label>
@@ -442,7 +449,7 @@ export default function InstallationFeesDialog({ open, onOpenChange }: Installat
                 id="edit-fee-amount"
                 type="number"
                 value={formData.fee_amount}
-                onChange={(e) => setFormData({...formData, fee_amount: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, fee_amount: e.target.value })}
                 placeholder="Masukkan biaya instalasi"
                 min="0"
                 step="1000"
@@ -453,7 +460,7 @@ export default function InstallationFeesDialog({ open, onOpenChange }: Installat
               <Textarea
                 id="edit-description"
                 value={formData.description}
-                onChange={(e) => setFormData({...formData, description: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 placeholder="Masukkan deskripsi biaya instalasi"
                 rows={3}
               />
@@ -462,7 +469,7 @@ export default function InstallationFeesDialog({ open, onOpenChange }: Installat
               <Switch
                 id="edit-active"
                 checked={formData.is_active}
-                onCheckedChange={(checked) => setFormData({...formData, is_active: checked})}
+                onCheckedChange={(checked) => setFormData({ ...formData, is_active: checked })}
               />
               <Label htmlFor="edit-active">Aktif</Label>
             </div>
@@ -504,32 +511,38 @@ export default function InstallationFeesDialog({ open, onOpenChange }: Installat
           <div className="space-y-4">
             <div>
               <Label htmlFor="calc-billing-type">Tipe Billing</Label>
-              <select
-                id="calc-billing-type"
+              <Select
                 value={selectedBillingType}
-                onChange={(e) => setSelectedBillingType(e.target.value as 'prepaid' | 'postpaid')}
-                className="w-full p-2 border rounded-md"
+                onValueChange={(value) => setSelectedBillingType(value as 'prepaid' | 'postpaid')}
               >
-                <option value="prepaid">Prabayar</option>
-                <option value="postpaid">Pascabayar</option>
-              </select>
+                <SelectTrigger id="calc-billing-type">
+                  <SelectValue placeholder="Pilih Tipe Billing" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="prepaid">Prabayar</SelectItem>
+                  <SelectItem value="postpaid">Pascabayar</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div>
               <Label htmlFor="calc-package">Paket (opsional)</Label>
-              <select
-                id="calc-package"
-                value={selectedPackage}
-                onChange={(e) => setSelectedPackage(e.target.value)}
+              <Select
+                value={selectedPackage || 'all'}
+                onValueChange={(value) => setSelectedPackage(value === 'all' ? '' : value)}
                 disabled={packagesLoading}
-                className="w-full p-2 border rounded-md"
               >
-                <option value="">Default</option>
-                {packages.map((pkg) => (
-                  <option key={pkg.id} value={pkg.id}>
-                    {pkg.name}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger id="calc-package">
+                  <SelectValue placeholder="Default" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Default</SelectItem>
+                  {packages.map((pkg) => (
+                    <SelectItem key={pkg.id} value={pkg.id}>
+                      {pkg.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <Button
@@ -607,32 +620,38 @@ export default function InstallationFeesDialog({ open, onOpenChange }: Installat
           <div className="space-y-4 max-h-96 overflow-y-auto">
             <div>
               <Label htmlFor="create-billing-type">Tipe Billing</Label>
-              <select
-                id="create-billing-type"
+              <Select
                 value={formData.billing_type}
-                onChange={(e) => setFormData({...formData, billing_type: e.target.value as 'prepaid' | 'postpaid'})}
-                className="w-full p-2 border rounded-md"
+                onValueChange={(value) => setFormData({ ...formData, billing_type: value as 'prepaid' | 'postpaid' })}
               >
-                <option value="prepaid">Prabayar</option>
-                <option value="postpaid">Pascabayar</option>
-              </select>
+                <SelectTrigger id="create-billing-type">
+                  <SelectValue placeholder="Pilih Tipe Billing" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="prepaid">Prabayar</SelectItem>
+                  <SelectItem value="postpaid">Pascabayar</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div>
               <Label htmlFor="create-package">Paket (opsional)</Label>
-              <select
-                id="create-package"
-                value={formData.package_id}
-                onChange={(e) => setFormData({...formData, package_id: e.target.value})}
+              <Select
+                value={formData.package_id || 'all'}
+                onValueChange={(value) => setFormData({ ...formData, package_id: value === 'all' ? '' : value })}
                 disabled={packagesLoading}
-                className="w-full p-2 border rounded-md"
               >
-                <option value="">Semua Paket (Default)</option>
-                {packages.map((pkg) => (
-                  <option key={pkg.id} value={pkg.id}>
-                    {pkg.name}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger id="create-package">
+                  <SelectValue placeholder="Semua Paket (Default)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Semua Paket (Default)</SelectItem>
+                  {packages.map((pkg) => (
+                    <SelectItem key={pkg.id} value={pkg.id}>
+                      {pkg.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div>
               <Label htmlFor="create-fee-amount">Biaya Instalasi (Rp)</Label>
@@ -640,7 +659,7 @@ export default function InstallationFeesDialog({ open, onOpenChange }: Installat
                 id="create-fee-amount"
                 type="number"
                 value={formData.fee_amount}
-                onChange={(e) => setFormData({...formData, fee_amount: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, fee_amount: e.target.value })}
                 placeholder="Masukkan biaya instalasi"
                 min="0"
                 step="1000"
@@ -651,7 +670,7 @@ export default function InstallationFeesDialog({ open, onOpenChange }: Installat
               <Textarea
                 id="create-description"
                 value={formData.description}
-                onChange={(e) => setFormData({...formData, description: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 placeholder="Masukkan deskripsi biaya instalasi"
                 rows={3}
               />
@@ -660,7 +679,7 @@ export default function InstallationFeesDialog({ open, onOpenChange }: Installat
               <Switch
                 id="create-active"
                 checked={formData.is_active}
-                onCheckedChange={(checked) => setFormData({...formData, is_active: checked})}
+                onCheckedChange={(checked) => setFormData({ ...formData, is_active: checked })}
               />
               <Label htmlFor="create-active">Aktif</Label>
             </div>

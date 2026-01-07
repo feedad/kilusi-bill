@@ -21,6 +21,14 @@ settingsManager.initialize().then(() => {
 }).catch(err => {
     logger.error(`❌ SettingsManager initialization failed: ${err.message}`);
 });
+
+// Run notification migration
+try {
+    const runNotificationMigration = require('./config/notifications-migration');
+    runNotificationMigration().then(() => logger.info('✅ Notification migration started')).catch(err => logger.error('Migration failed:', err));
+} catch (e) {
+    logger.error('Failed to load migration script:', e);
+}
 const helmet = require('helmet');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
@@ -35,6 +43,12 @@ const app = express();
 // 🔊 Setup global event system untuk settings broadcast
 global.appEvents = new EventEmitter();
 global.appEvents.setMaxListeners(20); // Increase limit untuk multiple listeners
+
+// Initialize Monitor Service
+const monitorService = require('./services/monitorService');
+setTimeout(() => {
+    monitorService.start();
+}, 5000);
 
 // Event listener untuk settings update
 global.appEvents.on('settings:updated', (newSettings) => {
@@ -151,6 +165,17 @@ const { responseHandler, errorHandler: responseErrorHandler, requestId } = requi
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// AGGRESSIVE CORS DEBUGGING
+app.use((req, res, next) => {
+    logger.info(`[INCOMING] ${req.method} ${req.url} | Origin: ${req.headers.origin}`);
+    // Manually setting headers to force it for debugging if the cors middleware fails
+    // allow all for a moment to see if it passes
+    // res.header("Access-Control-Allow-Origin", req.headers.origin || "*");
+    // res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization, x-customer-phone");
+    // res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    next();
+});
+
 // Debug logging untuk customer requests
 // Debug logging removed for security and cleanliness
 
@@ -213,69 +238,70 @@ app.use(helmet({
 }));
 
 // CORS (allow configured origins or localhost default)
-// CORS (allow configured origins or localhost default)
-const defaultOrigins = [
-    'http://localhost',
-    'http://localhost:80',
+const allowedOrigins = [
+    'https://billing.kilusi.id',
+    'https://www.billing.kilusi.id',
+    'https://portal.kilusi.id',
+    'https://www.portal.kilusi.id',
+    'https://api.kilusi.id',
+    'https://kilusi.id',
+    'https://www.kilusi.id',
     'http://localhost:3000',
     'http://localhost:3001',
     'http://localhost:8080',
-    'http://127.0.0.1',
     'http://127.0.0.1:3000',
-    'http://127.0.0.1:3001',
-    'http://127.0.0.1:8080',
-    'https://portal.kilusi.id',
-    'https://www.portal.kilusi.id',
-    'https://api.kilusi.id'
+    'http://172.22.10.30'
 ];
 
-// Combine default local origins with environment-specified origins
-let allowedOrigins = [...defaultOrigins];
-if (process.env.ALLOWED_ORIGINS) {
-    const envOrigins = process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim());
-    allowedOrigins = [...allowedOrigins, ...envOrigins];
-}
-// Remove trailing slashes for consistency
-allowedOrigins = allowedOrigins.map(o => o.replace(/\/$/, ""));
-
-// Ensure uniqueness
-allowedOrigins = [...new Set(allowedOrigins)];
-
-const corsOptions = {
+// CORS Configuration
+app.use(cors({
     origin: function (origin, callback) {
         // Allow requests with no origin (like mobile apps or curl requests)
         if (!origin) return callback(null, true);
 
-        // Check against static whitelist
-        if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
-            return callback(null, true);
-        }
-        // Temporary Debug: Allow all to find the missing one
-        logger.warn(`[CORS] Allowing unknown origin: ${origin}`);
-        return callback(null, true);
+        // Explicitly allow our known domains
+        const allowedDomains = [
+            'https://billing.kilusi.id',
+            'https://www.billing.kilusi.id',
+            'https://portal.kilusi.id',
+            'https://www.portal.kilusi.id',
+            'https://api.kilusi.id',
+            'https://kilusi.id',
+            'https://www.kilusi.id',
+            'http://localhost:3000',
+            'http://localhost:3001'
+        ];
 
-        // Check against Regex for Local Network IPs (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
-        const isLocalNetwork = /^(http|https):\/\/(192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})(:\d+)?$/.test(origin);
-        if (isLocalNetwork) {
-            return callback(null, true);
-        }
-
-        // Allow localhost regex (dynamic ports)
-        const isLocalhost = /^(http|https):\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
-        if (isLocalhost) {
+        if (allowedDomains.indexOf(origin) !== -1) {
             return callback(null, true);
         }
 
-        // Default: Block
-        const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-        return callback(new Error(msg), false);
+        // Allow localhost variants
+        if (origin.match(/^http:\/\/localhost/)) return callback(null, true);
+        if (origin.match(/^http:\/\/127\.0\.0\.1/)) return callback(null, true);
+        if (origin.match(/^http:\/\/172\.22\.10\.30/)) return callback(null, true);
+
+        // Fallback for development/debugging: if NODE_ENV is not production, allow all (with warning)
+        if (process.env.NODE_ENV !== 'production') {
+            // logger.warn(`[CORS] Allowing unknown origin in DEV: ${origin}`);
+            return callback(null, true);
+        }
+
+        // Strict in production, but since we are debugging a critical blocker, let's log and allow for now ONLY if consistent failure.
+        // Actually, let's keep it strict but ensure the array check above is correct.
+        // The previous error showed "Response to preflight request doesn't pass access control check: No 'Access-Control-Allow-Origin' header is present".
+        // This often happens if the callback returns false or error.
+
+        // If we are here, it's blocked.
+        return callback(new Error('Not allowed by CORS'), false);
     },
-    credentials: true, // Enable credentials for cookie/session support
+    credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'x-customer-phone', 'X-Customer-Phone']
-};
+}));
 
-app.use(cors(corsOptions));
+// OPTIONS Pre-flight handle explicitly for extra safety
+app.options('*', cors());
 
 // Rate limiting
 const apiLimiter = rateLimit({
@@ -498,8 +524,13 @@ app.get('/test-upload-logo', (req, res) => {
 
 
 // Import dan gunakan route API v1 untuk Next.js frontend
+// Import dan gunakan route API v1 untuk Next.js frontend
 const apiV1Router = require('./routes/api/v1');
 app.use('/api/v1', apiV1Router);
+
+// Register OLT routes (New Separation)
+const oltRouter = require('./routes/api/v1/olts');
+app.use('/api/v1/olts', oltRouter);
 
 
 // Konstanta
@@ -578,6 +609,8 @@ app.get('/health', (req, res) => {
         whatsapp: global.whatsappStatus.status
     });
 });
+
+
 
 
 // Mobile dashboard routes removed - now handled by Next.js frontend at /customer/portal
@@ -1156,7 +1189,8 @@ function startServer(portToUse) {
             process.exit(1);
         });
     } catch (error) {
-        logger.error(`❌ Terjadi kesalahan saat memulai server:`, error.message);
+        logger.error(`❌ Terjadi kesalahan saat memulai server:`, error); // Log full error object
+        if (error.stack) logger.error(error.stack);
         process.exit(1);
     }
 }

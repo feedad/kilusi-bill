@@ -4,9 +4,10 @@ import './globals.css'
 import 'leaflet/dist/leaflet.css'
 import { ThemeProvider } from '@/contexts/ThemeContext'
 import { AuthProvider } from '@/components/providers/AuthProvider'
+import { QueryProvider } from '@/components/providers/QueryProvider'
 import { Toaster } from 'react-hot-toast'
 
-const dmSans = DM_Sans({ 
+const dmSans = DM_Sans({
   subsets: ['latin'],
   variable: '--font-dm-sans',
   display: 'swap',
@@ -37,35 +38,37 @@ export default function RootLayout({
     <html lang="id" suppressHydrationWarning>
       <body className={dmSans.className}>
         <ThemeProvider>
-          <AuthProvider>
-            <div id="root">
-              {children}
-            </div>
-            <div id="modal-root" />
-            <Toaster
-              position="top-right"
-              toastOptions={{
-                duration: 4000,
-                style: {
-                  background: 'hsl(var(--background))',
-                  color: 'hsl(var(--foreground))',
-                  border: '1px solid hsl(var(--border))',
-                },
-                success: {
-                  iconTheme: {
-                    primary: 'hsl(142, 76%, 36%)',
-                    secondary: 'hsl(var(--background))',
+          <QueryProvider>
+            <AuthProvider>
+              <div id="root">
+                {children}
+              </div>
+              <div id="modal-root" />
+              <Toaster
+                position="top-right"
+                toastOptions={{
+                  duration: 4000,
+                  style: {
+                    background: 'hsl(var(--background))',
+                    color: 'hsl(var(--foreground))',
+                    border: '1px solid hsl(var(--border))',
                   },
-                },
-                error: {
-                  iconTheme: {
-                    primary: 'hsl(0, 84%, 60%)',
-                    secondary: 'hsl(var(--background))',
+                  success: {
+                    iconTheme: {
+                      primary: 'hsl(142, 76%, 36%)',
+                      secondary: 'hsl(var(--background))',
+                    },
                   },
-                },
-              }}
-            />
-          </AuthProvider>
+                  error: {
+                    iconTheme: {
+                      primary: 'hsl(0, 84%, 60%)',
+                      secondary: 'hsl(var(--background))',
+                    },
+                  },
+                }}
+              />
+            </AuthProvider>
+          </QueryProvider>
         </ThemeProvider>
       </body>
     </html>

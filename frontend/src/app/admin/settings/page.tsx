@@ -41,6 +41,10 @@ interface SystemSettings {
     website: string
     logo: string
     supportContacts: SupportContact[]
+    operatingHours?: {
+      weekday: string
+      weekend: string
+    }
   }
   network: {
     mikrotik: {
@@ -67,6 +71,10 @@ interface SystemSettings {
       enabled: boolean
       loginPage: string
       welcomePage: string
+    }
+    main_traffic?: {
+      router_id: string
+      interface_name: string
     }
   }
   notifications: {
@@ -143,7 +151,12 @@ export default function SettingsPage() {
       email: '',
       website: '',
       logo: '',
+      logo: '',
       supportContacts: [],
+      operatingHours: {
+        weekday: '',
+        weekend: ''
+      }
     },
     network: {
       mikrotik: {
@@ -166,6 +179,10 @@ export default function SettingsPage() {
         loginPage: '',
         welcomePage: '',
       },
+      main_traffic: {
+        router_id: '',
+        interface_name: ''
+      }
     },
     notifications: {
       email: {
@@ -263,12 +280,13 @@ export default function SettingsPage() {
             ...prev.notifications,
             ...fetchedSettings.notifications,
             email: { ...prev.notifications.email, ...fetchedSettings.notifications?.email },
-            email: { ...prev.notifications.email, ...fetchedSettings.notifications?.email },
             sms: { ...prev.notifications.sms, ...fetchedSettings.notifications?.sms },
             telegram: { ...prev.notifications.telegram, ...fetchedSettings.notifications?.telegram },
           },
           security: { ...prev.security, ...fetchedSettings.security },
           backup: { ...prev.backup, ...fetchedSettings.backup },
+          monitoring: { ...prev.monitoring, ...fetchedSettings.monitoring },
+          branding: { ...prev.branding, ...fetchedSettings.branding },
         }))
       }
     } catch (error) {
@@ -337,69 +355,52 @@ export default function SettingsPage() {
               </CardHeader>
               <CardContent className="space-y-6">
                 {/* Site Title Type */}
+                {/* Site Title Type - Now controlled via checkbox for display preference, but inputs are separate */}
                 <div className="space-y-4">
-                  <label className="text-sm font-medium">Tampilan Header</label>
-                  <div className="flex gap-4">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="titleType"
-                        value="text"
-                        checked={settings.branding.titleType === 'text'}
-                        onChange={() => {
-                          setSettings({
-                            ...settings,
-                            branding: { ...settings.branding, titleType: 'text' }
-                          })
-                          setHasChanges(true)
-                        }}
-                        className="text-primary"
-                      />
-                      <span className="text-sm">Text</span>
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="titleType"
-                        value="logo"
-                        checked={settings.branding.titleType === 'logo'}
-                        onChange={() => {
-                          setSettings({
-                            ...settings,
-                            branding: { ...settings.branding, titleType: 'logo' }
-                          })
-                          setHasChanges(true)
-                        }}
-                        className="text-primary"
-                      />
-                      <span className="text-sm">Logo/Gambar</span>
-                    </label>
-                  </div>
-                </div>
-
-                {/* Site Title - Text */}
-                {settings.branding.titleType === 'text' && (
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Judul Situs</label>
-                    <Input
-                      value={settings.branding.siteTitle}
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      checked={settings.branding.titleType === 'logo'}
                       onChange={(e) => {
                         setSettings({
                           ...settings,
-                          branding: { ...settings.branding, siteTitle: e.target.value }
+                          branding: { ...settings.branding, titleType: e.target.checked ? 'logo' : 'text' }
                         })
                         setHasChanges(true)
                       }}
-                      placeholder="Kilusi Bill"
+                      id="useLogo"
                     />
-                    <p className="text-xs text-muted-foreground">
-                      Text yang akan ditampilkan di header dan browser tab
-                    </p>
+                    <label htmlFor="useLogo" className="text-sm font-medium cursor-pointer">
+                      Gunakan Logo di Header Sidebar
+                    </label>
                   </div>
-                )}
+                  <p className="text-xs text-muted-foreground">
+                    Jika tidak dicentang, teks judul akan ditampilkan. Judul situs tetap digunakan untuk tab browser.
+                  </p>
+                </div>
 
-                {/* Site Logo - Upload */}
-                {settings.branding.titleType === 'logo' && (
+                {/* Site Title - Always Visible */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Judul Situs / Nama Aplikasi</label>
+                  <Input
+                    value={settings.branding.siteTitle}
+                    onChange={(e) => {
+                      setSettings({
+                        ...settings,
+                        branding: { ...settings.branding, siteTitle: e.target.value }
+                      })
+                      setHasChanges(true)
+                    }}
+                    placeholder="Kilusi Bill"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Judul ini akan ditampilkan di tab browser dan di header jika mode logo tidak aktif.
+                  </p>
+                </div>
+
+                {/* Site Logo - Always Visible */}
+                <div className="space-y-3 pt-4 border-t">
+
                   <div className="space-y-3">
                     <label className="text-sm font-medium flex items-center gap-2">
                       <Upload className="h-4 w-4" />
@@ -446,7 +447,7 @@ export default function SettingsPage() {
                       Rekomendasi: format PNG dengan tinggi 40px dan background transparan
                     </p>
                   </div>
-                )}
+                </div>
 
                 {/* Favicon - Upload */}
                 <div className="space-y-3 pt-4 border-t">
@@ -572,6 +573,50 @@ export default function SettingsPage() {
                   />
                 </div>
 
+                {/* Operating Hours */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium">Jam Operasional (Senin - Jumat)</label>
+                    <Input
+                      value={settings.company.operatingHours?.weekday || ''}
+                      onChange={(e) => {
+                        setSettings({
+                          ...settings,
+                          company: {
+                            ...settings.company,
+                            operatingHours: {
+                              ...settings.company.operatingHours,
+                              weekday: e.target.value
+                            } as any
+                          }
+                        })
+                        setHasChanges(true)
+                      }}
+                      placeholder="08:00 - 22:00 WIB"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Jam Operasional (Sabtu - Minggu / Libur)</label>
+                    <Input
+                      value={settings.company.operatingHours?.weekend || ''}
+                      onChange={(e) => {
+                        setSettings({
+                          ...settings,
+                          company: {
+                            ...settings.company,
+                            operatingHours: {
+                              ...settings.company.operatingHours,
+                              weekend: e.target.value
+                            } as any
+                          }
+                        })
+                        setHasChanges(true)
+                      }}
+                      placeholder="09:00 - 18:00 WIB"
+                    />
+                  </div>
+                </div>
+
                 {/* Support Contacts */}
                 <div className="pt-4 border-t space-y-4">
                   <div className="flex items-center justify-between">
@@ -685,6 +730,9 @@ export default function SettingsPage() {
             </Card>
           </div>
         )
+
+      case 'monitoring':
+        return <MonitoringSettingsTab settings={settings} setSettings={setSettings} setHasChanges={setHasChanges} />
 
       case 'network':
         return (
@@ -1345,118 +1393,7 @@ export default function SettingsPage() {
         )
 
       case 'monitoring':
-        return (
-          <div className="space-y-6">
-            {/* RX Power Monitoring */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Activity className="h-5 w-5" />
-                  Monitoring RX Power (OLT)
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-sm font-medium">Threshold Warning (dBm)</label>
-                    <Input
-                      type="number"
-                      value={settings.monitoring?.rxPowerWarning || -26}
-                      onChange={(e) => {
-                        setSettings({ ...settings, monitoring: { ...settings.monitoring, rxPowerWarning: parseFloat(e.target.value) } })
-                        setHasChanges(true)
-                      }}
-                    />
-                    <p className="text-xs text-muted-foreground mt-1">Contoh: -26</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium">Threshold Critical (dBm)</label>
-                    <Input
-                      type="number"
-                      value={settings.monitoring?.rxPowerCritical || -30}
-                      onChange={(e) => {
-                        setSettings({ ...settings, monitoring: { ...settings.monitoring, rxPowerCritical: parseFloat(e.target.value) } })
-                        setHasChanges(true)
-                      }}
-                    />
-                    <p className="text-xs text-muted-foreground mt-1">Contoh: -30</p>
-                  </div>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    checked={settings.monitoring?.rxPowerNotificationEnable ?? true}
-                    onChange={(e) => {
-                      setSettings({ ...settings, monitoring: { ...settings.monitoring, rxPowerNotificationEnable: e.target.checked } })
-                      setHasChanges(true)
-                    }}
-                  />
-                  <label className="text-sm font-medium">Aktifkan Notifikasi RX Power</label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    checked={settings.monitoring?.rxpowerRecapEnable ?? true}
-                    onChange={(e) => {
-                      setSettings({ ...settings, monitoring: { ...settings.monitoring, rxpowerRecapEnable: e.target.checked } })
-                      setHasChanges(true)
-                    }}
-                  />
-                  <label className="text-sm font-medium">Aktifkan Rekap RX Power</label>
-                </div>
-                {settings.monitoring?.rxpowerRecapEnable && (
-                  <div className="p-4 bg-muted/30 rounded-lg">
-                    <label className="text-sm font-medium">Interval Rekap (jam)</label>
-                    <Input
-                      type="number"
-                      value={settings.monitoring?.rxpowerRecapInterval || 6}
-                      onChange={(e) => {
-                        setSettings({ ...settings, monitoring: { ...settings.monitoring, rxpowerRecapInterval: parseInt(e.target.value) } })
-                        setHasChanges(true)
-                      }}
-                      className="mt-1 max-w-xs"
-                    />
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Offline Monitoring */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Monitoring Pelanggan Offline</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    checked={settings.monitoring?.offlineNotificationEnable ?? true}
-                    onChange={(e) => {
-                      setSettings({ ...settings, monitoring: { ...settings.monitoring, offlineNotificationEnable: e.target.checked } })
-                      setHasChanges(true)
-                    }}
-                  />
-                  <label className="text-sm font-medium">Aktifkan Notifikasi Pelanggan Offline</label>
-                </div>
-                {settings.monitoring?.offlineNotificationEnable && (
-                  <div className="p-4 bg-muted/30 rounded-lg">
-                    <label className="text-sm font-medium">Interval Notifikasi (jam)</label>
-                    <Input
-                      type="number"
-                      value={settings.monitoring?.offlineNotificationInterval || 12}
-                      onChange={(e) => {
-                        setSettings({ ...settings, monitoring: { ...settings.monitoring, offlineNotificationInterval: parseInt(e.target.value) } })
-                        setHasChanges(true)
-                      }}
-                      className="mt-1 max-w-xs"
-                    />
-                    <p className="text-xs text-muted-foreground mt-1">Kirim notifikasi setiap X jam untuk pelanggan offline</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        )
+        return <MonitoringSettingsTab settings={settings} setSettings={setSettings} setHasChanges={setHasChanges} />
 
       default:
         return null
@@ -1514,6 +1451,331 @@ export default function SettingsPage() {
 
       {/* Content */}
       {renderTabContent()}
+    </div>
+  )
+}
+
+function MonitoringSettingsTab({ settings, setSettings, setHasChanges }: any) {
+  const [monitors, setMonitors] = useState<any[]>([])
+  const [loadingMonitors, setLoadingMonitors] = useState(false)
+  const [newMonitor, setNewMonitor] = useState({ name: '', target: '', type: 'icmp', interval: 60 })
+  const [adding, setAdding] = useState(false)
+
+  const [nasList, setNasList] = useState<any[]>([])
+  const [nasInterfaces, setNasInterfaces] = useState<any[]>([])
+  const [loadingInterfaces, setLoadingInterfaces] = useState(false)
+
+  // Fetch Monitors on mount
+  useEffect(() => {
+    fetchMonitors()
+    // Fetch NAS List
+    adminApi.get(`${endpoints.admin.radius}/nas`)
+      .then(res => {
+        if (res.data.success) {
+          // Backend returns { success: true, data: { nas: [...] } }
+          // So the array is in res.data.data.nas
+          const data = res.data.data
+          const list = Array.isArray(data) ? data : (data?.nas || [])
+          setNasList(Array.isArray(list) ? list : [])
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to fetch NAS list", err)
+      })
+  }, [])
+
+  // Fetch interfaces when Router ID changes
+  useEffect(() => {
+    const routerId = settings.network.main_traffic?.router_id
+    if (!routerId) {
+      setNasInterfaces([])
+      return
+    }
+
+    const fetchInterfaces = async () => {
+      setLoadingInterfaces(true)
+      try {
+        const res = await adminApi.get(`${endpoints.admin.radius}/nas/${routerId}/interfaces`)
+        if (res.data.success) {
+          setNasInterfaces(Array.isArray(res.data.data) ? res.data.data : [])
+        }
+      } catch (error) {
+        console.error("Failed to fetch interfaces", error)
+        toast.error("Gagal memuat interface dari NAS")
+      } finally {
+        setLoadingInterfaces(false)
+      }
+    }
+
+    fetchInterfaces()
+  }, [settings.network.main_traffic?.router_id])
+
+  const fetchMonitors = async () => {
+    try {
+      setLoadingMonitors(true)
+      const res = await adminApi.get(endpoints.admin.monitoring.monitors)
+      if (res.data.success) {
+        setMonitors(res.data.data)
+      }
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setLoadingMonitors(false)
+    }
+  }
+
+  const addMonitor = async () => {
+    if (!newMonitor.name || !newMonitor.target) return toast.error('Name & Target required')
+    try {
+      setAdding(true)
+      const res = await adminApi.post(endpoints.admin.monitoring.monitors, newMonitor)
+      if (res.data.success) {
+        toast.success('Monitor Added')
+        fetchMonitors()
+        setNewMonitor({ name: '', target: '', type: 'icmp', interval: 60 })
+      }
+    } catch (e) {
+      toast.error('Failed to add monitor')
+    } finally {
+      setAdding(false)
+    }
+  }
+
+  const deleteMonitor = async (id: number) => {
+    if (!confirm('Area you sure?')) return
+    try {
+      await adminApi.delete(`${endpoints.admin.monitoring.monitors}/${id}`)
+      toast.success('Deleted')
+      fetchMonitors()
+    } catch (e) {
+      toast.error('Failed to delete')
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* 1. Traffic Interface Config */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Activity className="h-5 w-5" />
+            Main Traffic Interface
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="text-sm font-medium">Select Router (NAS)</label>
+              <select
+                className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={settings.network.main_traffic?.router_id || ''}
+                onChange={(e) => {
+                  setSettings({
+                    ...settings,
+                    network: {
+                      ...settings.network,
+                      main_traffic: { ...settings.network.main_traffic, router_id: e.target.value }
+                    }
+                  })
+                  setHasChanges(true)
+                }}
+              >
+                <option value="">-- Select Router --</option>
+                {nasList.map((n: any) => (
+                  <option key={n.id} value={n.id}>{n.shortname} ({n.nasname})</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-sm font-medium">Interface Name</label>
+              {loadingInterfaces ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading interfaces...
+                </div>
+              ) : (
+                <select
+                  className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={settings.network.main_traffic?.interface_name || ''}
+                  onChange={(e) => {
+                    setSettings({
+                      ...settings,
+                      network: {
+                        ...settings.network,
+                        main_traffic: { ...settings.network.main_traffic, interface_name: e.target.value }
+                      }
+                    })
+                    setHasChanges(true)
+                  }}
+                  disabled={!settings.network.main_traffic?.router_id}
+                >
+                  <option value="">-- Select Interface --</option>
+                  {nasInterfaces
+                    .filter(iface => {
+                      // Filter: Physical (6, 117, etc), VLAN (136), Bridge (209), Wireless (71)
+                      // Or name matches common patterns.
+                      const type = Number(iface.type)
+                      const name = (iface.name || '').toLowerCase()
+                      const isPhysical = [6, 136, 209, 71, 117].includes(type) || /(ether|sfp|vlan|wlan|bridge|bond|trunk)/.test(name)
+                      return isPhysical // Show disabled too, maybe user wants to monitor a disabled interface that will be enabled? The "disabled" field is in iface.disabled
+                    })
+                    .map((iface: any) => (
+                      <option key={iface.index} value={iface.name}>
+                        {iface.name} {iface.type === 136 ? '(VLAN)' : ''} {iface.disabled ? '(Disabled)' : ''}
+                      </option>
+                    ))}
+                </select>
+              )}
+              <p className="text-xs text-muted-foreground mt-1">
+                Pilih interface fisik atau VLAN yang akan dimonitor trafiknya.
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 2. Uptime Monitors */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Server className="h-5 w-5" />
+            Uptime Monitors
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Add New */}
+          <div className="flex gap-3 items-end bg-muted/20 p-4 rounded-lg">
+            <div className="flex-1">
+              <label className="text-xs font-medium">Name</label>
+              <Input
+                value={newMonitor.name}
+                onChange={(e) => setNewMonitor({ ...newMonitor, name: e.target.value })}
+                placeholder="Google DNS"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="text-xs font-medium">Target (IP/URL)</label>
+              <Input
+                value={newMonitor.target}
+                onChange={(e) => setNewMonitor({ ...newMonitor, target: e.target.value })}
+                placeholder="8.8.8.8"
+              />
+            </div>
+            <div className="w-24">
+              <label className="text-xs font-medium">Type</label>
+              <select
+                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+                value={newMonitor.type}
+                onChange={(e) => setNewMonitor({ ...newMonitor, type: e.target.value })}
+              >
+                <option value="icmp">Ping</option>
+                <option value="http">HTTP</option>
+              </select>
+            </div>
+            <Button onClick={addMonitor} disabled={adding}>
+              {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Add'}
+            </Button>
+          </div>
+
+          {/* List */}
+          <div className="border rounded-md">
+            <table className="w-full text-sm">
+              <thead className="bg-muted">
+                <tr>
+                  <th className="p-3 text-left">Name</th>
+                  <th className="p-3 text-left">Target</th>
+                  <th className="p-3 text-left">Type</th>
+                  <th className="p-3 text-center">Interval</th>
+                  <th className="p-3 text-center">Status</th>
+                  <th className="p-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loadingMonitors ? (
+                  <tr><td colSpan={6} className="p-4 text-center">Loading...</td></tr>
+                ) : monitors.length === 0 ? (
+                  <tr><td colSpan={6} className="p-4 text-center text-muted-foreground">No monitors configured</td></tr>
+                ) : (
+                  monitors.map((m: any) => (
+                    <tr key={m.id} className="border-t">
+                      <td className="p-3 font-medium">{m.name}</td>
+                      <td className="p-3 font-mono text-xs">{m.target}</td>
+                      <td className="p-3 uppercase">{m.type}</td>
+                      <td className="p-3 text-center">{m.interval}s</td>
+                      <td className="p-3 text-center">
+                        <span className={`px-2 py-1 rounded text-xs ${m.status === 'up' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                          {m.status?.toUpperCase()}
+                        </span>
+                      </td>
+                      <td className="p-3 text-right">
+                        <Button size="sm" variant="ghost" className="text-red-500 h-8 w-8 p-0" onClick={() => deleteMonitor(m.id)}>
+                          &times;
+                        </Button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 3. OLT Settings (Detailed) */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Radio className="h-5 w-5" />
+            OLT Signal Monitoring
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-sm font-medium">Warning Threshold (dBm)</label>
+              <Input
+                type="number"
+                value={settings.monitoring.rxPowerWarning}
+                onChange={(e) => {
+                  setSettings({
+                    ...settings,
+                    monitoring: { ...settings.monitoring, rxPowerWarning: parseInt(e.target.value) }
+                  })
+                  setHasChanges(true)
+                }}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Critical Threshold (dBm)</label>
+              <Input
+                type="number"
+                value={settings.monitoring.rxPowerCritical}
+                onChange={(e) => {
+                  setSettings({
+                    ...settings,
+                    monitoring: { ...settings.monitoring, rxPowerCritical: parseInt(e.target.value) }
+                  })
+                  setHasChanges(true)
+                }}
+              />
+            </div>
+          </div>
+          <div className="flex items-center space-x-2 pt-2">
+            <input
+              type="checkbox"
+              checked={settings.monitoring.rxPowerNotificationEnable}
+              onChange={(e) => {
+                setSettings({
+                  ...settings,
+                  monitoring: { ...settings.monitoring, rxPowerNotificationEnable: e.target.checked }
+                })
+                setHasChanges(true)
+              }}
+            />
+            <label className="text-sm">Enable WhatsApp Notifications for Critical Signal</label>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   )
 }

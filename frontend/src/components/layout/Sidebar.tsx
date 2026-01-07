@@ -33,6 +33,10 @@ import {
   Globe,
   Wallet,
   Radio,
+  BookOpen,
+  TicketCheck,
+  Wrench,
+  PlusCircle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -60,26 +64,57 @@ const navigationGroups: NavGroup[] = [
   {
     name: 'Overview',
     icon: LayoutDashboard,
-    roles: ['admin', 'technician'],
+    roles: ['admin'],
     items: [
       {
         name: 'Dashboard',
         href: '/admin/dashboard',
         icon: LayoutDashboard,
-        roles: ['admin', 'technician'],
+        roles: ['admin'],
+      },
+    ],
+  },
+  {
+    name: 'Technical',
+    icon: Activity,
+    roles: ['technician'],
+    items: [
+      {
+        name: 'Dashboard',
+        href: '/technician',
+        icon: LayoutDashboard,
+        roles: ['technician'],
       },
       {
-        name: 'Teknisi Dashboard',
-        href: '/admin/technician-dashboard',
-        icon: Activity,
-        roles: ['admin', 'technician'],
+        name: 'My Tickets',
+        href: '/technician/tickets',
+        icon: TicketCheck,
+        roles: ['technician'],
       },
+      {
+        name: 'Installations',
+        href: '/technician/installations', // Placeholder or same as tickets filtered
+        icon: Wrench,
+        roles: ['technician'],
+      },
+      {
+        name: 'Online Customers',
+        href: '/technician/online',
+        icon: Users,
+        roles: ['technician'],
+      },
+      {
+        name: 'Network Map',
+        href: '/admin/network-map', // Shared
+        icon: MapPin,
+        roles: ['technician'],
+      }
     ],
   },
   {
     name: 'Pelanggan',
     icon: Users,
-    roles: ['admin', 'technician'],
+    roles: ['admin'],
     items: [
       {
         name: 'Data Pelanggan',
@@ -88,10 +123,16 @@ const navigationGroups: NavGroup[] = [
         roles: ['admin'],
       },
       {
+        name: 'Pendaftaran Baru',
+        href: '/admin/registrations',
+        icon: UserCog,
+        roles: ['admin'],
+      },
+      {
         name: 'Pelanggan Online',
         href: '/admin/online-customers',
         icon: Monitor,
-        roles: ['admin', 'technician'],
+        roles: ['admin'],
       },
       {
         name: 'Paket Layanan',
@@ -113,22 +154,34 @@ const navigationGroups: NavGroup[] = [
     roles: ['admin', 'technician'],
     items: [
       {
-        name: 'GenieACS',
+        name: 'ACS / TR-069',
         href: '/admin/genieacs',
         icon: Server,
         roles: ['admin', 'technician'],
       },
       {
-        name: 'ODP',
-        href: '/admin/odp',
+        name: 'ODP Management',
+        href: '/admin/odp', // Admin view
         icon: Network,
         roles: ['admin'],
       },
       {
-        name: 'Network Map',
-        href: '/admin/network-map',
-        icon: MapPin,
-        roles: ['admin', 'technician'],
+        name: 'Add ODP',
+        href: '/technician/odps/create',
+        icon: PlusCircle,
+        roles: ['technician'],
+      },
+      {
+        name: 'Data OLT',
+        href: '/technician/olts',
+        icon: Server,
+        roles: ['technician'],
+      },
+      {
+        name: 'Manajemen OLT',
+        href: '/admin/olts',
+        icon: Server,
+        roles: ['admin'],
       },
       {
         name: 'Server RADIUS',
@@ -217,6 +270,18 @@ const navigationGroups: NavGroup[] = [
         icon: Settings,
         roles: ['admin'],
       },
+      {
+        name: 'Landing Page',
+        href: '/admin/landing-content',
+        icon: Globe,
+        roles: ['admin'],
+      },
+      {
+        name: 'Blog',
+        href: '/admin/blog',
+        icon: BookOpen,
+        roles: ['admin'],
+      },
     ],
   },
 ]
@@ -284,8 +349,8 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       <div className="flex h-16 items-center justify-between border-b border-border px-4">
         <div className="flex items-center gap-3">
           {isLogoMode && getLogoUrl() ? (
-            <img 
-              src={getLogoUrl()!} 
+            <img
+              src={getLogoUrl()!}
               alt={branding.siteTitle}
               className="h-10 object-contain"
               onError={(e) => {
@@ -324,39 +389,39 @@ export function Sidebar({ open, onClose }: SidebarProps) {
             <div key={group.name} className="relative">
               {/* Group Header */}
               {navigationGroups.length > 1 && (
-                 <div className="px-3 py-2 mt-4 first:mt-0 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                    {group.name}
-                 </div>
+                <div className="px-3 py-2 mt-4 first:mt-0 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  {group.name}
+                </div>
               )}
-              
+
               <div className="space-y-1">
-                  {group.items.map((item) => {
-                    const isActive = pathname === item.href || pathname.startsWith(item.href.split('#')[0] + '/')
-                    const ItemIcon = item.icon
-                    return (
-                      <Link
-                        key={item.name}
-                        href={item.href}
-                        onClick={() => onClose()}
+                {group.items.map((item) => {
+                  const isActive = pathname === item.href || pathname.startsWith(item.href.split('#')[0] + '/')
+                  const ItemIcon = item.icon
+                  return (
+                    <Link
+                      key={item.name}
+                      href={item.href}
+                      onClick={() => onClose()}
+                      className={cn(
+                        'group flex items-center px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-200',
+                        isActive
+                          ? 'bg-accent text-accent-foreground'
+                          : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                      )}
+                    >
+                      <ItemIcon
                         className={cn(
-                          'group flex items-center px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-200',
+                          'mr-3 h-5 w-5 flex-shrink-0 transition-colors',
                           isActive
-                            ? 'bg-accent text-accent-foreground'
-                            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                            ? 'text-primary'
+                            : 'text-muted-foreground group-hover:text-primary'
                         )}
-                      >
-                        <ItemIcon
-                          className={cn(
-                            'mr-3 h-5 w-5 flex-shrink-0 transition-colors',
-                            isActive
-                              ? 'text-primary'
-                              : 'text-muted-foreground group-hover:text-primary'
-                          )}
-                        />
-                        {item.name}
-                      </Link>
-                    )
-                  })}
+                      />
+                      {item.name}
+                    </Link>
+                  )
+                })}
               </div>
             </div>
           )
@@ -368,7 +433,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         <div className="px-3 py-3 rounded-xl bg-muted/50">
           <div className="flex items-center">
             <div className="h-10 w-10 rounded-full bg-primary flex items-center justify-center text-primary-foreground font-semibold text-sm shadow-sm">
-               {user?.name?.charAt(0)?.toUpperCase() || 'A'}
+              {user?.name?.charAt(0)?.toUpperCase() || 'A'}
             </div>
             <div className="ml-3 flex-1 min-w-0">
               <p className="text-sm font-semibold text-foreground truncate">
@@ -384,7 +449,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               className="ml-2 p-2.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
               title="Logout"
             >
-               {isLoggingOut ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
+              {isLoggingOut ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
             </button>
           </div>
         </div>

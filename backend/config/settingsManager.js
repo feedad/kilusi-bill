@@ -146,7 +146,13 @@ async function updateSetting(key, value) {
     // If it's a nested key, we might need special handling, but the new design encourages flat keys for DB app_config
     // For backwards compatibility, if key is simple, save to DB.
 
-    await settingsService.set(key, value);
+    // Infer type for DB
+    let type = 'string';
+    if (typeof value === 'boolean') type = 'boolean';
+    else if (typeof value === 'number') type = 'number';
+    else if (typeof value === 'object') type = 'json';
+
+    await settingsService.set(key, value, type);
 
     // Update Local Cache
     localCache[key] = value;

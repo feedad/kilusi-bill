@@ -51,11 +51,15 @@ function getApiBaseUrl(): string {
  */
 export async function validateApiConnection(): Promise<boolean> {
   try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 5000)
+
     const response = await fetch(`${CONFIG.API_BASE_URL}/api/v1/health`, {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' },
-      timeout: 5000
+      signal: controller.signal
     })
+    clearTimeout(timeoutId)
     return response.ok
   } catch (error) {
     console.error('API Connection validation failed:', error)

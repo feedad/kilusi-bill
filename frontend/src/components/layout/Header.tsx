@@ -1,20 +1,30 @@
-'use client'
-
-import React from 'react'
-import { Menu, Bell, Search, Settings, Moon, Sun } from 'lucide-react'
+import React, { useEffect, useState } from 'react'
+import { Menu, Bell, Search, Settings, Moon, Sun, Check } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
 import { useAuthStore } from '@/store/authStore'
 import { Button } from '@/components/ui'
 import { Input } from '@/components/ui'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { formatDistanceToNow } from 'date-fns'
+import { id } from 'date-fns/locale'
 
 interface HeaderProps {
   onMenuClick: () => void
 }
 
 export function Header({ onMenuClick }: HeaderProps) {
-  const { theme, setTheme, notifications, addNotification } = useAppStore()
+  const { theme, setTheme, unreadServerNotifications, serverNotifications, fetchServerNotifications, markServerNotificationRead, addNotification } = useAppStore()
   const { user } = useAuthStore()
   const [searchQuery, setSearchQuery] = React.useState('')
+  const [notificationsOpen, setNotificationsOpen] = useState(false)
+
+  // Fetch notifications periodically
+  useEffect(() => {
+    fetchServerNotifications()
+    const interval = setInterval(fetchServerNotifications, 30000) // Poll every 30s
+    return () => clearInterval(interval)
+  }, [])
 
   const toggleTheme = () => {
     setTheme(theme === 'light' ? 'dark' : 'light')
@@ -34,7 +44,7 @@ export function Header({ onMenuClick }: HeaderProps) {
   }
 
   return (
-    <header className="bg-card/80 backdrop-blur-sm shadow-sm">
+    <header className="bg-card/80 backdrop-blur-sm shadow-sm sticky top-0 z-40 w-full border-b">
       <div className="px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Left side - Menu button and Search */}
@@ -83,14 +93,63 @@ export function Header({ onMenuClick }: HeaderProps) {
             </Button>
 
             {/* Notifications */}
-            <div className="relative">
-              <Button variant="ghost" size="icon" className="rounded-xl hover:bg-muted">
-                <Bell className="h-5 w-5 text-muted-foreground" />
-                {notifications.length > 0 && (
-                  <span className="absolute top-1 right-1 h-2 w-2 bg-primary rounded-full" />
-                )}
-              </Button>
-            </div>
+            <Popover open={notificationsOpen} onOpenChange={setNotificationsOpen}>
+              <PopoverTrigger asChild>
+                <div className="relative">
+                  <Button variant="ghost" size="icon" className="rounded-xl hover:bg-muted">
+                    <Bell className="h-5 w-5 text-muted-foreground" />
+                    {unreadServerNotifications > 0 && (
+                      <span className="absolute top-1 right-1 h-4 w-4 bg-red-500 text-white text-[10px] flex items-center justify-center rounded-full">
+                        {unreadServerNotifications > 9 ? '9+' : unreadServerNotifications}
+                      </span>
+                    )}
+                  </Button>
+                </div>
+              </PopoverTrigger>
+              <PopoverContent className="w-80 p-0" align="end">
+                <div className="p-4 border-b">
+                  <h4 className="font-semibold leading-none">Notifikasi</h4>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Anda memiliki {unreadServerNotifications} notifikasi belum dibaca
+                  </p>
+                </div>
+                <ScrollArea className="h-[300px]">
+                  {serverNotifications.length === 0 ? (
+                    <div className="p-4 text-center text-sm text-muted-foreground">
+                      Tidak ada notifikasi
+                    </div>
+                  ) : (
+                    <div className="flex flex-col">
+                      {serverNotifications.map((notif) => (
+                        <div
+                          key={notif.id}
+                          className={`p-4 border-b last:border-0 hover:bg-muted/50 cursor-pointer transition-colors ${!notif.is_read ? 'bg-blue-50/50 dark:bg-blue-900/10' : ''}`}
+                          onClick={() => !notif.is_read && markServerNotificationRead(notif.id)}
+                        >
+                          <div className="flex justify-between items-start mb-1">
+                            <span className="font-medium text-sm">{notif.title}</span>
+                            {!notif.is_read && <span className="h-2 w-2 rounded-full bg-blue-500 block mt-1" />}
+                          </div>
+                          <p className="text-sm text-muted-foreground line-clamp-2 mb-2">
+                            {notif.message}
+                          </p>
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-muted-foreground">
+                              {formatDistanceToNow(new Date(notif.created_at), { addSuffix: true, locale: id })}
+                            </span>
+                            {notif.type === 'registration' && (
+                              <span className="text-[10px] bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full">
+                                Pendaftaran
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </ScrollArea>
+              </PopoverContent>
+            </Popover>
 
             {/* Settings */}
             <Button variant="ghost" size="icon" className="rounded-xl hover:bg-muted">

@@ -429,7 +429,8 @@ export default function CustomersPage() {
         region_id: filterRegion === 'all' ? '' : filterRegion,
         sort_field: sortField || '',
         sort_direction: sortDirection,
-        has_service: 'true', // Only show customers with active services in main table
+        sort_direction: sortDirection,
+        exclude_status: 'pending', // Exclude pending registrations from main list
       })
 
       const response = await adminApi.get(`/api/v1/customers?${params}`)

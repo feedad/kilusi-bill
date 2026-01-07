@@ -42,7 +42,7 @@ class CustomerService {
     /**
      * Get all customers with pagination and filtering
      */
-    static async getAllCustomers({ page = 1, limit = 10, search = '', status = '', has_service = null }) {
+    static async getAllCustomers({ page = 1, limit = 10, search = '', status = '', has_service = null, exclude_status = null }) {
         const offset = (page - 1) * limit;
         let whereClause = 'WHERE 1=1';
         let queryParams = [];
@@ -57,6 +57,12 @@ class CustomerService {
             queryParams.push(status);
         }
 
+        if (exclude_status) {
+            const excluded = Array.isArray(exclude_status) ? exclude_status : [exclude_status];
+            // logic for SQL NOT IN with arrays is != ALL or NOT (x = ANY(..))
+            whereClause += ` AND c.status != ALL($${queryParams.length + 1}::text[])`;
+            queryParams.push(excluded);
+        }
         // Filter for customers with/without service
         if (has_service === true || has_service === 'true') {
             whereClause += ` AND c.package_id IS NOT NULL`;
@@ -72,7 +78,7 @@ class CustomerService {
         // Data query - Reading from View
         const dataQuery = `
             SELECT
-                c.id, c.customer_id, c.name, c.phone, c.nik, c.address, c.billing_address,
+                c.id, c.customer_id, c.name, c.phone, c.email, c.nik, c.address, c.billing_address,
                 c.installation_address, c.latitude, c.longitude,
                 c.pppoe_username, c.pppoe_password,
                 c.status, c.created_at, c.updated_at,
@@ -484,7 +490,7 @@ class CustomerService {
         // Validation - duplicate checks
         if (phone && phone !== current.phone) {
             // Check in Identity table
-            const exist = await query('SELECT id FROM customers WHERE phone = $1 AND id != $2', [phone, id]);
+            const exist = await query('SELECT id FROM customers WHERE phone = $1 AND id != $2 AND status != \'pending\'', [phone, id]);
             if (exist.rows.length > 0) throw { code: 'RESOURCE_CONFLICT', message: 'Nomor telepon sudah terdaftar', field: 'phone' };
         }
         if (pppoe_username && pppoe_username !== current.pppoe_username) {

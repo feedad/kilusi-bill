@@ -11,13 +11,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter()
 
   // Public routes that don't require authentication
-  const publicRoutes = ['/admin/login', '/register', '/forgot-password']
+  const publicRoutes = ['/admin/login', '/register', '/forgot-password', '/blog', '/support', '/terms']
   // Customer login and registration routes
   const customerPublicRoutes = ['/customer/login', '/customer/register']
 
   // Check if route is public
   const isPublicRoute = publicRoutes.some(route => pathname === route || pathname.startsWith(route + '/')) ||
-                        customerPublicRoutes.some(route => pathname === route || pathname.startsWith(route + '/'))
+    customerPublicRoutes.some(route => pathname === route || pathname.startsWith(route + '/'))
 
   // Check if this is a customer route (all /customer/ routes are handled by CustomerAuthProvider)
   const isCustomerRoute = pathname.startsWith('/customer/')

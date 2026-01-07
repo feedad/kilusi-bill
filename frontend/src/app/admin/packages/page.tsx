@@ -256,17 +256,17 @@ export default function PackagesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sm:gap-0">
         <div>
           <h1 className="text-3xl font-bold">Manajemen Paket</h1>
           <p className="text-muted-foreground">Kelola paket layanan internet</p>
         </div>
-        <div className="flex space-x-2">
-          <Button variant="outline" onClick={() => setShowInstallationFeesDialog(true)}>
+        <div className="flex flex-col sm:flex-row w-full sm:w-auto space-y-2 sm:space-y-0 sm:space-x-2">
+          <Button variant="outline" onClick={() => setShowInstallationFeesDialog(true)} className="w-full sm:w-auto">
             <Settings className="h-4 w-4 mr-2" />
             Biaya Instalasi
           </Button>
-          <Button onClick={() => setShowCreateDialog(true)}>
+          <Button onClick={() => setShowCreateDialog(true)} className="w-full sm:w-auto">
             <Plus className="h-4 w-4 mr-2" />
             Tambah Paket
           </Button>
@@ -302,101 +302,78 @@ export default function PackagesPage() {
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-3">
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white ${
-                          pkg.isActive ? 'bg-blue-500' : 'bg-gray-400'
-                        }`}>
-                          <Wifi className="w-5 h-5" />
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white ${pkg.isActive ? 'bg-blue-500' : 'bg-slate-500'}`}>
+                          <Package className="w-5 h-5" />
                         </div>
                         <div>
                           <h3 className="font-semibold text-lg">{pkg.name}</h3>
-                          <p className="text-sm text-muted-foreground">{pkg.speed}</p>
+                          <div className="flex items-center text-sm text-muted-foreground">
+                            <Zap className="w-3 h-3 mr-1" />
+                            {pkg.speed}
+                          </div>
                         </div>
                       </div>
                       <Badge variant={pkg.isActive ? 'default' : 'secondary'}>
-                        {pkg.isActive ? 'Aktif' : 'Tidak Aktif'}
+                        {pkg.isActive ? 'Active' : 'Inactive'}
                       </Badge>
                     </div>
                   </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      <p className="text-sm text-muted-foreground">
-                        {pkg.description || 'Tidak ada deskripsi'}
+
+                  <CardContent className="space-y-4">
+                    <div className="flex items-start space-x-2 text-sm">
+                      <Settings className="w-4 h-4 mt-0.5 text-muted-foreground" />
+                      <span className="text-muted-foreground line-clamp-2">
+                        {pkg.description || 'No description provided'}
+                      </span>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span>Revenue Share</span>
+                        <span>{pkg.commission}%</span>
+                      </div>
+                      <div className="h-2 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-blue-500 rounded-full"
+                          style={{ width: `${Math.min(pkg.commission, 100)}%` }}
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        HPP: Rp {pkg.hpp.toLocaleString()}
                       </p>
+                    </div>
 
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="flex items-center space-x-2">
-                          <DollarSign className="h-4 w-4 text-green-600" />
-                          <div>
-                            <p className="text-xs text-muted-foreground">Harga</p>
-                            <p className="font-semibold">Rp {pkg.price.toLocaleString()}</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <Users className="h-4 w-4 text-blue-600" />
-                          <div>
-                            <p className="text-xs text-muted-foreground">Pelanggan</p>
-                            <p className="font-semibold">{pkg.customerCount}</p>
-                          </div>
-                        </div>
+                    <div className="grid grid-cols-2 gap-4 text-center">
+                      <div>
+                        <p className="text-2xl font-bold text-primary">Rp {pkg.price.toLocaleString()}</p>
+                        <p className="text-xs text-muted-foreground">/month</p>
                       </div>
-
-                      {pkg.duration && (
-                        <div className="flex items-center space-x-2">
-                          <Clock className="h-4 w-4 text-orange-600" />
-                          <div>
-                            <p className="text-xs text-muted-foreground">Durasi</p>
-                            <p className="font-semibold">{pkg.duration}</p>
-                          </div>
+                      <div>
+                        <div className="flex items-center justify-center gap-1">
+                          <p className="text-2xl font-bold text-green-600">{pkg.customerCount}</p>
                         </div>
-                      )}
-
-                      <div className="flex items-center space-x-2">
-                        <TrendingUp className="h-4 w-4 text-purple-600" />
-                        <div>
-                          <p className="text-xs text-muted-foreground">Total Pendapatan</p>
-                          <p className="font-semibold">Rp {pkg.totalRevenue.toLocaleString()}</p>
-                        </div>
+                        <p className="text-xs text-muted-foreground">Customers</p>
                       </div>
+                    </div>
 
-                      {pkg.features && pkg.features.length > 0 && (
-                        <div>
-                          <p className="text-xs text-muted-foreground mb-2">Fitur:</p>
-                          <div className="flex flex-wrap gap-1">
-                            {pkg.features.slice(0, 3).map((feature, index) => (
-                              <Badge key={index} variant="outline" className="text-xs">
-                                {feature}
-                              </Badge>
-                            ))}
-                            {pkg.features.length > 3 && (
-                              <Badge variant="outline" className="text-xs">
-                                +{pkg.features.length - 3}
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="flex space-x-2 pt-4 border-t">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => openEditDialog(pkg)}
-                          className="flex-1"
-                        >
-                          <Edit2 className="h-4 w-4 mr-1" />
-                          Edit
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleDeletePackage(pkg)}
-                          disabled={pkg.customerCount > 0}
-                          className="text-destructive hover:text-destructive flex-1"
-                        >
-                          <Trash2 className="h-4 w-4 mr-1" />
-                          Hapus
-                        </Button>
-                      </div>
+                    <div className="flex space-x-2 pt-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openEditDialog(pkg)}
+                        className="flex-1"
+                      >
+                        <Edit2 className="w-4 h-4 mr-1" /> Edit
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDeletePackage(pkg)}
+                        disabled={pkg.customerCount > 0}
+                        className="flex-1 text-red-600 hover:text-red-700 hover:bg-red-50"
+                      >
+                        <Trash2 className="w-4 h-4 mr-1" /> Delete
+                      </Button>
                     </div>
                   </CardContent>
                 </Card>
@@ -421,7 +398,7 @@ export default function PackagesPage() {
               <Input
                 id="create-name"
                 value={formData.name}
-                onChange={(e) => setFormData({...formData, name: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 placeholder="Masukkan nama paket"
               />
             </div>
@@ -430,7 +407,7 @@ export default function PackagesPage() {
               <Textarea
                 id="create-description"
                 value={formData.description}
-                onChange={(e) => setFormData({...formData, description: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 placeholder="Masukkan deskripsi paket"
               />
             </div>
@@ -439,7 +416,7 @@ export default function PackagesPage() {
               <Input
                 id="create-speed"
                 value={formData.speed}
-                onChange={(e) => setFormData({...formData, speed: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, speed: e.target.value })}
                 placeholder="Contoh: 10/10"
               />
             </div>
@@ -449,7 +426,7 @@ export default function PackagesPage() {
                 id="create-price"
                 type="number"
                 value={formData.price}
-                onChange={(e) => setFormData({...formData, price: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, price: e.target.value })}
                 placeholder="Masukkan harga"
               />
             </div>
@@ -458,7 +435,7 @@ export default function PackagesPage() {
               <Input
                 id="create-group"
                 value={formData.group}
-                onChange={(e) => setFormData({...formData, group: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, group: e.target.value })}
                 placeholder="Masukkan grup paket"
               />
             </div>
@@ -467,7 +444,7 @@ export default function PackagesPage() {
               <Input
                 id="create-rate-limit"
                 value={formData.rate_limit}
-                onChange={(e) => setFormData({...formData, rate_limit: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, rate_limit: e.target.value })}
                 placeholder="Contoh: 10M/10M"
               />
             </div>
@@ -477,7 +454,7 @@ export default function PackagesPage() {
                 id="create-hpp"
                 type="number"
                 value={formData.hpp}
-                onChange={(e) => setFormData({...formData, hpp: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, hpp: e.target.value })}
                 placeholder="Masukkan HPP"
               />
             </div>
@@ -487,7 +464,7 @@ export default function PackagesPage() {
                 id="create-commission"
                 type="number"
                 value={formData.commission}
-                onChange={(e) => setFormData({...formData, commission: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, commission: e.target.value })}
                 placeholder="Masukkan komisi"
               />
             </div>
@@ -495,7 +472,7 @@ export default function PackagesPage() {
               <Switch
                 id="create-shared"
                 checked={formData.shared}
-                onCheckedChange={(checked) => setFormData({...formData, shared: checked})}
+                onCheckedChange={(checked) => setFormData({ ...formData, shared: checked })}
               />
               <Label htmlFor="create-shared">Shared</Label>
             </div>
@@ -503,7 +480,7 @@ export default function PackagesPage() {
               <Switch
                 id="create-active"
                 checked={formData.is_active}
-                onCheckedChange={(checked) => setFormData({...formData, is_active: checked})}
+                onCheckedChange={(checked) => setFormData({ ...formData, is_active: checked })}
               />
               <Label htmlFor="create-active">Aktif</Label>
             </div>
@@ -548,7 +525,7 @@ export default function PackagesPage() {
               <Input
                 id="edit-name"
                 value={formData.name}
-                onChange={(e) => setFormData({...formData, name: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 placeholder="Masukkan nama paket"
               />
             </div>
@@ -557,7 +534,7 @@ export default function PackagesPage() {
               <Textarea
                 id="edit-description"
                 value={formData.description}
-                onChange={(e) => setFormData({...formData, description: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 placeholder="Masukkan deskripsi paket"
               />
             </div>
@@ -566,7 +543,7 @@ export default function PackagesPage() {
               <Input
                 id="edit-speed"
                 value={formData.speed}
-                onChange={(e) => setFormData({...formData, speed: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, speed: e.target.value })}
                 placeholder="Contoh: 10/10"
               />
             </div>
@@ -576,7 +553,7 @@ export default function PackagesPage() {
                 id="edit-price"
                 type="number"
                 value={formData.price}
-                onChange={(e) => setFormData({...formData, price: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, price: e.target.value })}
                 placeholder="Masukkan harga"
               />
             </div>
@@ -585,7 +562,7 @@ export default function PackagesPage() {
               <Input
                 id="edit-group"
                 value={formData.group}
-                onChange={(e) => setFormData({...formData, group: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, group: e.target.value })}
                 placeholder="Masukkan grup paket"
               />
             </div>
@@ -594,7 +571,7 @@ export default function PackagesPage() {
               <Input
                 id="edit-rate-limit"
                 value={formData.rate_limit}
-                onChange={(e) => setFormData({...formData, rate_limit: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, rate_limit: e.target.value })}
                 placeholder="Contoh: 10M/10M"
               />
             </div>
@@ -604,7 +581,7 @@ export default function PackagesPage() {
                 id="edit-hpp"
                 type="number"
                 value={formData.hpp}
-                onChange={(e) => setFormData({...formData, hpp: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, hpp: e.target.value })}
                 placeholder="Masukkan HPP"
               />
             </div>
@@ -614,7 +591,7 @@ export default function PackagesPage() {
                 id="edit-commission"
                 type="number"
                 value={formData.commission}
-                onChange={(e) => setFormData({...formData, commission: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, commission: e.target.value })}
                 placeholder="Masukkan komisi"
               />
             </div>
@@ -622,7 +599,7 @@ export default function PackagesPage() {
               <Switch
                 id="edit-shared"
                 checked={formData.shared}
-                onCheckedChange={(checked) => setFormData({...formData, shared: checked})}
+                onCheckedChange={(checked) => setFormData({ ...formData, shared: checked })}
               />
               <Label htmlFor="edit-shared">Shared</Label>
             </div>
@@ -630,7 +607,7 @@ export default function PackagesPage() {
               <Switch
                 id="edit-active"
                 checked={formData.is_active}
-                onCheckedChange={(checked) => setFormData({...formData, is_active: checked})}
+                onCheckedChange={(checked) => setFormData({ ...formData, is_active: checked })}
               />
               <Label htmlFor="edit-active">Aktif</Label>
             </div>

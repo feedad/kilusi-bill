@@ -20,8 +20,10 @@ export function AdminLayout({ children }: AdminLayoutProps) {
   const pathname = usePathname()
 
   // Skip auth check for login page - render children directly
-  const isLoginPage = pathname === '/admin/login'
-  
+  // Handle potentially nested paths or trailing slashes, and exact match check
+  // Also check for root path '/' which occurs when accessing via billing subdomain (rewritten to /admin/login)
+  const isLoginPage = pathname?.startsWith('/admin/login') || pathname === '/admin/login/' || pathname === '/';
+
   useEffect(() => {
     // Redirect to admin login if not authenticated (except on login page)
     if (!isLoginPage && (!isAuthenticated || !user)) {

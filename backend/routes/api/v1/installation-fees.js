@@ -14,6 +14,7 @@ router.get('/', async (req, res) => {
                 ifs.fee_amount,
                 ifs.description,
                 ifs.is_active,
+                ifs.fee_type,
                 ifs.created_at,
                 ifs.updated_at,
                 p.name as package_name,
@@ -37,6 +38,7 @@ router.get('/', async (req, res) => {
             fee_amount: parseFloat(setting.fee_amount),
             description: setting.description || null,
             is_active: setting.is_active,
+            fee_type: setting.fee_type,
             created_at: setting.created_at,
             updated_at: setting.updated_at
         }));
@@ -277,8 +279,8 @@ router.post('/', async (req, res) => {
         }
 
         const createQuery = `
-            INSERT INTO installation_fee_settings (billing_type, package_id, fee_amount, description, is_active)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO installation_fee_settings (billing_type, package_id, fee_amount, description, is_active, fee_type)
+            VALUES ($1, $2, $3, $4, $5, 'installation')
             RETURNING *
         `;
 

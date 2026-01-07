@@ -51,136 +51,91 @@ export function NASCard({
     const status = statusConfig[nas.status] || statusConfig.unknown
 
     return (
-        <Card className="hover:shadow-lg transition-shadow duration-200">
+        <Card className="hover:shadow-lg transition-shadow">
             <CardHeader className="pb-3">
-                <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center space-x-3 min-w-0 flex-1">
-                        <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0 ${nas.status === 'online' ? 'bg-green-500 text-white' :
-                            nas.status === 'offline' ? 'bg-red-500 text-white' :
-                                'bg-gray-500 text-white'
-                            }`}>
-                            <Server className="w-4 h-4 sm:w-5 sm:h-5" />
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white ${nas.status === 'online' ? 'bg-green-500' : nas.status === 'offline' ? 'bg-red-500' : 'bg-slate-500'}`}>
+                            <Server className="w-5 h-5" />
                         </div>
-                        <div className="min-w-0 flex-1">
-                            <h3 className="font-semibold text-base sm:text-lg truncate">{nas.shortname}</h3>
-                            <p className="text-xs sm:text-sm text-muted-foreground font-mono truncate">{nas.nasname}</p>
+                        <div>
+                            <h3 className="font-semibold text-lg max-w-[150px] truncate" title={nas.shortname}>{nas.shortname}</h3>
+                            <p className="text-sm text-muted-foreground font-mono">{nas.nasname}</p>
                         </div>
                     </div>
-                    <Badge className={`${status.color} shrink-0 text-xs`}>
-                        <span className="flex items-center space-x-1">
-                            <status.icon className="h-3 w-3" />
-                            <span className="capitalize hidden sm:inline">{status.label}</span>
-                        </span>
+                    <Badge variant={nas.status === 'online' ? 'default' : 'secondary'} className={nas.status === 'online' ? 'bg-green-500 hover:bg-green-600' : ''}>
+                        {status.label}
                     </Badge>
                 </div>
-                {nas.description && (
-                    <CardDescription className="mt-2 text-xs sm:text-sm line-clamp-2">{nas.description}</CardDescription>
-                )}
             </CardHeader>
 
-            <CardContent className="space-y-3 pt-0">
-                {/* Info Grid - 2 columns on mobile */}
-                <div className="grid grid-cols-2 gap-2 text-xs sm:text-sm">
-                    {/* SNMP Status */}
-                    <div className="flex items-center space-x-1.5">
-                        <Activity className="w-3 h-3 sm:w-4 sm:h-4 text-muted-foreground shrink-0" />
-                        <span className="text-muted-foreground">SNMP</span>
-                    </div>
-                    <div className="text-right">
-                        {nas.snmp_enabled ? (
-                            <Badge variant="secondary" className="bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 text-xs px-1.5 py-0">
-                                <Activity className="h-2.5 w-2.5 mr-0.5" />
-                                v{nas.snmp_version || '2c'}
-                            </Badge>
-                        ) : (
-                            <Badge variant="outline" className="text-muted-foreground text-xs px-1.5 py-0 border-muted-foreground/30">
-                                <WifiOff className="h-2.5 w-2.5 mr-0.5" />
-                                Off
-                            </Badge>
-                        )}
-                    </div>
+            <CardContent className="space-y-4">
+                <div className="flex items-start space-x-2 text-sm">
+                    <Activity className="w-4 h-4 mt-0.5 text-muted-foreground" />
+                    <span className="text-muted-foreground line-clamp-2">
+                        {nas.description || 'No description provided'}
+                    </span>
+                </div>
 
-                    {/* Last Seen */}
-                    <div className="flex items-center space-x-1.5">
-                        <RefreshCw className="w-3 h-3 sm:w-4 sm:h-4 text-muted-foreground shrink-0" />
-                        <span className="text-muted-foreground">Last Seen</span>
+                <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                        <span>SNMP Status</span>
+                        <span>{nas.snmp_enabled ? `v${nas.snmp_version || '2c'}` : 'Disabled'}</span>
                     </div>
-                    <div className="text-right text-muted-foreground truncate">
-                        {formatDate(nas.last_seen) || 'Never'}
+                    <div className="h-2 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                        <div
+                            className={`h-full rounded-full ${nas.snmp_enabled ? 'bg-blue-500' : 'bg-slate-300'}`}
+                            style={{ width: nas.snmp_enabled ? '100%' : '0%' }}
+                        />
                     </div>
+                    <p className="text-xs text-muted-foreground">Type: {nas.type || 'Unknown'}</p>
+                </div>
 
-                    {/* Server Type */}
-                    <div className="flex items-center space-x-1.5">
-                        <Monitor className="w-3 h-3 sm:w-4 sm:h-4 text-muted-foreground shrink-0" />
-                        <span className="text-muted-foreground">Type</span>
+                <div className="grid grid-cols-2 gap-4 text-center">
+                    <div>
+                        <p className="text-2xl font-bold text-primary">{nas.ports || 0}</p>
+                        <p className="text-xs text-muted-foreground">Ports</p>
                     </div>
-                    <div className="text-right text-muted-foreground capitalize">
-                        {nas.type || 'Unknown'}
+                    <div>
+                        <div className="flex items-center justify-center gap-1">
+                            {/* Use mock value or real if available, assume 0 for now as it wasn't in original card explicitly as big number */}
+                            <p className={`text-2xl font-bold ${nas.status === 'online' ? 'text-green-600' : 'text-slate-500'}`}>
+                                {nas.status === 'online' ? 'UP' : 'DOWN'}
+                            </p>
+                        </div>
+                        <p className="text-xs text-muted-foreground">State</p>
                     </div>
                 </div>
 
-                {/* Action Buttons */}
-                <div className="flex items-center gap-1.5 pt-2">
-                    {nas.snmp_enabled && (
+                <div className="flex space-x-2 pt-2">
+                    {nas.status === 'online' && (
                         <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => onTest(nas.id)}
-                            disabled={testLoading}
-                            className="flex-1 h-8 text-xs px-2"
-                            title="Test Connection"
+                            onClick={() => onView(nas)}
+                            className="flex-1"
                         >
-                            {testLoading ? (
-                                <RefreshCw className="h-3 w-3 animate-spin" />
-                            ) : (
-                                <>
-                                    <TestTube className="h-3 w-3 sm:mr-1" />
-                                    <span className="hidden sm:inline">Test</span>
-                                </>
-                            )}
+                            <Eye className="w-4 h-4 mr-1" /> View
                         </Button>
                     )}
                     <Button
                         variant="outline"
                         size="sm"
                         onClick={() => onEdit(nas)}
-                        className="flex-1 h-8 text-xs px-2"
+                        className="flex-1"
                     >
-                        <Edit className="h-3 w-3 sm:mr-1" />
-                        <span className="hidden sm:inline">Edit</span>
-                    </Button>
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => onDownloadScript(nas)}
-                        className="h-8 w-8 p-0"
-                        title="Download MikroTik Script"
-                    >
-                        <Download className="h-3 w-3" />
+                        <Edit className="w-4 h-4 mr-1" /> Edit
                     </Button>
                     <Button
                         variant="outline"
                         size="sm"
                         onClick={() => onDelete(nas)}
-                        className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                        className="flex-shrink-0 px-3 text-red-600 hover:text-red-700 hover:bg-red-50"
                         title="Delete NAS"
                     >
-                        <Trash2 className="h-3 w-3" />
+                        <Trash2 className="w-4 h-4" />
                     </Button>
                 </div>
-
-                {/* View Details Link for Online Servers */}
-                {nas.status === 'online' && (
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => onView(nas)}
-                        className="w-full text-primary hover:text-primary/80 h-8 text-xs"
-                    >
-                        <Eye className="h-3 w-3 mr-1" />
-                        View Server Details
-                    </Button>
-                )}
             </CardContent>
         </Card>
     )

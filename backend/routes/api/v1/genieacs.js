@@ -7,34 +7,34 @@ const { asyncHandler } = require('../../../middleware/response');
 
 // Helper function untuk extract parameter dari GenieACS device
 const parameterPaths = {
-  pppUsername: [
-    'VirtualParameters.pppoeUsername',
-    'VirtualParameters.pppUsername',
-    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Username'
-  ],
-  rxPower: [
-    'VirtualParameters.RXPower',
-    'VirtualParameters.redaman',
-    'InternetGatewayDevice.WANDevice.1.WANPONInterfaceConfig.RXPower'
-  ]
+    pppUsername: [
+        'VirtualParameters.pppoeUsername',
+        'VirtualParameters.pppUsername',
+        'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Username'
+    ],
+    rxPower: [
+        'VirtualParameters.RXPower',
+        'VirtualParameters.redaman',
+        'InternetGatewayDevice.WANDevice.1.WANPONInterfaceConfig.RXPower'
+    ]
 };
 
 function getParameterWithPaths(device, paths) {
-  for (const path of paths) {
-    const parts = path.split('.');
-    let value = device;
-    for (const part of parts) {
-      if (value && typeof value === 'object' && part in value) {
-        value = value[part];
-        if (value && value._value !== undefined) value = value._value;
-      } else {
-        value = undefined;
-        break;
-      }
+    for (const path of paths) {
+        const parts = path.split('.');
+        let value = device;
+        for (const part of parts) {
+            if (value && typeof value === 'object' && part in value) {
+                value = value[part];
+                if (value && value._value !== undefined) value = value._value;
+            } else {
+                value = undefined;
+                break;
+            }
+        }
+        if (value !== undefined && value !== null && value !== '') return value;
     }
-    if (value !== undefined && value !== null && value !== '') return value;
-  }
-  return '-';
+    return '-';
 }
 
 // GET /api/v1/genieacs/devices - Get all devices from GenieACS
@@ -73,88 +73,88 @@ router.get('/devices', asyncHandler(async (req, res) => {
         }, meta);
     }
 
-        // Process devices dengan format yang sama seperti adminGenieacs.js
-        const devices = devicesRaw.map((device, i) => {
-            // Extract basic info
-            const id = device._id || device.DeviceID?.SerialNumber || '-';
-            const serialNumber = device.DeviceID?.SerialNumber || device._id || '-';
-            const model = device.DeviceID?.ProductClass || device.InternetGatewayDevice?.DeviceInfo?.ModelName?._value || '-';
-            const lastInform = device._lastInform ? new Date(device._lastInform).toISOString() : new Date().toISOString();
-            
-            // Extract PPPoE username
-            const pppoeUsername = getParameterWithPaths(device, parameterPaths.pppUsername);
-            
-            // Extract WiFi info
-            const ssid = device.InternetGatewayDevice?.LANDevice?.['1']?.WLANConfiguration?.['1']?.SSID?._value || 
-                        device.VirtualParameters?.SSID || '-';
-            const password = device.InternetGatewayDevice?.LANDevice?.['1']?.WLANConfiguration?.['1']?.KeyPassphrase?._value || '-';
-            const userKonek = device.InternetGatewayDevice?.LANDevice?.['1']?.WLANConfiguration?.['1']?.TotalAssociations?._value || '-';
-            
-            // Extract RX Power
-            const rxPower = getParameterWithPaths(device, parameterPaths.rxPower);
-            
-            // Extract tags/nomor pelanggan
-            const tag = (Array.isArray(device.Tags) && device.Tags.length > 0)
-                ? device.Tags.join(', ')
-                : (typeof device.Tags === 'string' && device.Tags)
-                    ? device.Tags
-                    : (Array.isArray(device._tags) && device._tags.length > 0)
-                        ? device._tags.join(', ')
-                        : (typeof device._tags === 'string' && device._tags)
-                            ? device._tags
-                            : '-';
+    // Process devices dengan format yang sama seperti adminGenieacs.js
+    const devices = devicesRaw.map((device, i) => {
+        // Extract basic info
+        const id = device._id || device.DeviceID?.SerialNumber || '-';
+        const serialNumber = device.DeviceID?.SerialNumber || device._id || '-';
+        const model = device.DeviceID?.ProductClass || device.InternetGatewayDevice?.DeviceInfo?.ModelName?._value || '-';
+        const lastInform = device._lastInform ? new Date(device._lastInform).toISOString() : new Date().toISOString();
 
-            return {
-                _id: id,
-                id: id,
-                serial: serialNumber,
-                serialNumber: serialNumber,
-                model: model,
-                productClass: model,
-                manufacturer: device.DeviceID?.Manufacturer || device.InternetGatewayDevice?.DeviceInfo?.Manufacturer?._value || 'Unknown',
-                oui: device.DeviceID?.OUI || '-',
-                lastInform: lastInform,
-                pppoeUsername: pppoeUsername,
-                ssid: ssid,
-                password: password,
-                userKonek: userKonek,
-                rxPower: rxPower,
-                tag: tag,
-                tags: device._tags || device.Tags || [],
-                _tags: device._tags || [],
-                Tags: device.Tags || [],
-                parameters: device,
-                connectionState: getDeviceStatus(device) === 'online' ? 'connected' : 'disconnected'
-            };
+        // Extract PPPoE username
+        const pppoeUsername = getParameterWithPaths(device, parameterPaths.pppUsername);
+
+        // Extract WiFi info
+        const ssid = device.InternetGatewayDevice?.LANDevice?.['1']?.WLANConfiguration?.['1']?.SSID?._value ||
+            device.VirtualParameters?.SSID || '-';
+        const password = device.InternetGatewayDevice?.LANDevice?.['1']?.WLANConfiguration?.['1']?.KeyPassphrase?._value || '-';
+        const userKonek = device.InternetGatewayDevice?.LANDevice?.['1']?.WLANConfiguration?.['1']?.TotalAssociations?._value || '-';
+
+        // Extract RX Power
+        const rxPower = getParameterWithPaths(device, parameterPaths.rxPower);
+
+        // Extract tags/nomor pelanggan
+        const tag = (Array.isArray(device.Tags) && device.Tags.length > 0)
+            ? device.Tags.join(', ')
+            : (typeof device.Tags === 'string' && device.Tags)
+                ? device.Tags
+                : (Array.isArray(device._tags) && device._tags.length > 0)
+                    ? device._tags.join(', ')
+                    : (typeof device._tags === 'string' && device._tags)
+                        ? device._tags
+                        : '-';
+
+        return {
+            _id: id,
+            id: id,
+            serial: serialNumber,
+            serialNumber: serialNumber,
+            model: model,
+            productClass: model,
+            manufacturer: device.DeviceID?.Manufacturer || device.InternetGatewayDevice?.DeviceInfo?.Manufacturer?._value || 'Unknown',
+            oui: device.DeviceID?.OUI || '-',
+            lastInform: lastInform,
+            pppoeUsername: pppoeUsername,
+            ssid: ssid,
+            password: password,
+            userKonek: userKonek,
+            rxPower: rxPower,
+            tag: tag,
+            tags: device._tags || device.Tags || [],
+            _tags: device._tags || [],
+            Tags: device.Tags || [],
+            parameters: device,
+            connectionState: getDeviceStatus(device) === 'online' ? 'connected' : 'disconnected'
+        };
+    });
+
+    // Apply filters
+    let filteredDevices = devices;
+
+    if (search) {
+        filteredDevices = filteredDevices.filter(device =>
+            device.serialNumber.toLowerCase().includes(search.toLowerCase()) ||
+            device.pppoeUsername.toLowerCase().includes(search.toLowerCase()) ||
+            device.ssid.toLowerCase().includes(search.toLowerCase()) ||
+            device.tag.toLowerCase().includes(search.toLowerCase())
+        );
+    }
+
+    if (status && status !== 'all') {
+        filteredDevices = filteredDevices.filter(device => {
+            const deviceStatus = getDeviceStatus({ _lastInform: device.lastInform });
+            return deviceStatus === status;
         });
+    }
 
-        // Apply filters
-        let filteredDevices = devices;
-        
-        if (search) {
-            filteredDevices = filteredDevices.filter(device =>
-                device.serialNumber.toLowerCase().includes(search.toLowerCase()) ||
-                device.pppoeUsername.toLowerCase().includes(search.toLowerCase()) ||
-                device.ssid.toLowerCase().includes(search.toLowerCase()) ||
-                device.tag.toLowerCase().includes(search.toLowerCase())
-            );
-        }
-
-        if (status && status !== 'all') {
-            filteredDevices = filteredDevices.filter(device => {
-                const deviceStatus = getDeviceStatus({ _lastInform: device.lastInform });
-                return deviceStatus === status;
-            });
-        }
-
-        // Limit results
-        filteredDevices = filteredDevices.slice(0, limit);
+    // Limit results
+    filteredDevices = filteredDevices.slice(0, limit);
 
     // Calculate stats
     const now = Date.now();
     const stats = {
         total_devices: devicesRaw.length,
-        online_devices: devicesRaw.filter(dev => dev._lastInform && (now - new Date(dev._lastInform).getTime()) < 3600*1000).length,
+        online_devices: devicesRaw.filter(dev => dev._lastInform && (now - new Date(dev._lastInform).getTime()) < 3600 * 1000).length,
         offline_devices: 0,
         warning_devices: 0,
         total_customers: devices.filter(d => d.tag !== '-').length
@@ -182,6 +182,14 @@ router.get('/devices', asyncHandler(async (req, res) => {
 
 // POST /api/v1/genieacs/action - Perform action on device
 router.post('/action', asyncHandler(async (req, res) => {
+    // Restrict to admin only
+    if (req.user.role !== 'admin') {
+        return res.status(403).json({
+            success: false,
+            message: 'Access denied. Technicians have read-only access to ACS / TR-069.'
+        });
+    }
+
     const { deviceId, action, parameters = {} } = req.body;
 
     // Validation
@@ -421,6 +429,14 @@ function getDeviceStatus(device) {
 // POST /api/v1/genieacs/devices/:id/wifi-config - Update WiFi configuration
 router.post('/devices/:id/wifi-config', async (req, res) => {
     try {
+        // Restrict to admin only
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({
+                success: false,
+                message: 'Access denied. Technicians have read-only access to ACS / TR-069.'
+            });
+        }
+
         const { id } = req.params;
         const { ssid, password, ssid5g, password5g } = req.body;
 

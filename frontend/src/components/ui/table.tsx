@@ -2,7 +2,7 @@ import * as React from 'react'
 import { cn } from '@/lib/utils'
 import { ChevronDown, ChevronUp, MoreHorizontal } from 'lucide-react'
 
-interface TableProps {
+interface TableProps extends React.HTMLAttributes<HTMLTableElement> {
   className?: string
 }
 

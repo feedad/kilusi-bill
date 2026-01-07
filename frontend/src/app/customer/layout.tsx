@@ -70,7 +70,7 @@ function CustomerLayoutContent({
 
       console.log('🔑 Layout: hasLocalStorageAuth:', !!hasLocalStorageAuth)
 
-      if (!isAuthenticated && !hasLocalStorageAuth && pathname !== '/customer/login') {
+      if (!isAuthenticated && !hasLocalStorageAuth && pathname !== '/customer/login' && pathname !== '/customer/register') {
         console.warn('⛔ Layout: User not authenticated (neither React state nor localStorage), redirecting to login');
         router.push('/customer/login');
       }

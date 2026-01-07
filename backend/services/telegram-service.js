@@ -204,6 +204,36 @@ _${ticket.message ? ticket.message.substring(0, 100) + '...' : ''}_
     }
 
     /**
+     * Send new registration notification
+     * @param {Object} customer - Customer data
+     */
+    async sendNewRegistrationNotification(customer) {
+        const message = `
+👤 *PENDAFTARAN BARU*
+
+*Nama:* ${customer.name}
+*No. HP:* ${customer.phone}
+*Alamat:* ${customer.address || '-'}
+*Paket:* ${customer.package_name || '-'}
+
+_Tunggu verifikasi di dashboard admin._
+`;
+
+        // Send to Telegram
+        await this.sendMessage(message);
+
+        // Store in DB for Admin Dashboard
+        await this.storeNotification(
+            'registration',
+            'Pendaftaran Pelanggan Baru',
+            `Pendaftar baru: ${customer.name} (${customer.phone})`,
+            { customerId: customer.id }
+        );
+
+        return true;
+    }
+
+    /**
      * Store notification in database for history
      */
     async storeNotification(type, title, message, data = {}) {

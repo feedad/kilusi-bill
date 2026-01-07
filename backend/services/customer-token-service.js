@@ -96,11 +96,12 @@ class CustomerTokenService {
 
             // Check in customers table with package join (via services table)
             const customer = await getOne(
-                `SELECT c.id, c.name, c.phone, c.pppoe_username, c.email, c.status,
+                `SELECT c.id, c.name, c.phone, td.pppoe_username, c.email, c.status,
                         s.package_id, c.customer_id, COALESCE(s.address_installation, c.address) as address,
                         p.name as package_name, p.price as package_price
                  FROM customers c
                  LEFT JOIN services s ON s.customer_id = c.id
+                 LEFT JOIN technical_details td ON td.service_id = s.id
                  LEFT JOIN packages p ON s.package_id = p.id
                  WHERE c.portal_access_token = $1 AND c.token_expires_at >= $2
                  LIMIT 1`,

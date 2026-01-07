@@ -83,50 +83,45 @@ function snmpGet(session, oids) {
         if (value === null || value === undefined) {
           value = 0;
         } else if (Buffer.isBuffer(value)) {
-          // Check if printable ASCII first (for text like sysName, sysDescr)
-          try {
-            if (value.length === 0) {
-              value = '';
-            } else {
-              const isPrintable = Array.from(value).every(b => b >= 32 && b <= 126 || b === 0);
-              if (isPrintable && value.length > 1) {
-                // String buffer (sysName, sysDescr, etc.)
-                value = value.toString('utf8').replace(/\0+$/, '').trim();
-              } else if (value.length === 6 && !isPrintable) {
-                // Could be MAC address (6 bytes, non-printable) - check if looks like MAC
-                // MAC addresses typically have varied bytes, counters may have leading zeros
-                const hasVariedBytes = new Set(Array.from(value)).size > 2;
-                if (hasVariedBytes) {
-                  // Likely MAC address - keep as buffer for MAC formatting elsewhere
-                  value = vb.value;
-                } else {
-                  // Likely 6-byte counter - parse as number
-                  value = parseVariableLengthInt(value);
-                }
-              } else if (!isPrintable && value.length >= 3 && value.length <= 8) {
-                // Variable-length counter (Counter64 can be 3-8 bytes)
-                value = parseVariableLengthInt(value);
-              } else if (value.length === 2 && !isPrintable) {
-                // 16-bit value
-                value = value.readUInt16BE(0);
-              } else if (value.length === 1) {
-                // Could be single char or byte
-                if (isPrintable) {
-                  value = value.toString('utf8');
-                } else {
-                  value = value.readUInt8(0);
-                }
-              } else if (!isPrintable) {
-                // Non-printable buffer of unknown length - try to parse as number
-                value = parseVariableLengthInt(value);
+          // Special handling for Counter64 (Type 70)
+          if (vb.type === 70) {
+            value = parseVariableLengthInt(value);
+          } else {
+            // General Buffer Handling (Strings, MACs, Numbers)
+            try {
+              if (value.length === 0) {
+                value = '';
               } else {
-                // Try as UTF8 string
-                value = value.toString('utf8').replace(/\0+$/, '').trim();
+                // Check printability
+                const isPrintable = Array.from(value).every(b => (b >= 32 && b <= 126) || b === 0 || b === 9 || b === 10 || b === 13);
+
+                if (isPrintable && value.length > 1) {
+                  // Likely String
+                  value = value.toString('utf8').replace(/\0+$/, '').trim();
+                } else if (value.length === 6 && !isPrintable) {
+                  // MAC Address Check
+                  const hasVariedBytes = new Set(Array.from(value)).size > 2;
+                  if (hasVariedBytes) {
+                    // Keep as Buffer (MAC)
+                    value = vb.value;
+                  } else {
+                    // 6-byte counter
+                    value = parseVariableLengthInt(value);
+                  }
+                } else if (!isPrintable && value.length <= 8) {
+                  // Unknown binary, treat as number (Counter/Gauge)
+                  value = parseVariableLengthInt(value);
+                } else if (isPrintable) {
+                  value = value.toString('utf8').replace(/\0+$/, '').trim();
+                } else {
+                  // Fallback to hex
+                  value = value.toString('hex');
+                }
               }
+            } catch (e) {
+              // If parsing fails, use raw or string
+              value = value.toString();
             }
-          } catch (e) {
-            logger.warn(`Failed to parse buffer value for OID ${vb.oid}: ${e.message}, using raw value`);
-            value = vb.value;
           }
         } else if (typeof value === 'object' && value.constructor && value.constructor.name === 'Counter64') {
           // Handle Counter64 objects from net-snmp
@@ -289,9 +284,26 @@ async function getInterfaceTraffic({ host, community, version, port, interfaceNa
   try {
     logger.debug(`SNMP: Getting traffic for ${interfaceName} on ${host}:${port}`);
     const ifIndex = await resolveIfIndex(session, interfaceName);
-    const inOid = `${OIDS.ifHCInOctets}.${ifIndex}`;
-    const outOid = `${OIDS.ifHCOutOctets}.${ifIndex}`;
-    const res = await snmpGet(session, [inOid, outOid]);
+
+    // Try 64-bit HC counters first
+    let inOid = `${OIDS.ifHCInOctets}.${ifIndex}`;
+    let outOid = `${OIDS.ifHCOutOctets}.${ifIndex}`;
+    let res;
+
+    try {
+      res = await snmpGet(session, [inOid, outOid]);
+    } catch (e) {
+      // Fallback to 32-bit counters if HC counters fail (common on virtual interfaces/VLANs)
+      const msg = (e && e.message) ? e.message.toLowerCase() : '';
+      if (msg.includes('nosuch') || msg.includes('not found') || msg.includes('no such')) {
+        logger.debug(`SNMP: 64-bit counters not supported for ${interfaceName}, falling back to 32-bit`);
+        inOid = `1.3.6.1.2.1.2.2.1.10.${ifIndex}`; // ifInOctets
+        outOid = `1.3.6.1.2.1.2.2.1.16.${ifIndex}`; // ifOutOctets
+        res = await snmpGet(session, [inOid, outOid]);
+      } else {
+        throw e;
+      }
+    }
     const key = `${host}|${community}|${ifIndex}`;
     const entry = rateCache.get(key) || { in: null, out: null };
     const inComp = computeRate(entry.in, res[inOid]);

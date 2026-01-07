@@ -24,7 +24,7 @@ adminApi.interceptors.request.use(
 
       // Only add auth header for non-auth endpoints
       const isAuthEndpoint = config.url?.includes('/auth/login') ||
-                           config.url?.includes('/auth/refresh')
+        config.url?.includes('/auth/refresh')
 
       if (!isAuthEndpoint) {
         const authStorage = localStorage.getItem(CONFIG.TOKEN_KEYS.ADMIN_JWT)
@@ -237,6 +237,14 @@ export const endpoints = {
     genieacs: '/api/v1/genieacs',
     tokens: '/api/v1/tokens',
     settings: '/api/v1/settings',
+    monitoring: {
+      stats: '/api/v1/monitoring/stats',
+      monitors: '/api/v1/monitoring/monitors',
+    },
+    technician: {
+      dashboard: '/api/v1/technician/dashboard',
+      online: '/api/v1/technician/online-customers',
+    },
   },
   // Customer endpoints
   customer: {

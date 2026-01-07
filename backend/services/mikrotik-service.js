@@ -7,6 +7,7 @@ const snmpMonitor = require('../services/snmp-monitor-service'); // Use the SERV
 const snmpLib = require('../config/snmp-monitor');
 const radiusService = require('./radius-service');
 const radiusDb = require('../config/radius-postgres'); // Direct DB access for voucher generation
+const radiusDisconnect = require('../config/radius-disconnect'); // Import Disconnect module
 
 class MikrotikService {
     constructor() {
@@ -428,7 +429,14 @@ class MikrotikService {
                 await db.query(`DELETE FROM radusergroup WHERE username = $1`, [username]);
                 await db.query(`INSERT INTO radusergroup (username, groupname, priority) VALUES ($1, $2, 1)`, [username, profile]);
 
-                return { success: true, message: `Updated RADIUS group to ${profile}` };
+                // Disconnect user to apply new profile
+                if (profile !== 'default') { // Optional: Don't disconnect if restoring default? No, we likely want to restore service.
+                    // Actually, if we change profile (isolir -> normal), we MUST disconnect to re-auth with new profile.
+                    logger.info(`[MikrotikService] Profile changed to ${profile}. Disconnecting user ${username} to apply changes...`);
+                    this.disconnectRadiusUser(username).catch(err => logger.error(`Background disconnect failed: ${err.message}`));
+                }
+
+                return { success: true, message: `Updated RADIUS group to ${profile} and triggered disconnect` };
             } catch (e) {
                 return { success: false, message: e.message };
             }
@@ -436,19 +444,46 @@ class MikrotikService {
         return { success: false, message: 'API mode not supported' };
     }
 
-    /**
-     * Remove Active Session (Disconnect User)
-     */
     async removeActiveSession(username) {
         if (this.getAuthMode() === 'radius') {
-            // To disconnect a RADIUS user, we typically send CoA-Request to NAS.
-            // We don't have CoA implementation here yet.
-            // We can stub it or log it.
-            // "Disconnect active session" in RADIUS mode is hard without CoA.
-            logger.warn(`[MikrotikService] CoA Disconnect for ${username} not implemented yet. User will be updated on next re-login.`);
-            return { success: true, message: 'CoA not implemented' };
+            return await this.disconnectRadiusUser(username);
         }
         return { success: false, message: 'API mode not supported' };
+    }
+
+    /**
+     * Helper: Disconnect RADIUS User via CoA
+     */
+    async disconnectRadiusUser(username) {
+        try {
+            // 1. Check if user is online
+            const status = await radiusService.getUserConnectionStatus(username);
+            if (!status || !status.online) {
+                logger.info(`[MikrotikService] User ${username} is already offline (skipping disconnect)`);
+                return { success: true, message: 'User already offline' };
+            }
+
+            // 2. Get NAS Secret
+            const nas = await radiusService.getNasByIp(status.nas_ip);
+            if (!nas) {
+                logger.error(`[MikrotikService] Failed to find NAS for IP ${status.nas_ip}`);
+                return { success: false, message: 'NAS not found' };
+            }
+
+            // 3. Send Disconnect Request
+            const result = await radiusDisconnect.disconnectUser({
+                username,
+                nasIp: status.nas_ip,
+                nasSecret: nas.secret,
+                sessionId: status.session_id || status.acctsessionid
+            });
+
+            return result;
+
+        } catch (e) {
+            logger.error(`[MikrotikService] Disconnect failed for ${username}: ${e.message}`);
+            return { success: false, message: e.message };
+        }
     }
 
 }

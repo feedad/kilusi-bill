@@ -26,6 +26,22 @@ interface AppState {
   removeNotification: (id: string) => void
   clearNotifications: () => void
   updateSettings: (settings: Partial<AppState['settings']>) => void
+
+  // Server Notifications
+  serverNotifications: ServerNotification[]
+  unreadServerNotifications: number
+  fetchServerNotifications: () => Promise<void>
+  markServerNotificationRead: (id: number) => Promise<void>
+}
+
+export interface ServerNotification {
+  id: number
+  type: string
+  title: string
+  message: string
+  data: any
+  is_read: boolean
+  created_at: string
 }
 
 export interface Notification {
@@ -39,22 +55,66 @@ export interface Notification {
 
 export type NotificationInput = Omit<Notification, 'id' | 'timestamp'>
 
+// Dynamic import to avoid circular dependency issues if any
+let adminApi: any = null
+const getAdminApi = async () => {
+  if (!adminApi) {
+    const mod = await import('@/lib/api-clients')
+    adminApi = mod.adminApi
+  }
+  return adminApi
+}
+
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
       // Initial states
       sidebarOpen: true,
       theme: 'light',
-      notifications: [],
+      notifications: [], // UI toasts
+      serverNotifications: [], // Backend notifications
+      unreadServerNotifications: 0,
       globalLoading: false,
 
       settings: {
         companyName: 'Kilusi ISP',
         currency: 'IDR',
         dateFormat: 'DD/MM/YYYY',
+        logo: '',
       },
 
       // Actions
+      fetchServerNotifications: async () => {
+        try {
+          const api = await getAdminApi()
+          const res = await api.get('/api/v1/notifications')
+          if (res.data.success) {
+            set({
+              serverNotifications: res.data.data,
+              unreadServerNotifications: res.data.meta?.unreadCount || 0
+            })
+          }
+        } catch (error) {
+          console.error('Failed to fetch notifications:', error)
+        }
+      },
+
+      markServerNotificationRead: async (id: number) => {
+        try {
+          const api = await getAdminApi()
+          await api.put(`/api/v1/notifications/${id}/read`)
+
+          // Optimistic update
+          const notifications = get().serverNotifications.map(n =>
+            n.id === id ? { ...n, is_read: true } : n
+          )
+          const unreadCount = notifications.filter(n => !n.is_read).length
+          set({ serverNotifications: notifications, unreadServerNotifications: unreadCount })
+        } catch (error) {
+          console.error('Failed to mark notification read:', error)
+        }
+      },
+
       setSidebarOpen: (open: boolean) => set({ sidebarOpen: open }),
 
       setTheme: (theme: 'light' | 'dark') => {

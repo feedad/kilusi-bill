@@ -55,6 +55,11 @@ router.use('/radius-comments', jwtAuth, require('./radius-comments'));
 router.use('/branding-public', require('./branding-public'));
 router.use('/branding', jwtAuth, require('./branding'));
 router.use('/system', require('./system'));
+router.use('/monitoring', jwtAuth, require('./monitoring'));
+router.use('/landing', require('./landing-page'));
+router.use('/notifications', jwtAuth, require('./notifications'));
+router.use('/blog', require('./blog')); // Blog Routes
+router.use('/public', require('./public-registration')); // Public Registration
 // Import payments routes
 const { router: paymentsRouter, webhookRouter } = require('./payments');
 
@@ -82,5 +87,9 @@ router.get('/health', (req, res) => {
         version: '1.0.0'
     });
 });
+
+// Public Settings Route
+const publicSettingsRouter = require('./public-settings');
+router.use('/public', publicSettingsRouter);
 
 module.exports = router;

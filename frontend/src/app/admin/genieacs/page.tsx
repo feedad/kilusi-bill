@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useAuthStore } from '@/store/authStore'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui'
 import { Button } from '@/components/ui'
 import { Input } from '@/components/ui'
@@ -46,6 +47,7 @@ interface DeviceStats {
 }
 
 export default function GenieACSPage() {
+  const { user } = useAuthStore()
   const [devices, setDevices] = useState<GenieACSDevice[]>([])
   const [stats, setStats] = useState<DeviceStats>({
     total_devices: 0,
@@ -280,9 +282,9 @@ export default function GenieACSPage() {
       {/* Page Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-foreground">Manajemen Perangkat GenieACS</h1>
+          <h1 className="text-2xl font-semibold text-foreground">Manajemen Perangkat ACS / TR-069</h1>
           <p className="text-muted-foreground">
-            Monitor dan kelola perangkat ONU/ONT melalui GenieACS
+            Monitor dan kelola perangkat ONU/ONT melalui ACS / TR-069
           </p>
         </div>
         <div className="flex items-center space-x-2">
@@ -303,14 +305,18 @@ export default function GenieACSPage() {
               />
             </button>
           </div>
-          <Button variant="outline" onClick={() => { fetchSettings(); setShowSettings(true); }}>
-            <Settings className="h-4 w-4 mr-2" />
-            Setting API
-          </Button>
-          <Button>
-            <Plus className="h-4 w-4 mr-2" />
-            Tambah Device
-          </Button>
+          {user?.role === 'admin' && (
+            <>
+              <Button variant="outline" onClick={() => { fetchSettings(); setShowSettings(true); }}>
+                <Settings className="h-4 w-4 mr-2" />
+                Setting API
+              </Button>
+              <Button>
+                <Plus className="h-4 w-4 mr-2" />
+                Tambah Device
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -495,24 +501,28 @@ export default function GenieACSPage() {
                               <Eye className="h-3 w-3 mr-1" />
                               Detail
                             </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleEditSSID(device)}
-                              className="h-8 px-3"
-                            >
-                              <Edit className="h-3 w-3 mr-1" />
-                              Edit SSID
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleDeviceAction(device._id || device.id, 'reboot')}
-                              className="h-8 px-3"
-                            >
-                              <RefreshCw className="h-3 w-3 mr-1" />
-                              Restart
-                            </Button>
+                            {user?.role === 'admin' && (
+                              <>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleEditSSID(device)}
+                                  className="h-8 px-3"
+                                >
+                                  <Edit className="h-3 w-3 mr-1" />
+                                  Edit SSID
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleDeviceAction(device._id || device.id, 'reboot')}
+                                  className="h-8 px-3"
+                                >
+                                  <RefreshCw className="h-3 w-3 mr-1" />
+                                  Restart
+                                </Button>
+                              </>
+                            )}
                           </div>
                         </div>
                       </CardContent>
@@ -594,26 +604,30 @@ export default function GenieACSPage() {
                                     <Eye className="h-3 w-3 mr-1" />
                                     Detail
                                   </Button>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => handleEditSSID(device)}
-                                    className="h-6 px-2"
-                                    title="Edit SSID & Password"
-                                  >
-                                    <Edit className="h-3 w-3 mr-1" />
-                                    Edit SSID
-                                  </Button>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => handleDeviceAction(device._id || device.id, 'reboot')}
-                                    className="h-6 px-2"
-                                    title="Restart ONU"
-                                  >
-                                    <RefreshCw className="h-3 w-3 mr-1" />
-                                    Restart
-                                  </Button>
+                                  {user?.role === 'admin' && (
+                                    <>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleEditSSID(device)}
+                                        className="h-6 px-2"
+                                        title="Edit SSID & Password"
+                                      >
+                                        <Edit className="h-3 w-3 mr-1" />
+                                        Edit SSID
+                                      </Button>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleDeviceAction(device._id || device.id, 'reboot')}
+                                        className="h-6 px-2"
+                                        title="Restart ONU"
+                                      >
+                                        <RefreshCw className="h-3 w-3 mr-1" />
+                                        Restart
+                                      </Button>
+                                    </>
+                                  )}
                                 </div>
                               </td>
                             </tr>

@@ -354,7 +354,7 @@ async function getODPStats() {
                 (SELECT COUNT(*) FROM customers_view WHERE odp_code IS NOT NULL AND odp_code != '') as total_used_ports,
                 (SELECT COUNT(*) FROM customers_view WHERE odp_code IS NOT NULL) as total_connected_customers,
                 (SELECT COUNT(*) FROM customers_view WHERE odp_code IS NOT NULL AND status = 'active') as total_active_customers,
-                (SELECT COUNT(*) FROM customers WHERE latitude IS NOT NULL AND longitude IS NOT NULL) as mapped_customers
+                (SELECT COUNT(*) FROM customers_view WHERE latitude IS NOT NULL AND longitude IS NOT NULL) as mapped_customers
         `);
 
         return stats;

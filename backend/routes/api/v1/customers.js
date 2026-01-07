@@ -11,8 +11,9 @@ router.get('/', jwtAuth, asyncHandler(async (req, res) => {
     const search = req.query.search || '';
     const status = req.query.status || '';
     const has_service = req.query.has_service; // 'true', 'false', or undefined
+    const exclude_status = req.query.exclude_status ? req.query.exclude_status.split(',') : undefined;
 
-    const { data, pagination } = await CustomerService.getAllCustomers({ page, limit, search, status, has_service });
+    const { data, pagination } = await CustomerService.getAllCustomers({ page, limit, search, status, has_service, exclude_status });
 
     return res.sendPaginated(data, pagination, {
         search: search || undefined,
@@ -49,7 +50,7 @@ router.get('/:id', jwtAuth, asyncHandler(async (req, res) => {
 router.post('/identity', jwtAuth, asyncHandler(async (req, res) => {
     try {
         const customer = await CustomerService.createIdentity(req.body);
-        
+
         return res.sendSuccess({ customer }, {
             customerId: customer.id,
             message: 'Identitas pelanggan berhasil dibuat'
@@ -143,7 +144,7 @@ router.delete('/:id', jwtAuth, asyncHandler(async (req, res) => {
 router.post('/:id/services', jwtAuth, asyncHandler(async (req, res) => {
     try {
         const result = await CustomerService.createService(req.params.id, req.body);
-        
+
         return res.sendSuccess(result, {
             customerId: req.params.id,
             serviceId: result.serviceId,

@@ -46,6 +46,15 @@ class RadiusService {
     }
 
     /**
+     * Get NAS by IP
+     */
+    async getNasByIp(ip) {
+        const queryStr = `SELECT * FROM nas WHERE nasname = $1 LIMIT 1`;
+        const result = await query(queryStr, [ip]);
+        return result.rows[0];
+    }
+
+    /**
      * Create NAS
      */
     async createNas(data) {
