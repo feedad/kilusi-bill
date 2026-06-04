@@ -130,16 +130,15 @@ async function initializeRadiusTables() {
         // Insert default groups if they don't exist
         await query(`
             INSERT INTO radgroup (groupname, description, priority) VALUES
-            ('default', 'Default user group', 1),
-            ('vip', 'VIP user group', 2),
-            ('isolir', 'Isolated users group', 3)
+            ('ISOLIR', 'Isolated users group', 3),
+            ('HOTSPOT_DEFAULT', 'Hotspot default group', 5)
             ON CONFLICT (groupname) DO NOTHING
         `);
 
-        // Insert default group attributes for 'isolir' group
+        // Insert default group attributes for 'ISOLIR' group
         await query(`
             INSERT INTO radgroupreply (groupname, attribute, op, value) VALUES
-            ('isolir', 'Framed-Pool', ':=', 'isolir')
+            ('ISOLIR', 'Framed-Pool', ':=', 'ISOLIR')
             ON CONFLICT DO NOTHING
         `);
 
@@ -204,16 +203,18 @@ async function createOrUpdateRadiusUser(username, password, groupname = 'default
                 DO UPDATE SET value = EXCLUDED.value
             `, [username, password]);
 
-            // Add user to group
+            // Delete all existing group assignments for this user (clean both with/without suffix)
+            const baseUsername = username.split('@')[0];
+            await client.query(`DELETE FROM radusergroup WHERE username LIKE $1`, [`${baseUsername}%`]);
+
+            // Add user to group (only one group)
             await client.query(`
                 INSERT INTO radusergroup (username, groupname, priority)
                 VALUES ($1, $2, 1)
-                ON CONFLICT (username, groupname)
-                DO UPDATE SET priority = EXCLUDED.priority
             `, [username, groupname]);
         });
 
-        logger.info(`✅ RADIUS user ${username} created/updated`);
+        logger.info(`✅ RADIUS user ${username} created/updated (group: ${groupname})`);
         return true;
     } catch (error) {
         logger.error(`Error creating/updating RADIUS user ${username}: ${error.message}`);
@@ -565,6 +566,62 @@ async function deleteNasClient(id) {
 }
 
 /**
+ * Set RADIUS group reply attribute (for group-level settings like rate limits)
+ */
+async function setRadiusGroupReplyAttribute(groupname, attribute, value) {
+    if (!groupname || !attribute) {
+        throw new Error('Groupname and attribute are required');
+    }
+
+    try {
+        // First delete any existing entry for this groupname+attribute combination
+        await query(`
+            DELETE FROM radgroupreply WHERE groupname = $1 AND attribute = $2
+        `, [groupname, attribute]);
+
+        // Then insert the new value
+        await query(`
+            INSERT INTO radgroupreply (groupname, attribute, op, value)
+            VALUES ($1, $2, ':=', $3)
+        `, [groupname, attribute, value]);
+
+        logger.debug(`✅ Set group attribute: ${groupname} -> ${attribute} = ${value}`);
+        return true;
+    } catch (error) {
+        logger.error(`Error setting group attribute ${groupname}.${attribute}: ${error.message}`);
+        throw error;
+    }
+}
+
+/**
+ * Set RADIUS user reply attribute (for user-specific settings)
+ */
+async function setRadiusReplyAttribute(username, attribute, value) {
+    if (!username || !attribute) {
+        throw new Error('Username and attribute are required');
+    }
+
+    try {
+        // First delete any existing entry for this username+attribute combination
+        await query(`
+            DELETE FROM radreply WHERE username = $1 AND attribute = $2
+        `, [username, attribute]);
+
+        // Then insert the new value
+        await query(`
+            INSERT INTO radreply (username, attribute, op, value)
+            VALUES ($1, $2, ':=', $3)
+        `, [username, attribute, value]);
+
+        logger.debug(`✅ Set user attribute: ${username} -> ${attribute} = ${value}`);
+        return true;
+    } catch (error) {
+        logger.error(`Error setting user attribute ${username}.${attribute}: ${error.message}`);
+        throw error;
+    }
+}
+
+/**
  * Close database connection (cleanup)
  */
 async function closeDatabase() {
@@ -590,6 +647,8 @@ module.exports = {
     getAllNasClients,
     addNasClient,
     deleteNasClient,
+    setRadiusGroupReplyAttribute,
+    setRadiusReplyAttribute,
     closeDatabase,
 
     // Legacy compatibility methods

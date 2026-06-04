@@ -28,10 +28,26 @@ const verifyCustomerToken = async (req, res, next) => {
         // Or we can just use the customer object from session
         req.customer = sessionValidation.customer;
 
-        // IMPORTANT: Fetch pppoe_username from DB if missing in session
-        // Note: Columns missing in DB, disabling fetch
+        // Fetch pppoe_username from DB if missing in session
         if (!req.customer.pppoe_username) {
-          // Logic disabled
+          try {
+            const { getOne } = require('../../../config/database');
+            const dbCustomer = await getOne(`
+              SELECT t.pppoe_username
+              FROM services s
+              LEFT JOIN technical_details t ON s.id = t.service_id
+              WHERE s.customer_id::text = $1
+              LIMIT 1
+            `, [req.customer.id || req.customer.customer_id]);
+            if (dbCustomer && dbCustomer.pppoe_username) {
+              req.customer.pppoe_username = dbCustomer.pppoe_username;
+              console.log(`✅ Fetched pppoe_username from DB: ${dbCustomer.pppoe_username}`);
+            } else {
+              console.log(`⚠️ No pppoe_username found in DB for customer ${req.customer.id || req.customer.customer_id}`);
+            }
+          } catch (dbError) {
+            console.error('❌ Failed to fetch pppoe_username from DB:', dbError.message);
+          }
         }
 
         return next();
@@ -50,10 +66,10 @@ const verifyCustomerToken = async (req, res, next) => {
       const decoded = jwt.verify(token, CUSTOMER_JWT_SECRET);
 
       if (decoded.type === 'customer' && decoded.customerId) {
-        // Get customer by ID
+        // Get customer by ID from customers_view to include pppoe_username
         const query = `
           SELECT c.*
-          FROM customers c
+          FROM customers_view c
           WHERE c.id = $1
         `;
         const result = await pool.query(query, [decoded.customerId]);
@@ -161,7 +177,7 @@ router.get('/info', verifyCustomerToken, async (req, res) => {
     const radiusData = {
       radius_username: customer.pppoe_username,
       radius_attribute: 'Cleartext-Password',
-      radius_password: customer.wifi_password || '********',
+      radius_password: customer.pppoe_password || '********',
       radius_op: ':=',
       session_start: radiusConnection.session_start || null,
       session_end: null,
@@ -202,28 +218,159 @@ router.get('/info', verifyCustomerToken, async (req, res) => {
       }
     }
 
-    // Get device information from RADIUS data
+    // Get device information from RADIUS and GenieACS
+    let acsDevice = null;
+    let acsDeviceId = null;
+    const genieacs = require('../../../config/genieacs');
+
+    try {
+      // Try multiple search strategies
+      const searchStrategies = [
+        { query: { '_tags': `id:${customer.id}` }, label: 'customer_id' },
+        { query: { '_tags': customer.phone }, label: 'phone' },
+        { query: { '_tags': `pppoe:${customer.pppoe_username}` }, label: 'pppoe' }
+      ];
+
+      for (const strategy of searchStrategies) {
+        try {
+          const axiosInstance = genieacs.getAxiosInstance();
+          const acsResponse = await axiosInstance.get('/devices', {
+            params: { 'query': JSON.stringify(strategy.query) }
+          });
+
+          if (acsResponse.data && acsResponse.data.length > 0) {
+            acsDevice = acsResponse.data[0];
+            acsDeviceId = acsDevice._id;
+            console.log(`✅ Found ACS device by ${strategy.label}: ${acsDeviceId}`);
+            break;
+          }
+        } catch (e) {
+          console.log(`⚠️ Search by ${strategy.label} failed:`, e.message);
+        }
+      }
+
+      if (!acsDevice) {
+        console.log(`⚠️ GenieACS returned no devices for customer ${customer.id}`);
+      }
+    } catch (acsError) {
+      console.warn(`❌ Error searching ACS for customer ${customer.id}:`, acsError.message);
+    }
+
+    // Parse SSID and connected devices directly from acsDevice (list endpoint object)
+    let acsSSID = null;
+    let acsConnectedDevices = [];
+    if (acsDevice) {
+      try {
+        // Log available top-level keys for debugging
+        console.log(`🔍 GenieACS device keys: ${Object.keys(acsDevice).join(', ')}`);
+        if (acsDevice.InternetGatewayDevice) {
+          console.log(`🔍 IGD keys: ${Object.keys(acsDevice.InternetGatewayDevice).join(', ')}`);
+          const lanDev = acsDevice.InternetGatewayDevice.LANDevice;
+          if (lanDev) {
+            console.log(`🔍 LANDevice keys: ${Object.keys(lanDev).join(', ')}`);
+            if (lanDev['1']) {
+              console.log(`🔍 LANDevice.1 keys: ${Object.keys(lanDev['1']).join(', ')}`);
+              if (lanDev['1'].Hosts) {
+                console.log(`🔍 Hosts keys: ${Object.keys(lanDev['1'].Hosts).join(', ')}`);
+                console.log(`🔍 HostNumberOfEntries: ${lanDev['1'].Hosts.HostNumberOfEntries?._value || 'N/A'}`);
+                if (lanDev['1'].Hosts.Host) {
+                  console.log(`🔍 Host entries keys: ${Object.keys(lanDev['1'].Hosts.Host).slice(0, 10).join(', ')}`);
+                  const firstHost = lanDev['1'].Hosts.Host['1'];
+                  console.log(`🔍 firstHost type: ${typeof firstHost}, isNull: ${firstHost === null}`);
+                  if (firstHost) {
+                    console.log(`🔍 Sample Host entry keys: ${Object.keys(firstHost).slice(0, 15).join(', ')}`);
+                    console.log(`🔍 Sample Host entry: ${JSON.stringify(firstHost).substring(0, 200)}`);
+                  }
+                }
+              }
+              if (lanDev['1'].WLANConfiguration) {
+                console.log(`🔍 WLANConfiguration keys: ${Object.keys(lanDev['1'].WLANConfiguration).join(', ')}`);
+                const wlan1 = lanDev['1'].WLANConfiguration['1'];
+                if (wlan1) {
+                  console.log(`🔍 WLAN.1 keys: ${Object.keys(wlan1).slice(0, 15).join(', ')}`);
+                }
+              }
+            }
+          }
+        }
+        if (acsDevice.Device) {
+          console.log(`🔍 Device keys: ${Object.keys(acsDevice.Device).join(', ')}`);
+        }
+
+        acsSSID = genieacs.parseSSID(acsDevice);
+        acsConnectedDevices = genieacs.parseConnectedDevices(acsDevice);
+        console.log(`📡 GenieACS SSID: ${acsSSID}, Connected devices: ${acsConnectedDevices.length}`);
+      } catch (e) {
+        console.warn('Error parsing GenieACS device data:', e.message);
+      }
+    }
+
+    // Validasi MAC Address (harus format 00:00:00:00:00:00)
+    const isValidMac = (mac) => /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/.test(mac);
+
+    // SSID: ambil dari GenieACS (real-time), fallback ke DB, then fallback ke default
+    let finalSSID = acsSSID || customer.ssid || null;
+    if (!finalSSID && customer.pppoe_username) {
+      finalSSID = 'KilusiNet-' + customer.pppoe_username.split('@')[0];
+    }
+
+    // Auto-sync SSID dari GenieACS ke DB: selalu sync kalau GenieACS punya data yang berbeda dari DB
+    if (acsSSID && acsSSID !== customer.ssid) {
+      try {
+        const { query } = require('../../../config/database');
+        await query(`UPDATE customers SET ssid = $1, updated_at = NOW() WHERE id = $2`, [acsSSID, customer.id]);
+        console.log(`🔄 Auto-synced SSID from GenieACS to DB: ${acsSSID} (was: ${customer.ssid})`);
+      } catch (syncErr) {
+        console.warn('Failed to sync SSID to DB:', syncErr.message);
+      }
+    }
+
+    // Password WiFi: dari DATABASE (GenieACS tidak expose password via API)
+    const dbWiFiPassword = customer.wifi_password || '********';
+
     const deviceInfo = {
-      ipAddress: radiusConnection.online ? (radiusData.assigned_ip || '-') : '-',
-      macAddress: radiusConnection.online ? (radiusConnection.mac_address || customer.mac_address || '-') : '-',
-      ssid: radiusConnection.online ? (customer.ssid || 'KilusiNet-' + customer.pppoe_username) : (customer.ssid || 'KilusiNet-' + customer.pppoe_username),
+      ipAddress: radiusConnection.online ? (radiusConnection.ip_address || '-') : '-',
+      macAddress: (radiusConnection.online && isValidMac(radiusConnection.mac_address))
+        ? radiusConnection.mac_address
+        : (customer.mac_address || '-'),
+      ssid: finalSSID || 'KilusiNet',
+      wifiPassword: dbWiFiPassword,
       status: radiusData.status,
       uptime: radiusData.status === 'online' ? formatUptime(realTimeSessionDuration) : '-',
-      lastSeen: radiusConnection.online && radiusData.session_start ? new Date(radiusData.session_start).toLocaleString('id-ID') : '-',
+      lastSeen: radiusConnection.online && radiusData.session_start ? new Date(radiusData.session_start).toLocaleString('id-ID') : (acsDevice?._lastInform ? new Date(acsDevice._lastInform).toLocaleString('id-ID') : '-'),
       radiusUsername: radiusData.radius_username,
-      connectionType: radiusConnection.online ? (radiusData.connection_type || 'Wireless') : '-',
+      connectionType: radiusConnection.online ? (radiusData.connection_type || 'Wireless') : (acsDevice ? 'TR-069' : '-'),
       nasIP: radiusConnection.online ? radiusData.nas_ip : '-',
-      sessionStartTime: radiusConnection.online ? radiusData.session_start : null
+      sessionStartTime: radiusConnection.online ? radiusData.session_start : null,
+      model: acsDevice?.DeviceID?.ProductClass || acsDevice?.InternetGatewayDevice?.DeviceInfo?.ProductClass?._value || '-',
+      serialNumber: acsDevice?.DeviceID?.SerialNumber || acsDevice?.InternetGatewayDevice?.DeviceInfo?.SerialNumber?._value || '-',
+      rxPower: acsDevice?.VirtualParameters?.RXPower?._value || acsDevice?.InternetGatewayDevice?.WANDevice?.['1']?.WANPONInterfaceConfig?.RXPower?._value || '-'
     };
 
     console.log(`[DEBUG] Device Info sessionStartTime:`, deviceInfo.sessionStartTime);
     console.log(`[DEBUG] Device Info status:`, deviceInfo.status);
 
-    // Connected devices based on real RADIUS data
-    const connectedDevices = radiusConnection.online ? [
-      {
-        mac: radiusConnection.mac_address || customer.mac_address || 'AA:BB:CC:DD:EE:FF',
-        ip: radiusData.assigned_ip || '192.168.1.100',
+    // Connected devices from GenieACS (real LAN hosts / AssociatedDevice)
+    let connectedDevices = [];
+    if (acsConnectedDevices.length > 0) {
+      connectedDevices = acsConnectedDevices.map(dev => ({
+        mac: dev.mac || '-',
+        ip: dev.ip || '-',
+        name: dev.name || 'Unknown Device',
+        deviceType: 'other',
+        connectionTime: '-',
+        uploadSpeed: 0,
+        downloadSpeed: 0,
+        signalStrength: dev.signalStrength || -50,
+        status: 'online'
+      }));
+    }
+
+    // If no ACS data, fallback to RADIUS device entry
+    if (connectedDevices.length === 0 && radiusConnection.online) {
+      connectedDevices.push({
+        mac: radiusConnection.mac_address || customer.mac_address || '-',
+        ip: radiusData.assigned_ip || '-',
         name: 'Customer Device',
         deviceType: 'laptop',
         connectionTime: formatConnectionTime(radiusData.session_start),
@@ -231,8 +378,8 @@ router.get('/info', verifyCustomerToken, async (req, res) => {
         downloadSpeed: parseFloat(currentDownloadSpeed) || 0,
         signalStrength: -45,
         status: radiusData.status
-      }
-    ] : [];
+      });
+    }
 
     // Traffic statistics with real-time session duration
     const trafficStats = {
@@ -258,11 +405,15 @@ router.get('/info', verifyCustomerToken, async (req, res) => {
         radiusInfo: {
           username: radiusData.radius_username,
           attribute: radiusData.radius_attribute,
+          password: radiusData.radius_password,
           sessionActive: radiusData.status === 'online',
           sessionStart: radiusData.session_start,
           nasIP: radiusData.nas_ip
         },
-        deviceInfo,
+        deviceInfo: {
+          ...deviceInfo,
+          radiusPassword: radiusData.radius_password
+        },
         connectedDevices,
         trafficStats,
         customer: {
@@ -285,8 +436,8 @@ router.get('/info', verifyCustomerToken, async (req, res) => {
   }
 });
 
-// Update WiFi password (customer table)
-router.put('/password', verifyCustomerToken, async (req, res) => {
+// Update WiFi Password
+router.put('/wifi-password', verifyCustomerToken, async (req, res) => {
   try {
     const customer = req.customer;
     const { newPassword } = req.body;
@@ -298,30 +449,47 @@ router.put('/password', verifyCustomerToken, async (req, res) => {
       });
     }
 
-    // Use the database from config
-    // const pool = getPool();
+    const genieacs = require('../../../config/genieacs');
+    const customerIdTag = `id:${customer.id}`;
 
-    // Update password in customer table
-    // Column missing in DB
-    /*const updatePasswordQuery = `
+    // Find device
+    const axiosInstance = genieacs.getAxiosInstance();
+    const acsResponse = await axiosInstance.get('/devices', {
+        params: { 'query': JSON.stringify({ '_tags': customerIdTag }) }
+    });
+
+    if (!acsResponse.data || acsResponse.data.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Perangkat modem tidak ditemukan di sistem ACS. Pastikan modem sudah online.'
+      });
+    }
+
+    const deviceId = acsResponse.data[0]._id;
+
+    // Perform update on GenieACS
+    await genieacs.setParameterValues(deviceId, {
+        'Password': newPassword
+    });
+
+    // Also save to database so customer can reveal it later in portal
+    const { query } = require('../../../config/database');
+    await query(`
       UPDATE customers
-      SET wifi_password = $1,
-          updated_at = NOW()
+      SET wifi_password = $1, updated_at = NOW()
       WHERE id = $2
-    `;
+    `, [newPassword, customer.id]);
 
-    await pool.query(updatePasswordQuery, [newPassword, customer.id]);*/
-
-    return res.status(501).json({
-      success: false,
-      message: 'Fitur belum tersedia (kolom database belum ada)'
+    return res.json({
+      success: true,
+      message: 'Password WiFi sedang diperbarui. Modem akan sinkronisasi dalam beberapa saat.'
     });
 
   } catch (error) {
     console.error('Error updating WiFi password:', error);
     res.status(500).json({
       success: false,
-      message: 'Error memperbarui password',
+      message: 'Gagal memperbarui password WiFi',
       error: error.message
     });
   }
@@ -340,30 +508,84 @@ router.put('/ssid', verifyCustomerToken, async (req, res) => {
       });
     }
 
-    // Use the database from config
-    // const pool = getPool();
+    const genieacs = require('../../../config/genieacs');
+    const customerIdTag = `id:${customer.id}`;
 
-    // Update SSID in customer table
-    // Column missing in DB
-    /*const updateSSIDQuery = `
+    // Find device
+    const axiosInstance = genieacs.getAxiosInstance();
+    const acsResponse = await axiosInstance.get('/devices', {
+        params: { 'query': JSON.stringify({ '_tags': customerIdTag }) }
+    });
+
+    if (!acsResponse.data || acsResponse.data.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Perangkat modem tidak ditemukan di sistem ACS.'
+      });
+    }
+
+    const deviceId = acsResponse.data[0]._id;
+
+    // Perform update on GenieACS
+    await genieacs.setParameterValues(deviceId, {
+        'SSID': newSSID.trim()
+    });
+
+    // Also save to database
+    const { query } = require('../../../config/database');
+    await query(`
       UPDATE customers
-      SET ssid = $1,
-          updated_at = NOW()
+      SET ssid = $1, updated_at = NOW()
       WHERE id = $2
-    `;
+    `, [newSSID.trim(), customer.id]);
 
-    await pool.query(updateSSIDQuery, [newSSID.trim(), customer.id]);*/
-
-    return res.status(501).json({
-      success: false,
-      message: 'Fitur belum tersedia (kolom database belum ada)'
+    return res.json({
+      success: true,
+      message: 'Nama WiFi (SSID) sedang diperbarui.'
     });
 
   } catch (error) {
     console.error('Error updating SSID:', error);
     res.status(500).json({
       success: false,
-      message: 'Error memperbarui SSID',
+      message: 'Gagal memperbarui SSID',
+      error: error.message
+    });
+  }
+});
+
+// Reboot Device
+router.post('/reboot', verifyCustomerToken, async (req, res) => {
+  try {
+    const customer = req.customer;
+    const genieacs = require('../../../config/genieacs');
+    const customerIdTag = `id:${customer.id}`;
+    
+    const axiosInstance = genieacs.getAxiosInstance();
+    const acsResponse = await axiosInstance.get('/devices', {
+        params: { 'query': JSON.stringify({ '_tags': customerIdTag }) }
+    });
+
+    if (!acsResponse.data || acsResponse.data.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Modem tidak ditemukan.'
+      });
+    }
+
+    const deviceId = acsResponse.data[0]._id;
+    await genieacs.reboot(deviceId);
+
+    return res.json({
+      success: true,
+      message: 'Perintah reboot telah dikirim ke modem. Modem akan restart dalam beberapa saat.'
+    });
+
+  } catch (error) {
+    console.error('Error rebooting device:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Gagal melakukan reboot modem',
       error: error.message
     });
   }

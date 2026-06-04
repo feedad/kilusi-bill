@@ -319,30 +319,28 @@ router.get('/validate/:token', async (req, res) => {
 
         if (!token) {
             return res.status(400).json({
-                valid: false,
-                error: 'Token tidak ada'
+                success: false,
+                data: { valid: false, error: 'Token tidak ada' }
             });
         }
 
         const validation = await CustomerTokenService.validateToken(token);
 
         // Return limited info for public validation
-        const publicResponse = {
+        const responseData = {
             valid: validation.valid,
-            error: validation.error,
-            timestamp: new Date().toISOString()
+            error: validation.error
         };
 
         // Add customer info only if valid
         if (validation.valid && validation.customer) {
-            publicResponse.customer = {
-                name: validation.customer.name,
-                status: validation.customer.status
-                // Don't expose sensitive data like phone, email in public validation
-            };
+            responseData.customer = validation.customer;
         }
 
-        res.json(publicResponse);
+        res.json({
+            success: validation.valid,
+            data: responseData
+        });
 
     } catch (error) {
         console.error('Error validating token:', error);
@@ -380,7 +378,8 @@ router.get('/export/csv', authenticateAdmin, async (req, res) => {
         ].map(row => row.join(',')).join('\n');
 
         res.setHeader('Content-Type', 'text/csv');
-        res.setHeader('Content-Disposition', `attachment; filename="customer-tokens-${new Date().toISOString().split('T')[0]}.csv"`);
+        const d = new Date();
+        res.setHeader('Content-Disposition', `attachment; filename="customer-tokens-${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}.csv"`);
         res.send(csv);
 
     } catch (error) {

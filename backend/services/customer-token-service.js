@@ -1,6 +1,7 @@
 /**
  * Customer Token Service
  * Handles token-based authentication for customer portal access
+ * Token expiry is based on customer's billing cycle (isolir_date)
  */
 
 const crypto = require('crypto');
@@ -19,27 +20,40 @@ class CustomerTokenService {
     }
 
     /**
-     * Generate token for customer
+     * Get customer service billing expiry (isolir_date)
      * @param {number} customerId - Customer ID
-     * @param {string} expiresIn - Expiration period (e.g., '30d', '7d', '24h')
+     * @returns {Date|null} Billing expiry date or null
+     */
+    static async getCustomerBillingExpiry(customerId) {
+        try {
+            const service = await getOne(
+                'SELECT isolir_date, status FROM services WHERE customer_id = $1',
+                [customerId]
+            );
+            return service ? service.isolir_date : null;
+        } catch (error) {
+            logger.error('Error getting customer billing expiry:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Generate token for customer
+     * Token expiry is based on customer's billing cycle (isolir_date)
+     * Falls back to 30 days if no isolir_date exists
+     * @param {number} customerId - Customer ID
+     * @param {string} fallbackExpiresIn - Fallback expiration if no billing cycle (default '30d')
      * @param {Object} options - Additional options
      * @returns {Object} Token data with login URL
      */
-    static async generateCustomerToken(customerId, expiresIn = '30d', options = {}) {
+    static async generateCustomerToken(customerId, fallbackExpiresIn = '365d', options = {}) {
         const token = this.generateSecureToken();
-        const expiresAt = new Date();
 
-        // Calculate expiration
-        if (expiresIn.endsWith('d')) {
-            const days = parseInt(expiresIn);
-            expiresAt.setDate(expiresAt.getDate() + days);
-        } else if (expiresIn.endsWith('h')) {
-            const hours = parseInt(expiresIn);
-            expiresAt.setHours(expiresAt.getHours() + hours);
-        } else if (expiresIn.endsWith('m')) {
-            const minutes = parseInt(expiresIn);
-            expiresAt.setMinutes(expiresAt.getMinutes() + minutes);
-        }
+        // Token valid 365 hari — independent dari billing cycle
+        // Diregenerate saat invoice baru diterbitkan
+        const expiresAt = new Date();
+        const days = parseInt(fallbackExpiresIn);
+        expiresAt.setDate(expiresAt.getDate() + (days || 365));
 
         try {
             // Update customers table (quick lookup)
@@ -48,9 +62,9 @@ class CustomerTokenService {
                 [token, expiresAt, customerId]
             );
 
-            // Get customer data
+            // Get customer data (only existing columns in customers table)
             const customer = await getOne(
-                'SELECT id, name, phone, email, pppoe_username, status, package_id FROM customers WHERE id = $1',
+                'SELECT id, name, phone, email FROM customers WHERE id = $1',
                 [customerId]
             );
 
@@ -69,6 +83,7 @@ class CustomerTokenService {
                 customerId,
                 expiresAt,
                 loginUrl,
+                billingExpiry, // Include for reference
                 customer: {
                     id: customer.id,
                     name: customer.name,
@@ -85,6 +100,7 @@ class CustomerTokenService {
 
     /**
      * Validate token and return customer data
+     * Checks token expiry AND service status
      * @param {string} token - Token to validate
      * @returns {Object} Validation result with customer data
      */
@@ -94,21 +110,21 @@ class CustomerTokenService {
                 return { valid: false, error: 'Invalid token format' };
             }
 
-            // Check in customers table with package join (via services table)
-            const customer = await getOne(
-                `SELECT c.id, c.name, c.phone, td.pppoe_username, c.email, c.status,
-                        s.package_id, c.customer_id, COALESCE(s.address_installation, c.address) as address,
-                        p.name as package_name, p.price as package_price
+            // Check in customers table with service join for status validation
+            const result = await query(
+                `SELECT c.id, c.name, c.phone, c.email,
+                        p.name as package_name, p.price as package_price,
+                        s.status as service_status, s.isolir_date
                  FROM customers c
-                 LEFT JOIN services s ON s.customer_id = c.id
-                 LEFT JOIN technical_details td ON td.service_id = s.id
+                 LEFT JOIN services s ON s.customer_id::text = c.id
                  LEFT JOIN packages p ON s.package_id = p.id
                  WHERE c.portal_access_token = $1 AND c.token_expires_at >= $2
                  LIMIT 1`,
                 [token, new Date()]
             );
 
-            if (customer) {
+            if (result.rows.length > 0) {
+                const customer = result.rows[0];
 
                 return {
                     valid: true,
@@ -116,14 +132,13 @@ class CustomerTokenService {
                         id: customer.id,
                         name: customer.name,
                         phone: customer.phone,
-                        username: customer.pppoe_username,
                         email: customer.email,
-                        status: customer.status,
-                        package_id: customer.package_id,
+                        status: customer.service_status || 'active',
+                        package_id: null,
                         package_name: customer.package_name,
                         package_price: parseFloat(customer.package_price) || 0,
-                        customer_id: customer.customer_id,
-                        address: customer.address
+                        customer_id: customer.id,
+                        address: null
                     }
                 };
             }
@@ -142,10 +157,10 @@ class CustomerTokenService {
     /**
      * Regenerate token for customer (deactivate old one)
      * @param {number} customerId - Customer ID
-     * @param {string} expiresIn - New expiration period
+     * @param {string} fallbackExpiresIn - Fallback expiration period
      * @returns {Object} New token data
      */
-    static async regenerateToken(customerId, expiresIn = '30d') {
+    static async regenerateToken(customerId, fallbackExpiresIn = '365d') {
         try {
             // Clear existing token
             await query(
@@ -154,7 +169,7 @@ class CustomerTokenService {
             );
 
             // Generate new token
-            return await this.generateCustomerToken(customerId, expiresIn);
+            return await this.generateCustomerToken(customerId, fallbackExpiresIn);
 
         } catch (error) {
             console.error('Error regenerating token:', error);
@@ -236,14 +251,13 @@ class CustomerTokenService {
 
     /**
      * Generate tokens for all customers (bulk operation)
-     * @param {string} expiresIn - Default expiration period
+     * @param {string} fallbackExpiresIn - Fallback expiration period
      * @returns {Object} Results with success count and errors
      */
-    static async generateTokensForAllCustomers(expiresIn = '30d') {
+    static async generateTokensForAllCustomers(fallbackExpiresIn = '30d') {
         try {
             const customers = await getAll(
-                'SELECT id, name, phone FROM customers WHERE status = $1',
-                ['active']
+                'SELECT id, name, phone FROM customers WHERE 1=1'
             );
 
             const results = {
@@ -254,7 +268,7 @@ class CustomerTokenService {
 
             for (const customer of customers) {
                 try {
-                    const tokenData = await this.generateCustomerToken(customer.id, expiresIn);
+                    const tokenData = await this.generateCustomerToken(customer.id, fallbackExpiresIn);
                     results.success++;
                     results.tokenData.push({
                         customerId: customer.id,

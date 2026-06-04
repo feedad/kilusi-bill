@@ -131,6 +131,9 @@ router.post('/:id/test', async (req, res) => {
 router.get('/:id/onus', async (req, res) => {
     try {
         const { id } = req.params;
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 50;
+        const search = (req.query.search || '').toLowerCase().trim();
         const oltResult = await query('SELECT * FROM olts WHERE id = $1', [id]);
 
         if (oltResult.rows.length === 0) return res.status(404).json({ success: false, message: 'OLT not found' });
@@ -144,8 +147,27 @@ router.get('/:id/onus', async (req, res) => {
             vendor: olt.type
         };
 
-        const onus = await oltMonitor.getOnuList(config);
-        res.json({ success: true, data: onus });
+        let onus = await oltMonitor.getOnuList(config);
+
+        // Server-side search filter
+        if (search) {
+            onus = onus.filter(onu =>
+                (onu.sn && onu.sn.toLowerCase().includes(search)) ||
+                (onu.name && onu.name.toLowerCase().includes(search)) ||
+                (onu.status && onu.status.toLowerCase().includes(search))
+            );
+        }
+
+        const total = onus.length;
+        const totalPages = Math.ceil(total / limit);
+        const offset = (page - 1) * limit;
+        const paginated = onus.slice(offset, offset + limit);
+
+        res.json({
+            success: true,
+            data: paginated,
+            pagination: { page, limit, total, totalPages }
+        });
 
     } catch (error) {
         logger.error('Error fetching ONU list:', error);

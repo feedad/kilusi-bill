@@ -92,12 +92,12 @@ export default function InvoicesPage() {
         // Calculate stats from invoice data
         setStats({
           totalInvoices: invoiceList.length,
-          draftInvoices: invoiceList.filter(i => i.status === 'draft').length,
-          sentInvoices: invoiceList.filter(i => i.status === 'sent').length,
-          paidInvoices: invoiceList.filter(i => i.status === 'paid').length,
-          overdueInvoices: invoiceList.filter(i => i.status === 'overdue').length,
-          totalRevenue: invoiceList.filter(i => i.status === 'paid').reduce((sum, i) => sum + i.amount, 0),
-          pendingRevenue: invoiceList.filter(i => i.status === 'sent' || i.status === 'overdue').reduce((sum, i) => sum + i.amount, 0),
+          draftInvoices: invoiceList.filter((i: any) => i.status === 'draft').length,
+          sentInvoices: invoiceList.filter((i: any) => i.status === 'sent').length,
+          paidInvoices: invoiceList.filter((i: any) => i.status === 'paid').length,
+          overdueInvoices: invoiceList.filter((i: any) => i.status === 'overdue').length,
+          totalRevenue: invoiceList.filter((i: any) => i.status === 'paid').reduce((sum: number, i: any) => sum + i.amount, 0),
+          pendingRevenue: invoiceList.filter((i: any) => i.status === 'sent' || i.status === 'overdue').reduce((sum: number, i: any) => sum + i.amount, 0),
         })
       }
     } catch (err: any) {
@@ -415,7 +415,7 @@ export default function InvoicesPage() {
                         <div>
                           <p className="font-medium text-foreground">{invoice.invoice_number}</p>
                           <p className="text-xs text-muted-foreground">
-                            {new Date(invoice.created_at).toLocaleDateString('id-ID')}
+                            {new Date(invoice.created_at).toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' })}
                           </p>
                         </div>
                       </td>
@@ -481,8 +481,8 @@ export default function InvoicesPage() {
 
       {/* Invoice Detail Modal */}
       {showDetailModal && selectedInvoice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-card rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowDetailModal(false)}>
+          <div className="bg-card rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="p-6 border-b">
               <div className="flex items-center justify-between">
                 <h2 className="text-xl font-semibold text-foreground">Detail Invoice</h2>

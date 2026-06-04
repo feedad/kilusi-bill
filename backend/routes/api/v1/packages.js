@@ -4,6 +4,50 @@ const { logger } = require('../../../config/logger');
 const { getSetting } = require('../../../config/settingsManager');
 const { query, getOne, getAll } = require('../../../config/database');
 
+// Helper to ensure Radius Group exists and is properly configured
+async function ensureRadiusGroup(groupName, packageName) {
+    if (!groupName) return;
+
+    try {
+        // 1. Ensure exists in radgroup
+        const checkGroup = await query('SELECT 1 FROM radgroup WHERE groupname = $1', [groupName]);
+        if (checkGroup.rowCount === 0) {
+            await query('INSERT INTO radgroup (groupname, description) VALUES ($1, $2)',
+                [groupName, `Group for package ${packageName}`]);
+            logger.info(`Created new Radius Group: ${groupName}`);
+        }
+
+        // 2. Ensure basic attributes in radgroupreply
+        // Service-Type = Framed
+        const checkService = await query('SELECT 1 FROM radgroupreply WHERE groupname = $1 AND attribute = $2',
+            [groupName, 'Service-Type']);
+        if (checkService.rowCount === 0) {
+            await query('INSERT INTO radgroupreply (groupname, attribute, op, value) VALUES ($1, $2, $3, $4)',
+                [groupName, 'Service-Type', ':=', 'Framed']);
+        }
+
+        // Framed-Protocol = PPP
+        const checkProtocol = await query('SELECT 1 FROM radgroupreply WHERE groupname = $1 AND attribute = $2',
+            [groupName, 'Framed-Protocol']);
+        if (checkProtocol.rowCount === 0) {
+            await query('INSERT INTO radgroupreply (groupname, attribute, op, value) VALUES ($1, $2, $3, $4)',
+                [groupName, 'Framed-Protocol', ':=', 'PPP']);
+        }
+
+        // 3. Ensure Mikrotik-Group attribute is set (Mapping to local Mikrotik Profile)
+        const checkMikrotik = await query('SELECT 1 FROM radgroupreply WHERE groupname = $1 AND attribute = $2',
+            [groupName, 'Mikrotik-Group']);
+        if (checkMikrotik.rowCount === 0) {
+            await query('INSERT INTO radgroupreply (groupname, attribute, op, value) VALUES ($1, $2, $3, $4)',
+                [groupName, 'Mikrotik-Group', ':=', groupName]); // Value matches Group Name
+        }
+
+    } catch (error) {
+        logger.error(`Failed to ensure Radius Group ${groupName}:`, error);
+        // Don't block package creation, just log error
+    }
+}
+
 // GET /api/v1/packages - Get all packages with pagination and search
 router.get('/', async (req, res) => {
     try {
@@ -271,9 +315,15 @@ router.post('/', async (req, res) => {
             });
         }
 
+        if (group) {
+            // Sync pppoe_profile to group name
+            // Use the group name provided as the pppoe_profile
+            await ensureRadiusGroup(group, name);
+        }
+
         const insertQuery =
-            'INSERT INTO packages (name, speed, price, description, installation_fee, installation_description, "group", rate_limit, shared, hpp, commission, is_active, created_at, updated_at) ' +
-            'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true, NOW(), NOW()) ' +
+            'INSERT INTO packages (name, speed, price, description, installation_fee, installation_description, "group", pppoe_profile, rate_limit, shared, hpp, commission, is_active, created_at, updated_at) ' +
+            'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, true, NOW(), NOW()) ' +
             'RETURNING *';
 
         const result = await query(insertQuery, [
@@ -284,6 +334,7 @@ router.post('/', async (req, res) => {
             parseFloat(installation_fee || 50000),
             installation_description || 'Standard installation',
             group || null,
+            group || 'default', // Sync pppoe_profile to group, default fallback
             rate_limit || null,
             shared ? 1 : 0,
             parseFloat(hpp) || 0,
@@ -340,11 +391,15 @@ router.put('/:id', async (req, res) => {
             });
         }
 
+        if (group) {
+            await ensureRadiusGroup(group, name);
+        }
+
         const updateQuery =
             'UPDATE packages ' +
             'SET name = $1, speed = $2, price = $3, description = $4, installation_fee = $5, installation_description = $6, ' +
-            '    "group" = $7, rate_limit = $8, shared = $9, hpp = $10, commission = $11, updated_at = NOW() ' +
-            'WHERE id = $12 ' +
+            '    "group" = $7, pppoe_profile = $8, rate_limit = $9, shared = $10, hpp = $11, commission = $12, updated_at = NOW() ' +
+            'WHERE id = $13 ' +
             'RETURNING *';
 
         const result = await query(updateQuery, [
@@ -355,6 +410,7 @@ router.put('/:id', async (req, res) => {
             parseFloat(installation_fee || 50000),
             installation_description || 'Standard installation',
             group || null,
+            group || 'default', // Sync pppoe_profile to group
             rate_limit || null,
             shared ? 1 : 0,
             parseFloat(hpp) || 0,

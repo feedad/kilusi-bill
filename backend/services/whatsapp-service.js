@@ -243,7 +243,21 @@ class WhatsappService {
      * Get/Generate QR Code
      */
     async getQR(refresh = false) {
-        // Check global status first
+        const sock = getSock();
+        const isConnected = sock && sock.user;
+
+        // If already connected, return connected status immediately
+        if (isConnected) {
+            return {
+                qrCode: null,
+                rawQR: null,
+                generatedAt: null,
+                status: 'connected',
+                message: 'WhatsApp is already connected'
+            };
+        }
+
+        // Check global status first for existing QR
         if (global.whatsappStatus && global.whatsappStatus.qrCode) {
             this.currentQRCode = global.whatsappStatus.qrCode;
             this.qrGeneratedAt = this.qrGeneratedAt || new Date();
@@ -251,21 +265,37 @@ class WhatsappService {
             const isExpired = this.qrGeneratedAt ? (Date.now() - this.qrGeneratedAt.getTime()) > 60000 : true;
 
             if (refresh || !this.currentQRCode || isExpired) {
-                // Logic to generate new QR
+                // Reset QR state
                 this.currentQRCode = null;
                 this.qrGeneratedAt = null;
 
-                const sock = getSock();
-                if (sock && sock.user) {
-                    await deleteWhatsAppSession();
-                    await new Promise(resolve => setTimeout(resolve, 1000));
+                // Only force new connection if truly disconnected and not already connecting
+                if (!global.whatsappStatus || global.whatsappStatus.status !== 'connecting') {
+                    try {
+                        // Set a timeout to prevent indefinite hang
+                        const connectTimeout = 15000; // 15 seconds max
+                        await Promise.race([
+                            connectToWhatsApp(),
+                            new Promise((_, reject) => 
+                                setTimeout(() => reject(new Error('WhatsApp connection timed out')), connectTimeout)
+                            )
+                        ]);
+                    } catch (connError) {
+                        console.error('❌ Failed to initiate WhatsApp connection:', connError.message);
+                        return {
+                            qrCode: null,
+                            rawQR: null,
+                            generatedAt: null,
+                            status: 'error',
+                            message: connError.message
+                        };
+                    }
                 }
 
-                await connectToWhatsApp();
-
-                // Wait loop for QR
+                // Wait loop for QR with safety limits
                 let attempts = 0;
-                while (!this.currentQRCode && attempts < 20) {
+                const maxAttempts = 30;
+                while (!this.currentQRCode && attempts < maxAttempts) {
                     attempts++;
                     if (global.whatsappStatus && global.whatsappStatus.qrCode) {
                         this.currentQRCode = global.whatsappStatus.qrCode;
@@ -278,7 +308,18 @@ class WhatsappService {
                         this.qrGeneratedAt = new Date();
                         break;
                     }
-                    await new Promise(resolve => setTimeout(resolve, Math.min(500 + (attempts * 100), 2000)));
+                    // Check if we somehow got connected during the wait
+                    const currentSock = getSock();
+                    if (currentSock && currentSock.user) {
+                        return {
+                            qrCode: null,
+                            rawQR: null,
+                            generatedAt: null,
+                            status: 'connected',
+                            message: 'WhatsApp connected while waiting for QR'
+                        };
+                    }
+                    await new Promise(resolve => setTimeout(resolve, Math.min(500 + (attempts * 100), 1500)));
                 }
             }
         }
@@ -288,7 +329,8 @@ class WhatsappService {
             try {
                 qrCodeImage = await qrcode.toDataURL(this.currentQRCode, { width: 256, margin: 2, color: { dark: '#000000', light: '#FFFFFF' } });
             } catch (e) {
-                qrCodeImage = this.currentQRCode;
+                console.error('❌ Failed to generate QR data URL:', e.message);
+                qrCodeImage = null;
             }
         }
 
@@ -296,7 +338,8 @@ class WhatsappService {
             qrCode: qrCodeImage,
             rawQR: this.currentQRCode,
             generatedAt: this.qrGeneratedAt,
-            status: this.currentQRCode ? 'active' : 'pending'
+            status: qrCodeImage ? 'active' : (this.currentQRCode ? 'raw' : 'pending'),
+            message: qrCodeImage ? 'QR code ready' : (this.currentQRCode ? 'QR string available but image generation failed' : 'Waiting for QR code...')
         };
     }
 

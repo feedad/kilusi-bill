@@ -49,8 +49,8 @@ export function DeviceDetailModal({ device, isOpen, onClose }: DeviceDetailModal
     const wanMac = getParam((device.parameters?.InternetGatewayDevice?.WANDevice?.['1']?.WANConnectionDevice?.['1'] as any)?.MACAddress);
 
     return (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-            <Card className="max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={onClose}>
+            <Card className="max-w-4xl w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                 <CardHeader className="flex flex-row items-center justify-between">
                     <CardTitle>Device Details: {device.serialNumber || device.serial || 'Unknown'}</CardTitle>
                     <Button variant="ghost" onClick={onClose}>

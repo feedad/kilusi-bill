@@ -82,8 +82,8 @@ router.get('/stats', asyncHandler(async (req, res) => {
     const activeCustomersQuery = await query("SELECT COUNT(*) as count FROM customers_view WHERE status = 'active'");
     const activeCustomers = parseInt(activeCustomersQuery.rows[0].count);
 
-    // Get inactive customers
-    const inactiveCustomersQuery = await query("SELECT COUNT(*) as count FROM customers_view WHERE status = 'inactive'");
+    // Get suspended customers (replaces old "inactive" — no service uses inactive anymore)
+    const inactiveCustomersQuery = await query("SELECT COUNT(*) as count FROM customers_view WHERE status = 'suspended'");
     const inactiveCustomers = parseInt(inactiveCustomersQuery.rows[0].count);
 
     // Get new customers this month
@@ -110,15 +110,24 @@ router.get('/stats', asyncHandler(async (req, res) => {
     const totalRevenueQuery = await query("SELECT COALESCE(SUM(amount), 0) as total FROM invoices WHERE status = 'paid'");
     const totalRevenue = parseFloat(totalRevenueQuery.rows[0].total);
 
+    // Get monthly revenue (current month based on paid_at)
+    const monthlyRevenueQuery = await query(`
+        SELECT COALESCE(SUM(amount), 0) as total
+        FROM invoices
+        WHERE status = 'paid'
+          AND DATE_TRUNC('month', paid_at) = DATE_TRUNC('month', CURRENT_DATE)
+    `);
+    const monthlyRevenue = parseFloat(monthlyRevenueQuery.rows[0].total);
+
     // Get pending invoices
-    const pendingInvoicesQuery = await query("SELECT COUNT(*) as count FROM invoices WHERE status = 'unpaid'");
+    const pendingInvoicesQuery = await query("SELECT COUNT(*) as count FROM invoices WHERE status IN ('unpaid', 'suspended')");
     const pendingInvoices = parseInt(pendingInvoicesQuery.rows[0].count);
 
     // Get overdue invoices
     const overdueInvoicesQuery = await query(`
             SELECT COUNT(*) as count, COALESCE(SUM(amount), 0) as total_amount
             FROM invoices
-            WHERE status = 'unpaid' AND due_date < CURRENT_DATE
+            WHERE status IN ('unpaid', 'suspended') AND due_date < DATE(TIMEZONE('Asia/Jakarta', NOW()))
         `);
     const overdueInvoices = parseInt(overdueInvoicesQuery.rows[0].count);
     const overdueAmount = parseFloat(overdueInvoicesQuery.rows[0].total_amount);
@@ -145,6 +154,7 @@ router.get('/stats', asyncHandler(async (req, res) => {
         overdueInvoices,
         overdueAmount,
         totalRevenue,
+        monthlyRevenue,
         // Additional computed metrics
         customerGrowth: {
             percentage: totalCustomers > 0 ? ((activeCustomers / totalCustomers) * 100).toFixed(1) : 0
@@ -196,11 +206,37 @@ router.get('/recent-activities', asyncHandler(async (req, res) => {
             LIMIT $1
         `, [limit]);
 
+    // Get recent portal logins
+    const portalLoginsQuery = await query(`
+            SELECT 'portal_login' as type, name, last_portal_login as date,
+                   'Login ke portal pelanggan' as description
+            FROM customers
+            WHERE last_portal_login IS NOT NULL
+            ORDER BY last_portal_login DESC
+            LIMIT $1
+        `, [limit]);
+
+    // Get recent RADIUS connections (last 24h)
+    const radiusConnectsQuery = await query(`
+            SELECT 'radius_connect' as type,
+                   COALESCE(c.name, r.username) as name, r.acctstarttime as date,
+                   r.username || ' terhubung' as description
+            FROM radacct r
+            LEFT JOIN technical_details t ON t.pppoe_username = r.username
+            LEFT JOIN services s ON s.id = t.service_id
+            LEFT JOIN customers c ON c.id::text = s.customer_id::text
+            WHERE r.acctstoptime IS NULL
+            ORDER BY r.acctstarttime DESC
+            LIMIT $1
+        `, [limit]);
+
     // Combine and sort all activities
     const allActivities = [
         ...newCustomersQuery.rows,
         ...paidInvoicesQuery.rows,
-        ...newInvoicesQuery.rows
+        ...newInvoicesQuery.rows,
+        ...portalLoginsQuery.rows,
+        ...radiusConnectsQuery.rows
     ];
 
     // Sort by date (most recent first) and limit
@@ -324,7 +360,8 @@ router.get('/monthly-revenue', asyncHandler(async (req, res) => {
 
     // Fill revenues array with actual data
     revenueQuery.rows.forEach(record => {
-        const dateKey = record.date.toISOString().split('T')[0];
+        const dt = new Date(record.date);
+        const dateKey = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
         const dayIndex = dates.indexOf(dateKey);
         if (dayIndex !== -1) {
             revenues[dayIndex] = parseFloat(record.daily_revenue || 0);

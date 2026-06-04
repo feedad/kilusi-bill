@@ -2,7 +2,10 @@
 
 import { useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Server } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Server, Trash2, Loader2 } from 'lucide-react'
+import { adminApi } from '@/lib/api-clients'
+import { toast } from 'react-hot-toast'
 
 // Types
 import { NAS, NASFormData } from './types'
@@ -18,6 +21,22 @@ import { NASFormModal } from './components/NASFormModal'
 import { NASDetailModal } from './components/NASDetailModal'
 
 export default function RadiusPage() {
+  const [cleaningOrphan, setCleaningOrphan] = useState(false)
+
+  const handleOrphanCleanup = async () => {
+    if (!confirm('Hapus semua user RADIUS yang sudah tidak memiliki layanan aktif?')) return
+    setCleaningOrphan(true)
+    try {
+      const res = await adminApi.post('/api/v1/radius/orphan-cleanup')
+      if (res.data?.success) {
+        toast.success(`${res.data.cleaned || 0} user yatim dihapus`)
+      } else {
+        toast.error(res.data?.message || 'Gagal')
+      }
+    } catch (e: any) {
+      toast.error(e.response?.data?.message || 'Gagal cleanup orphan')
+    } finally { setCleaningOrphan(false) }
+  }
   // Use custom hook for NAS list management
   const {
     nasList,
@@ -182,7 +201,13 @@ set interim-update=0s
     <div className="space-y-4 sm:space-y-6">
       {/* Page Header */}
       <div className="text-center">
-        <h1 className="text-xl sm:text-2xl font-semibold text-foreground">RADIUS Management</h1>
+        <div className="flex items-center justify-center gap-3">
+          <h1 className="text-xl sm:text-2xl font-semibold text-foreground">RADIUS Management</h1>
+          <Button size="sm" variant="outline" onClick={handleOrphanCleanup} disabled={cleaningOrphan} className="text-xs hover:bg-red-50">
+            {cleaningOrphan ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Trash2 className="h-3 w-3 mr-1" />}
+            Cleanup Orphan
+          </Button>
+        </div>
         <p className="text-sm sm:text-base text-muted-foreground">
           Kelola Network Access Server (NAS) dan monitoring SNMP
         </p>

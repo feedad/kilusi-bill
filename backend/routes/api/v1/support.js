@@ -266,6 +266,44 @@ router.post('/tickets', upload.array('attachments', 5), asyncHandler(async (req,
         has_initial_message: !!initial_message
     };
 
+    // Send ticket created notification to customer
+    try {
+        const whatsappNotifications = require('../../../config/whatsapp-notifications');
+        await whatsappNotifications.sendTicketCreatedNotification(
+            customer_phone,
+            {
+                customerName: customer_name,
+                ticketNumber: ticketNumber,
+                subject: subject,
+                category: category,
+                priority: priority,
+                description: description
+            }
+        );
+        logger.info(`📱 Ticket created notification sent to ${customer_phone} for ticket ${ticketNumber}`);
+    } catch (notifError) {
+        logger.error(`Failed to send ticket created notification:`, notifError.message);
+        // Don't fail the request if notification fails
+    }
+
+    // Send ticket created notification to admins
+    try {
+        const whatsappNotifications = require('../../../config/whatsapp-notifications');
+        await whatsappNotifications.notifyAdminsNewTicket({
+            ticketNumber: ticketNumber,
+            customerName: customer_name,
+            customerPhone: customer_phone,
+            subject: subject,
+            category: category,
+            priority: priority,
+            description: description
+        });
+        logger.info(`📱 Admin notified about new ticket ${ticketNumber}`);
+    } catch (notifError) {
+        logger.error(`Failed to send admin notification for ticket ${ticketNumber}:`, notifError.message);
+        // Don't fail the request if notification fails
+    }
+
     return res.sendCreated({ ticket }, meta);
 }));
 
@@ -398,7 +436,7 @@ router.post('/tickets/:id/messages', async (req, res) => {
 // PUT /api/v1/support/tickets/:id - Update ticket status
 router.put('/tickets/:id', asyncHandler(async (req, res) => {
     const ticketId = req.params.id;
-    const { status, assigned_agent, resolution_time } = req.body;
+    const { status, assigned_agent, assigned_to_user, taken_over_reason, resolution_time } = req.body;
 
     const validStatuses = ['open', 'in_progress', 'pending', 'resolved', 'closed'];
     if (status && !validStatuses.includes(status)) {
@@ -410,9 +448,12 @@ router.put('/tickets/:id', asyncHandler(async (req, res) => {
         }]);
     }
 
-    // Check if ticket exists
+    // Check if ticket exists with full details
     const existingTicket = await query(`
-        SELECT id, status as current_status FROM support_tickets WHERE id = $1
+        SELECT st.*, u.name as admin_name
+        FROM support_tickets st
+        LEFT JOIN users u ON u.id = st.created_by
+        WHERE st.id = $1
     `, [ticketId]);
 
     if (existingTicket.rows.length === 0) {
@@ -420,27 +461,135 @@ router.put('/tickets/:id', asyncHandler(async (req, res) => {
     }
 
     const currentTicket = existingTicket.rows[0];
+    const adminId = req.user?.id || req.user?.userId; // Get current admin ID
+
+    // Build update query dynamically
+    const updates = [];
+    const values = [];
+    let paramIndex = 1;
+
+    if (status) {
+        updates.push(`status = $${paramIndex++}`);
+        values.push(status);
+    }
+    if (assigned_agent) {
+        updates.push(`assigned_agent = $${paramIndex++}`);
+        values.push(assigned_agent);
+    }
+    if (assigned_to_user !== undefined) {
+        updates.push(`assigned_to_user = $${paramIndex++}`);
+        values.push(assigned_to_user);
+    }
+    if (taken_over_reason) {
+        updates.push(`taken_over_reason = $${paramIndex++}`);
+        updates.push(taken_over_reason);
+        updates.push(`taken_over_by = $${paramIndex++}`);
+        values.push(adminId);
+        updates.push(`taken_over_at = $${paramIndex++}`);
+        values.push(new Date());
+    }
+    if (resolution_time) {
+        updates.push(`resolution = $${paramIndex++}`);
+        values.push(resolution_time);
+    }
+    updates.push(`updated_at = CURRENT_TIMESTAMP`);
+    values.push(ticketId);
 
     const result = await query(`
         UPDATE support_tickets
-        SET
-            status = COALESCE($1, status),
-            assigned_agent = COALESCE($2, assigned_agent),
-            resolution_time = COALESCE($3, resolution_time),
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = $4
+        SET ${updates.join(', ')}
+        WHERE id = $${paramIndex}
         RETURNING *
-    `, [status, assigned_agent, resolution_time, ticketId]);
+    `, values);
+
+    const updatedTicket = result.rows[0];
+
+    // Send ticket updated notification if status changed
+    if (status && status !== currentTicket.status) {
+        try {
+            // Get customer phone and assigned agent
+            const customerResult = await query(`
+                SELECT customer_phone, customer_name, assigned_to FROM support_tickets WHERE id = $1
+            `, [ticketId]);
+
+            if (customerResult.rows.length > 0 && customerResult.rows[0].customer_phone) {
+                const whatsappNotifications = require('../../../config/whatsapp-notifications');
+
+                // Map status to user-friendly text
+                const statusText = {
+                    'open': 'Buka',
+                    'in_progress': 'Sedang Diproses',
+                    'pending': 'Tertunda',
+                    'resolved': 'Terselesaikan',
+                    'closed': 'Ditutup'
+                }[status] || status;
+
+                await whatsappNotifications.sendTicketUpdatedNotification(
+                    customerResult.rows[0].customer_phone,
+                    {
+                        customerName: customerResult.rows[0].customer_name,
+                        ticketNumber: updatedTicket.ticket_number,
+                        newStatus: statusText,
+                        assignedAgent: assigned_agent || customerResult.rows[0].assigned_to || 'Tim Support',
+                        updateMessage: resolution_time || 'Terima kasih telah melapor.'
+                    }
+                );
+                logger.info(`📱 Ticket updated notification sent to ${customerResult.rows[0].customer_phone} for ticket ${updatedTicket.ticket_number}`);
+            }
+        } catch (notifError) {
+            logger.error(`Failed to send ticket updated notification:`, notifError.message);
+            // Don't fail the request if notification fails
+        }
+    }
+
+    // Send technician notification if assigned to a technician
+    if (assigned_to_user && assigned_to_user !== currentTicket.assigned_to_user) {
+        try {
+            // Get full ticket details for technician notification
+            const ticketDetailsResult = await query(`
+                SELECT st.*, u.name as admin_name
+                FROM support_tickets st
+                LEFT JOIN users u ON u.id = $1
+                WHERE st.id = $2
+            `, [adminId, ticketId]);
+
+            if (ticketDetailsResult.rows.length > 0) {
+                const ticketData = ticketDetailsResult.rows[0];
+                const whatsappNotifications = require('../../../config/whatsapp-notifications');
+
+                // If status changed to in_progress, include that in notification
+                const finalStatus = (status && status === 'in_progress') ? status : currentTicket.status;
+
+                await whatsappNotifications.notifyTechnicianTicketAssignment(assigned_to_user, {
+                    ticketNumber: ticketData.ticket_number,
+                    customerName: ticketData.customer_name,
+                    customerPhone: ticketData.customer_phone,
+                    subject: ticketData.subject,
+                    category: ticketData.category,
+                    priority: ticketData.priority,
+                    description: ticketData.description,
+                    takenOverReason: taken_over_reason,
+                    status: finalStatus
+                });
+                logger.info(`📱 Technician notified about ticket ${updatedTicket.ticket_number}`);
+            }
+        } catch (notifError) {
+            logger.error(`Failed to send technician notification:`, notifError.message);
+            // Don't fail the request if notification fails
+        }
+    }
 
     const meta = {
         ticket_id: ticketId,
         fields_updated: {
             status: status !== currentTicket.status,
             assigned_agent: assigned_agent !== undefined,
+            assigned_to_user: assigned_to_user !== undefined,
+            taken_over_reason: taken_over_reason !== undefined,
             resolution_time: resolution_time !== undefined
         },
         previous_status: currentTicket.status,
-        new_status: result.rows[0].status
+        new_status: updatedTicket.status
     };
 
     return res.sendSuccess({ ticket: result.rows[0] }, meta);

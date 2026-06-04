@@ -325,9 +325,9 @@ const BroadcastBanner: React.FC<BroadcastBannerProps> = ({
                         <div className="mt-4 flex items-center space-x-6 text-xs">
                           <span className={`${config.textColor} opacity-80 flex items-center`}>
                             <Clock className="w-4 h-4 mr-2" />
-                            {new Date(message.created_at).toLocaleString('id-ID', {
+                            {new Date(message.created_at).toLocaleString('en-GB', {
                               day: 'numeric',
-                              month: 'short',
+                              month: '2-digit',
                               hour: '2-digit',
                               minute: '2-digit'
                             })}
@@ -335,9 +335,9 @@ const BroadcastBanner: React.FC<BroadcastBannerProps> = ({
                           {message.expires_at && (
                             <span className={`${config.textColor} opacity-80 flex items-center`}>
                               <Activity className="w-4 h-4 mr-2" />
-                              Berlaku hingga: {new Date(message.expires_at).toLocaleString('id-ID', {
+                              Berlaku hingga: {new Date(message.expires_at).toLocaleString('en-GB', {
                                 day: 'numeric',
-                                month: 'short',
+                                month: '2-digit',
                                 hour: '2-digit',
                                 minute: '2-digit'
                               })}

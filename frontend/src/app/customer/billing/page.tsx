@@ -29,6 +29,7 @@ import {
 import { toast } from 'react-hot-toast'
 import Link from 'next/link'
 import { customerAPI } from '@/lib/customer-api'
+import { CONFIG } from '@/lib/config'
 import PaymentMethodSelector from '@/components/payments/PaymentMethodSelector'
 import ProofUploadModal from '@/components/payments/ProofUploadModal'
 
@@ -47,6 +48,7 @@ interface Invoice {
   package_name?: string
   display_status?: string
   can_pay?: boolean
+  amount_with_code?: number
 }
 
 interface Payment {
@@ -85,7 +87,10 @@ export default function CustomerBilling() {
   const [showPaymentInstructions, setShowPaymentInstructions] = useState(false)
   const [showProofUploadModal, setShowProofUploadModal] = useState(false)
   const [proofUploadInvoice, setProofUploadInvoice] = useState<Invoice | null>(null)
+  const [proofUploadTransactionId, setProofUploadTransactionId] = useState<string | null>(null)
   const [manualBankDetails, setManualBankDetails] = useState<any>(null)
+  const [showQRIS, setShowQRIS] = useState(false)
+  const [qrisData, setQrisData] = useState<{qrDataUrl:string;amount_with_code:number}|null>(null)
 
   // Helper function to get customer data consistently (same approach as other standardized pages)
   const getCustomerData = () => {
@@ -202,29 +207,42 @@ export default function CustomerBilling() {
 
             console.log('📞 Billing: Using standardized customer API for customer ID:', customerData.id)
 
-            // Fetch invoices using new payment API
+            // Fetch invoices and payments using customer billing API
             const customerToken = localStorage.getItem('customer_token')
-            const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || ''
 
-            const invoicesResponse = await fetch(`${apiBaseUrl}/api/v1/customer-payments/invoices`, {
-              headers: {
-                'Authorization': `Bearer ${customerToken}`,
-                'Content-Type': 'application/json'
-              }
-            })
+            const [invoicesResponse, paymentsResponse] = await Promise.all([
+              fetch(`${CONFIG.API_BASE_URL}/api/v1/customer-billing/my-invoices`, {
+                headers: {
+                  'Authorization': `Bearer ${customerToken}`,
+                  'Content-Type': 'application/json'
+                }
+              }),
+              fetch(`${CONFIG.API_BASE_URL}/api/v1/customer-billing/my-payments`, {
+                headers: {
+                  'Authorization': `Bearer ${customerToken}`,
+                  'Content-Type': 'application/json'
+                }
+              })
+            ])
 
             if (!invoicesResponse.ok) {
               throw new Error('Failed to fetch invoices')
             }
+            if (!paymentsResponse.ok) {
+              throw new Error('Failed to fetch payments')
+            }
 
             const invoicesData = await invoicesResponse.json()
+            const paymentsData = await paymentsResponse.json()
 
             if (!invoicesData.success) {
               throw new Error(invoicesData.error || 'Failed to fetch invoices')
             }
 
-            const invoices = invoicesData.data.invoices || []
+            const invoices = invoicesData.data || []
+            const payments = paymentsData.data || []
             setInvoices(invoices)
+            setPayments(payments)
             setBulkPaymentSettings({
               enabled: true,
               discount_1_month_type: 'percentage',
@@ -239,7 +257,7 @@ export default function CustomerBilling() {
               discount_12_months_value: 15
             });
 
-            return { invoices, bulkPaymentSettings: bulkPaymentSettings };
+            return { invoices, payments, bulkPaymentSettings: bulkPaymentSettings };
           })
 
           if (result) {
@@ -328,7 +346,7 @@ export default function CustomerBilling() {
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('id-ID', {
       year: 'numeric',
-      month: 'long',
+      month: '2-digit',
       day: 'numeric'
     })
   }
@@ -360,33 +378,28 @@ export default function CustomerBilling() {
       toast.error('Silakan pilih metode pembayaran')
       return
     }
-
-    // Handle manual transfer differently
-    if (selectedPaymentMethod.type === 'manual_transfer') {
-      setManualBankDetails({
-        bank_name: selectedPaymentMethod.bank_name,
-        account_number: selectedPaymentMethod.account_number,
-        account_holder: selectedPaymentMethod.account_holder
-      })
-      setProofUploadInvoice(selectedInvoice)
-      setShowPaymentModal(false)
-      setShowProofUploadModal(true)
+    if (selectedPaymentMethod.method === 'qris') {
+      try {
+        const t = localStorage.getItem('customer_token')
+        const r = await fetch(`${CONFIG.API_BASE_URL}/api/v1/customer-billing/invoices/${selectedInvoice.id}/qris`, { headers: { Authorization: `Bearer ${t}` } })
+        const d = await r.json()
+        if (d.success) { setQrisData(d.data); setShowQRIS(true) } else { toast.error('Gagal generate QR') }
+      } catch { toast.error('Gagal generate QR') }
       return
     }
-
     setPaymentLoading(true)
     try {
       const customerToken = localStorage.getItem('customer_token')
 
-      const response = await fetch(`/api/v1/customer-payments/invoices/${selectedInvoice.id}/pay`, {
+      const response = await fetch(`${CONFIG.API_BASE_URL}/api/v1/customer-payments/invoices/${selectedInvoice.id}/pay`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${customerToken}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          payment_method: selectedPaymentMethod.method,
-          gateway: selectedPaymentMethod.gateway,
+          payment_method: selectedPaymentMethod.id || selectedPaymentMethod.method, // Use ID for manual, method for Tripay
+          gateway: selectedPaymentMethod.gateway || 'tripay',
           // Send invoice details for bulk payments (since they don't exist on backend yet)
           amount: String(selectedInvoice.id).startsWith('bulk-') ? selectedInvoice.amount : undefined,
           invoice_number: String(selectedInvoice.id).startsWith('bulk-') ? selectedInvoice.invoice_number : undefined,
@@ -398,6 +411,43 @@ export default function CustomerBilling() {
 
       if (data.success) {
         setPaymentResult(data.data)
+
+        // Handle manual payments - show proof upload modal
+        if (selectedPaymentMethod.type?.startsWith('manual_') || data.data.manual_payment_details) {
+          // Prepare bank details for display
+          let paymentDetails = {}
+
+          if (selectedPaymentMethod.type === 'manual_bank') {
+            paymentDetails = {
+              type: 'bank',
+              bank_name: selectedPaymentMethod.bankName,
+              account_number: selectedPaymentMethod.accountNumber,
+              account_holder: selectedPaymentMethod.accountName
+            }
+          } else if (selectedPaymentMethod.type === 'manual_ewallet') {
+            paymentDetails = {
+              type: 'ewallet',
+              provider: selectedPaymentMethod.provider,
+              phone_number: selectedPaymentMethod.phoneNumber,
+              account_holder: selectedPaymentMethod.accountName
+            }
+          } else if (selectedPaymentMethod.type === 'manual_cash') {
+            paymentDetails = {
+              type: 'cash',
+              instructions: 'Silakan bayar tunai ke admin kami'
+            }
+          }
+
+          setManualBankDetails(paymentDetails)
+          setProofUploadInvoice(selectedInvoice)
+          setProofUploadTransactionId(data.data.transaction_id)
+          setShowPaymentModal(false)
+          setShowProofUploadModal(true)
+          toast.success('Silakan upload bukti pembayaran')
+          setPaymentLoading(false)
+          return
+        }
+
         setShowPaymentInstructions(true)
         toast.success('Pembayaran berhasil! Mengalihkan...')
 
@@ -428,6 +478,7 @@ export default function CustomerBilling() {
   const handleProofUploadSuccess = (result: any) => {
     setShowProofUploadModal(false)
     setProofUploadInvoice(null)
+    setProofUploadTransactionId(null)
     setManualBankDetails(null)
 
     // Update invoice status
@@ -448,6 +499,8 @@ export default function CustomerBilling() {
     setSelectedPaymentMethod(null)
     setPaymentResult(null)
     setShowPaymentInstructions(false)
+    setShowQRIS(false)
+    setQrisData(null)
   }
 
   const handleDownloadInvoice = (invoice: Invoice) => {
@@ -469,7 +522,7 @@ export default function CustomerBilling() {
         console.warn('Package price not available, fetching from backend...')
         try {
           const customerToken = localStorage.getItem('customer_token')
-          const response = await fetch('/api/v1/customer-auth-nextjs/get-customer-data', {
+          const response = await fetch(`${CONFIG.API_BASE_URL}/api/v1/customer-auth-nextjs/get-customer-data`, {
             headers: {
               'Authorization': `Bearer ${customerToken}`,
               'Content-Type': 'application/json'
@@ -505,7 +558,7 @@ export default function CustomerBilling() {
           discountDisplay: 'Harga paket tidak tersedia',
           isolationDate: isolationDate.toLocaleDateString('id-ID', {
             year: 'numeric',
-            month: 'long',
+            month: '2-digit',
             day: 'numeric'
           }),
           effectiveMonths: months,
@@ -537,7 +590,7 @@ export default function CustomerBilling() {
           discountDisplay: result.data.discountDisplay,
           isolationDate: isolationDate.toLocaleDateString('id-ID', {
             year: 'numeric',
-            month: 'long',
+            month: '2-digit',
             day: 'numeric'
           }),
           effectiveMonths: result.data.effectiveMonths,
@@ -571,40 +624,41 @@ export default function CustomerBilling() {
             discountType = currentDiscountType
             switch (currentDiscountType) {
               case 'percentage':
-                discount = (packagePrice * months) * (currentDiscountValue / 100)
+                discount = Math.round((packagePrice * months) * (currentDiscountValue / 100))
                 discountDisplay = `Diskon ${currentDiscountValue}%`
                 break
               case 'free_months':
-                discount = packagePrice * currentDiscountValue
+                discount = Math.round(packagePrice * currentDiscountValue)
                 discountDisplay = `Gratis ${currentDiscountValue} bulan`
                 effectiveMonths = months + currentDiscountValue
                 break
               case 'fixed_amount':
-                discount = currentDiscountValue
+                discount = Math.round(currentDiscountValue)
                 discountDisplay = `Diskon Rp ${currentDiscountValue.toLocaleString('id-ID')}`
                 break
             }
           }
         }
 
-        const total = (packagePrice * months) - discount
+        const originalTotal = Math.round(packagePrice * months)
+        const total = Math.round(originalTotal - discount)
         const currentDate = new Date()
         const isolationDate = new Date(currentDate.setMonth(currentDate.getMonth() + effectiveMonths))
 
         return {
           total,
-          originalTotal: packagePrice * months,
+          originalTotal,
           discount,
           discountType,
           discountDisplay,
           isolationDate: isolationDate.toLocaleDateString('id-ID', {
             year: 'numeric',
-            month: 'long',
+            month: '2-digit',
             day: 'numeric'
           }),
           effectiveMonths,
           totalMonthsPaid,
-          perMonthEffective: total / effectiveMonths
+          perMonthEffective: Math.round((total / effectiveMonths) * 100) / 100
         }
       }
     } catch (error) {
@@ -635,40 +689,41 @@ export default function CustomerBilling() {
           discountType = currentDiscountType
           switch (currentDiscountType) {
             case 'percentage':
-              discount = (packagePrice * months) * (currentDiscountValue / 100)
+              discount = Math.round((packagePrice * months) * (currentDiscountValue / 100))
               discountDisplay = `Diskon ${currentDiscountValue}%`
               break
             case 'free_months':
-              discount = packagePrice * currentDiscountValue
+              discount = Math.round(packagePrice * currentDiscountValue)
               discountDisplay = `Gratis ${currentDiscountValue} bulan`
               effectiveMonths = months + currentDiscountValue
               break
             case 'fixed_amount':
-              discount = currentDiscountValue
+              discount = Math.round(currentDiscountValue)
               discountDisplay = `Diskon Rp ${currentDiscountValue.toLocaleString('id-ID')}`
               break
           }
         }
       }
 
-      const total = (packagePrice * months) - discount
+      const originalTotal = Math.round(packagePrice * months)
+      const total = Math.round(originalTotal - discount)
       const currentDate = new Date()
       const isolationDate = new Date(currentDate.setMonth(currentDate.getMonth() + effectiveMonths))
 
       return {
         total,
-        originalTotal: packagePrice * months,
+        originalTotal,
         discount,
         discountType,
         discountDisplay,
         isolationDate: isolationDate.toLocaleDateString('id-ID', {
           year: 'numeric',
-          month: 'long',
+          month: '2-digit',
           day: 'numeric'
         }),
         effectiveMonths,
         totalMonthsPaid,
-        perMonthEffective: total / effectiveMonths
+        perMonthEffective: Math.round((total / effectiveMonths) * 100) / 100
       }
     }
   }
@@ -746,7 +801,10 @@ export default function CustomerBilling() {
     { value: 12, label: '1 Tahun', discount: 2, discountType: 'free_months' }
   ]
 
-  const filteredInvoices = invoices.filter(invoice =>
+  // Tab Tagihan: only show unpaid/overdue/pending invoices (not paid/cancelled)
+  const unpaidInvoices = invoices.filter(inv => inv.status !== 'paid' && inv.status !== 'cancelled')
+
+  const filteredInvoices = unpaidInvoices.filter(invoice =>
     (invoice.invoice_number || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
     (invoice.description || '').toLowerCase().includes(searchTerm.toLowerCase())
   )
@@ -850,7 +908,11 @@ export default function CustomerBilling() {
             </Card>
           ) : (
             filteredInvoices.map((invoice) => (
-              <Card key={invoice.id} className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow">
+              <Card
+                key={invoice.id}
+                className={`bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow ${invoice.can_pay && invoice.status !== 'paid' ? 'cursor-pointer' : ''}`}
+                onClick={() => { if (invoice.can_pay && invoice.status !== 'paid') handlePayInvoice(invoice) }}
+              >
                 <CardContent className="pt-6">
                   <div className="flex items-center justify-between">
                     <div className="flex-1">
@@ -885,20 +947,10 @@ export default function CustomerBilling() {
                     </div>
                     <div className="text-right">
                       <div className="text-lg font-semibold text-gray-900 dark:text-white">
-                        {formatCurrency(invoice.final_amount || invoice.amount)}
+                        {formatCurrency(invoice.amount_with_code || invoice.final_amount || invoice.amount)}
                       </div>
-                      <div className="flex items-center gap-2 mt-1">
+                      <div className="flex items-center gap-2 mt-1 justify-end">
                         {getStatusBadge(invoice.display_status || invoice.status)}
-                        {invoice.can_pay && invoice.status !== 'paid' && (
-                          <Button
-                            size="sm"
-                            onClick={() => handlePayInvoice(invoice)}
-                            className="bg-blue-600 hover:bg-blue-700 text-white"
-                          >
-                            <CreditCard className="w-4 h-4 mr-1" />
-                            Bayar
-                          </Button>
-                        )}
                       </div>
                     </div>
                   </div>
@@ -912,7 +964,7 @@ export default function CustomerBilling() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => handleDownloadInvoice(invoice)}
+                        onClick={(e) => { e.stopPropagation(); handleDownloadInvoice(invoice) }}
                         className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
                       >
                         <Download className="w-4 h-4 mr-1" />
@@ -1017,8 +1069,8 @@ export default function CustomerBilling() {
 
       {/* Payment Modal */}
       {showPaymentModal && selectedInvoice && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onClick={closePaymentModal}>
+          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="p-6">
               <div className="flex items-center justify-between mb-6">
                 <div>
@@ -1066,7 +1118,7 @@ export default function CustomerBilling() {
                       <div className="border-t pt-2 flex justify-between font-semibold">
                         <span className="text-gray-900 dark:text-white">Total Pembayaran</span>
                         <span className="text-lg text-blue-600 dark:text-blue-400">
-                          {formatCurrency(selectedInvoice.final_amount || selectedInvoice.amount)}
+                          {formatCurrency(selectedInvoice.amount_with_code || selectedInvoice.final_amount || selectedInvoice.amount)}
                         </span>
                       </div>
                     </div>
@@ -1076,7 +1128,7 @@ export default function CustomerBilling() {
                   <div>
                     <h4 className="font-semibold text-gray-900 dark:text-white mb-4">Pilih Metode Pembayaran</h4>
                     <PaymentMethodSelector
-                      amount={selectedInvoice.final_amount || selectedInvoice.amount}
+                      amount={Number(selectedInvoice.amount_with_code) || selectedInvoice.final_amount || selectedInvoice.amount}
                       onMethodSelect={handlePaymentMethodSelect}
                       selectedMethod={selectedPaymentMethod?.method}
                       disabled={paymentLoading}
@@ -1156,7 +1208,7 @@ export default function CustomerBilling() {
                         <div className="flex justify-between text-sm">
                           <span className="text-gray-600 dark:text-gray-300">Jumlah</span>
                           <span className="text-gray-900 dark:text-white font-semibold">
-                            {formatCurrency(paymentResult.amount)}
+                            {formatCurrency(selectedInvoice.amount_with_code || paymentResult.amount)}
                           </span>
                         </div>
                         {paymentResult.expiry_time && (
@@ -1217,8 +1269,8 @@ export default function CustomerBilling() {
 
       {/* Bulk Payment Modal */}
       {showBulkPaymentModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-md w-full max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onClick={() => setShowBulkPaymentModal(false)}>
+          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-md w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="p-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-xl font-semibold text-gray-900 dark:text-white">Pembayaran di Muka</h3>
@@ -1337,6 +1389,23 @@ export default function CustomerBilling() {
         </div>
       )}
 
+      {/* QRIS Modal */}
+      {showQRIS && qrisData && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4" onClick={() => { setShowQRIS(false); setQrisData(null); setSelectedPaymentMethod(null) }}>
+          <div className="bg-white dark:bg-gray-800 rounded-xl max-w-sm w-full p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex flex-col items-center space-y-4">
+              <div className="bg-white p-3 rounded-xl border-2 border-blue-200"><img src={qrisData.qrDataUrl} alt="QRIS" className="w-52 h-52" /></div>
+              <div className="text-center space-y-2">
+                <div className="text-2xl font-bold text-blue-600">{formatCurrency(qrisData.amount_with_code)}</div>
+                <div className="text-xs text-gray-500">Scan dengan aplikasi bank atau e-wallet yang mendukung QRIS</div>
+                <div className="text-xs text-gray-400">Invoice: {selectedInvoice?.invoice_number}</div>
+              </div>
+              <Button variant="outline" onClick={() => { setShowQRIS(false); setQrisData(null); setSelectedPaymentMethod(null) }}>Tutup</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Proof Upload Modal for Manual Transfer */}
       {proofUploadInvoice && (
         <ProofUploadModal
@@ -1344,11 +1413,13 @@ export default function CustomerBilling() {
           onClose={() => {
             setShowProofUploadModal(false)
             setProofUploadInvoice(null)
+            setProofUploadTransactionId(null)
             setManualBankDetails(null)
           }}
           invoiceId={proofUploadInvoice.id}
           invoiceNumber={proofUploadInvoice.invoice_number}
-          amount={proofUploadInvoice.final_amount || proofUploadInvoice.amount}
+          amount={proofUploadInvoice.amount_with_code || proofUploadInvoice.final_amount || proofUploadInvoice.amount}
+          transactionId={proofUploadTransactionId}
           bankDetails={manualBankDetails}
           onUploadSuccess={handleProofUploadSuccess}
         />

@@ -6,6 +6,7 @@ import Link from 'next/link';
 import ScrollAnimation from './ScrollAnimation';
 import { Swiper, SwiperSlide } from 'swiper/react';
 import { Pagination, Autoplay } from 'swiper/modules';
+import { CONFIG } from '@/lib/config';
 
 // Import Swiper styles
 import 'swiper/css';
@@ -31,7 +32,7 @@ export default function PricingSection() {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        fetch('/api/v1/landing/packages')
+        fetch(`${CONFIG.API_BASE_URL}/api/v1/landing/packages`)
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
@@ -62,27 +63,28 @@ export default function PricingSection() {
 
                 <Swiper
                     modules={[Pagination, Autoplay]}
-                    spaceBetween={30}
+                    spaceBetween={24}
                     slidesPerView={1}
+                    slidesPerGroup={1}
                     breakpoints={{
-                        640: { slidesPerView: 1 },
-                        768: { slidesPerView: 2 },
-                        1024: { slidesPerView: 3 },
+                        640: { slidesPerView: 1, slidesPerGroup: 1 },
+                        768: { slidesPerView: 2, slidesPerGroup: 1 },
+                        1024: { slidesPerView: 3, slidesPerGroup: 1 },
                     }}
                     pagination={{ clickable: true }}
-                    autoplay={{ delay: 5000, disableOnInteraction: false }}
-                    className="pb-12 px-4 !overflow-visible"
+                    autoplay={{ delay: 4000, disableOnInteraction: false, pauseOnMouseEnter: true }}
+                    loop={true}
+                    className="pb-12 !pt-6"
                 >
                     {packages.map((pkg, idx) => {
-                        // Default styles if config missing
                         const borderColor = pkg.borderColor || 'border-slate-200 dark:border-slate-800';
                         const badgeColor = pkg.badgeColor || 'bg-blue-600 text-white';
 
                         return (
                             <SwiperSlide key={pkg.id} className="!h-auto pb-8 flex">
-                                <div className={`relative p-8 rounded-3xl w-full h-full bg-white dark:bg-slate-950 border-2 transition-all duration-300 flex flex-col ${borderColor} hover:shadow-xl hover:-translate-y-1`}>
+                                <div className={`relative p-8 rounded-3xl w-full h-full bg-white dark:bg-slate-950 border-2 transition-all duration-300 flex flex-col ${borderColor} hover:shadow-xl`}>
                                     {pkg.badge && (
-                                        <div className={`absolute -top-3 left-1/2 transform -translate-x-1/2 px-4 py-1 rounded-full text-xs font-bold uppercase tracking-wide shadow-md ${badgeColor} z-10`}>
+                                        <div className={`absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 px-4 py-1 rounded-full text-xs font-bold uppercase tracking-wide shadow-md ${badgeColor} z-10`}>
                                             {pkg.badge}
                                         </div>
                                     )}

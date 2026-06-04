@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { flushSync } from 'react-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui'
 import {
@@ -26,13 +26,15 @@ import {
   Wifi,
   Cable,
   CreditCard,
+  RefreshCw,
+  UserPlus,
 } from 'lucide-react'
 import { Button } from '@/components/ui'
 import { Input } from '@/components/ui'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-// import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select' // Replaced with native HTML selects
+import { SearchBar } from '@/components/SearchBar'
 import { formatCurrency } from '@/lib/utils'
 import { adminApi } from '@/lib/api-clients'
 import { API_BASE_URL } from '@/lib/api'
@@ -91,6 +93,8 @@ interface Customer {
   cable_length?: number
   service_number?: string
   region_id?: string
+  mitra_id?: string
+  mitra_name?: string
 }
 
 interface Package {
@@ -162,16 +166,8 @@ export default function CustomersPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [identityError, setIdentityError] = useState<string | null>(null)
-  const [searchQuery, setSearchQuery] = useState('') // The actual query sent to API
-  const [searchInput, setSearchInput] = useState('') // The input field value
-
-  // Debounce search input
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setSearchQuery(searchInput)
-    }, 500)
-    return () => clearTimeout(timer)
-  }, [searchInput])
+  const searchQueryRef = useRef('')
+  const [isSearching, setIsSearching] = useState(false)
 
   // Search state for modal
   const [modalSearchResults, setModalSearchResults] = useState<Customer[]>([])
@@ -182,25 +178,36 @@ export default function CustomersPage() {
   const [searchModalMode, setSearchModalMode] = useState<'view' | 'select'>('view')
   const [isIdentityEditing, setIsIdentityEditing] = useState(false)
   const [editingIdentityId, setEditingIdentityId] = useState<string | null>(null)
-  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive' | 'suspended'>('all')
+  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive' | 'suspended' | 'online'>('all')
+  const [viewMode, setViewMode] = useState<'customers' | 'identities'>('customers')
+  const [identities, setIdentities] = useState<Customer[]>([])
+  const [identitiesLoading, setIdentitiesLoading] = useState(false)
+  const [identitiesTotal, setIdentitiesTotal] = useState(0)
+  const [identitiesPage, setIdentitiesPage] = useState(1)
   const [filterPackage, setFilterPackage] = useState('all')
   const [filterRouter, setFilterRouter] = useState('all')
   const [filterRegion, setFilterRegion] = useState('all')
+  const [filterMitra, setFilterMitra] = useState('all')
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
   const [showDetailModal, setShowDetailModal] = useState(false)
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [showPackageChangeModal, setShowPackageChangeModal] = useState(false)
+  const [showPackageHistoryModal, setShowPackageHistoryModal] = useState(false)
+  const [packageHistory, setPackageHistory] = useState<any[]>([])
+  const [packageChange, setPackageChange] = useState({ new_package_id: '' })
   const [isEditing, setIsEditing] = useState(false)
   const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null)
   const editingCustomerData = useRef<Customer | null>(null)
   const [showRegionModal, setShowRegionModal] = useState(false)
   const [regions, setRegions] = useState<any[]>([])
+  const [mitraList, setMitraList] = useState<any[]>([])
   const [odps, setODPs] = useState<any[]>([])
   const [fetchingODPs, setFetchingODPs] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [totalItems, setTotalItems] = useState(0)
-  const [sortField, setSortField] = useState<'customer_id' | 'isolir_date' | 'region' | null>(null)
+  const [sortField, setSortField] = useState<'customer_id' | 'isolir_date' | 'region' | 'service_number' | 'name' | null>(null)
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
   const [selectedCustomers, setSelectedCustomers] = useState<Set<string>>(new Set())
   const [showBulkActions, setShowBulkActions] = useState(false)
@@ -233,6 +240,7 @@ export default function CustomersPage() {
   const [submitting, setSubmitting] = useState(false)
   const [fetchingStatus, setFetchingStatus] = useState<string | null>(null)
   const [lastStatusRefresh, setLastStatusRefresh] = useState<Date | null>(null)
+  const [syncingMac, setSyncingMac] = useState(false)
 
   // Multi-Service Constants removed - Reverting to single modal
 
@@ -315,12 +323,13 @@ export default function CustomersPage() {
     fetchCustomers()
     fetchPackages()
     fetchRegions()
+    fetchMitraList()
     fetchRouters()
     fetchODPs()
     // Preload installation fees for both billing types
     fetchInstallationFee('prepaid')
     fetchInstallationFee('postpaid')
-  }, [currentPage, pageSize, searchQuery, filterStatus, filterPackage, filterRouter, filterRegion, sortField, sortDirection])
+  }, [currentPage, pageSize, filterStatus, filterPackage, filterRouter, filterRegion, filterMitra, sortField, sortDirection])
 
   // Auto-generate PPPoE username when customer_id changes or when suffix changes in settings
   useEffect(() => {
@@ -414,23 +423,30 @@ export default function CustomersPage() {
     }
   }
 
-  const fetchCustomers = async () => {
+  const fetchCustomers = async (page?: number) => {
     try {
-      setLoading(true)
+      // Only show full page loading state for initial load or page changes, not for search
+      const isSearchOperation = searchQueryRef.current.length > 0 || page === 1
+      if (!isSearchOperation) {
+        setLoading(true)
+      }
       setError(null)
 
+      const actualPage = page ?? currentPage
+
       const params = new URLSearchParams({
-        page: currentPage.toString(),
+        page: actualPage.toString(),
         limit: pageSize.toString(),
-        search: searchQuery,
+        search: searchQueryRef.current,
         status: filterStatus === 'all' ? '' : filterStatus,
         package_id: filterPackage === 'all' ? '' : filterPackage,
         router_id: filterRouter === 'all' ? '' : filterRouter,
         region_id: filterRegion === 'all' ? '' : filterRegion,
+        mitra_id: filterMitra === 'all' ? '' : filterMitra,
         sort_field: sortField || '',
         sort_direction: sortDirection,
-        sort_direction: sortDirection,
-        exclude_status: 'pending', // Exclude pending registrations from main list
+        exclude_status: 'waiting', // Exclude waiting registrations (not yet processed)
+        has_service: 'true', // Only show customers WITH services
       })
 
       const response = await adminApi.get(`/api/v1/customers?${params}`)
@@ -460,6 +476,11 @@ export default function CustomersPage() {
         const pagination = response.data.pagination || {}
         setTotalItems(pagination.total || 0)
 
+        // Update currentPage state if page parameter was provided
+        if (page !== undefined) {
+          setCurrentPage(page)
+        }
+
         // Fetch connection status for first few customers (for better UX)
         const visibleCustomers = customersWithDefaultStatus.slice(0, Math.min(10, customersWithDefaultStatus.length))
         fetchConnectionStatusForVisibleCustomers(visibleCustomers)
@@ -469,6 +490,34 @@ export default function CustomersPage() {
       setError(err.message || 'Failed to load customers')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchIdentities = async (page?: number) => {
+    try {
+      setIdentitiesLoading(true)
+      const actualPage = page ?? identitiesPage
+      const params = new URLSearchParams({
+        page: actualPage.toString(),
+        limit: pageSize.toString(),
+        search: searchQueryRef.current,
+        has_service: 'false',
+        sort_field: 'created_at',
+        sort_direction: 'desc',
+      })
+      const response = await adminApi.get(`/api/v1/customers?${params}`)
+      if (response.data.success) {
+        const rawData = response.data.data
+        const list = Array.isArray(rawData) ? rawData : (rawData?.customers || [])
+        setIdentities(list)
+        const pagination = response.data.pagination || {}
+        setIdentitiesTotal(pagination.total || 0)
+        if (page !== undefined) setIdentitiesPage(page)
+      }
+    } catch (err: any) {
+      console.error('Error fetching identities:', err)
+    } finally {
+      setIdentitiesLoading(false)
     }
   }
 
@@ -483,7 +532,7 @@ export default function CustomersPage() {
         customersWithUsername.map(async (customer) => {
           try {
             // Use the correct endpoint path
-            const statusResponse = await adminApi.get(`/api/v1/radius/connection-status/${customer.pppoe_username}`)
+            const statusResponse = await adminApi.get(`/api/v1/radius/connection-status/${encodeURIComponent(customer.pppoe_username)}`)
 
             const connectionStatus = statusResponse.data?.data?.connectionStatus || statusResponse.data?.connectionStatus || { online: false, status: 'offline' }
 
@@ -568,6 +617,15 @@ export default function CustomersPage() {
     }
   }
 
+  // Handler untuk search dipanggil oleh SearchBar
+  const handleSearch = useCallback((query: string) => {
+    searchQueryRef.current = query
+    setIsSearching(!!query)
+    // Directly call fetchCustomers with page 1, bypassing the useEffect
+    // This avoids triggering a full page re-render
+    fetchCustomers(1)
+  }, [])
+
   const fetchRegions = async () => {
     try {
       const response = await adminApi.get('/api/v1/regions?limit=100&include_disabled=false')
@@ -577,6 +635,17 @@ export default function CustomersPage() {
       }
     } catch (err: any) {
       console.error('Error fetching regions:', err)
+    }
+  }
+
+  const fetchMitraList = async () => {
+    try {
+      const response = await adminApi.get('/api/v1/mitra?limit=200')
+      if (response.data.success) {
+        setMitraList(Array.isArray(response.data.data) ? response.data.data : [])
+      }
+    } catch (err: any) {
+      console.error('Error fetching mitra:', err)
     }
   }
 
@@ -911,13 +980,16 @@ export default function CustomersPage() {
   }
 
   // Bulk operation functions
-  const handleSelectCustomer = (customerId: string, checked: boolean) => {
+  const handleSelectCustomer = (customer: Customer) => {
+    // Gunakan kombinasi ID + Service Number agar benar-benar unik per baris layanan
+    const id = `${customer.id}-${customer.service_number || customer.pppoe_username || 'no-service'}`
+    
     setSelectedCustomers(prev => {
       const newSet = new Set(prev)
-      if (checked) {
-        newSet.add(customerId)
+      if (newSet.has(id)) {
+        newSet.delete(id)
       } else {
-        newSet.delete(customerId)
+        newSet.add(id)
       }
       return newSet
     })
@@ -925,7 +997,7 @@ export default function CustomersPage() {
 
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      const allIds = customers.map(c => c.id)
+      const allIds = customers.map(c => `${c.id}-${c.service_number || c.pppoe_username || 'no-service'}`)
       setSelectedCustomers(new Set(allIds))
     } else {
       setSelectedCustomers(new Set())
@@ -943,9 +1015,13 @@ export default function CustomersPage() {
       setSubmittingBulk(true)
       setError(null)
 
-      const promises = Array.from(selectedCustomers).map(customerId =>
-        adminApi.delete(`/api/v1/customers/${customerId}`)
-      )
+      const promises = Array.from(selectedCustomers).map(compositeId => {
+        // Ekstrak bagian setelah tanda hubung (service_number atau pppoe_username)
+        // Jika tidak ada tanda hubung, gunakan compositeId itu sendiri (id lama)
+        const parts = compositeId.split('-')
+        const actualId = parts.length > 1 ? parts[1] : parts[0]
+        return adminApi.delete(`/api/v1/customers/${actualId}`)
+      })
 
       const results = await Promise.allSettled(promises)
       const successful = results.filter(r => r.status === 'fulfilled').length
@@ -965,6 +1041,63 @@ export default function CustomersPage() {
       setError(err.response?.data?.message || err.message || 'Gagal menghapus pelanggan')
     } finally {
       setSubmittingBulk(false)
+    }
+  }
+
+  const handleSyncMacFromRadius = async () => {
+    if (!window.confirm(
+      'Sinkronkan MAC Address dari RADIUS ke Technical Details?\n\n' +
+      'Ini akan mengupdate MAC address untuk pelanggan yang MAC-nya masih kosong.\n' +
+      'Data diambil dari history koneksi RADIUS.'
+    )) {
+      return
+    }
+
+    try {
+      setSyncingMac(true)
+      setError(null)
+
+      const response = await adminApi.post('/api/v1/technical-details/sync-mac-from-radius', {
+        dry_run: false
+      })
+
+      if (response.data.success) {
+        const { updated, skipped } = response.data.data.summary
+        alert(`✅ Sinkronisasi MAC Selesai!\n\nBerhasil: ${updated} pelanggan\nDilewati: ${skipped} pelanggan`)
+
+        // Refresh customer data to show updated MACs
+        fetchCustomers()
+      } else {
+        setError('Gagal sinkronisasi MAC')
+      }
+    } catch (err: any) {
+      console.error('Error syncing MAC:', err)
+      setError(err.response?.data?.message || err.message || 'Gagal sinkronisasi MAC')
+    } finally {
+      setSyncingMac(false)
+    }
+  }
+
+  const handleInstallationComplete = async (customer) => {
+    if (!window.confirm(`Tandai instalasi selesai untuk ${customer.name}?`)) return
+
+    try {
+      setSubmitting(true)
+      setError(null)
+      const response = await adminApi.post(`/api/v1/customers/${customer.id}/activate`)
+      if (response.data.success) {
+        setShowDetailModal(false)
+        fetchCustomers()
+        fetchDashboardStats()
+        alert('✅ Instalasi berhasil diselesaikan')
+      } else {
+        setError(response.data.message || 'Gagal mengaktifkan')
+      }
+    } catch (err: any) {
+      console.error('Error completing installation:', err)
+      setError(err.response?.data?.message || err.message || 'Gagal menyelesaikan instalasi')
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -1104,7 +1237,7 @@ export default function CustomersPage() {
     }
   }
 
-  const handleSort = (field: 'customer_id' | 'isolir_date' | 'region') => {
+  const handleSort = (field: 'customer_id' | 'isolir_date' | 'region' | 'service_number' | 'name') => {
     if (sortField === field) {
       setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
     } else {
@@ -1116,8 +1249,8 @@ export default function CustomersPage() {
   const formatDate = (dateString: string) => {
     if (dateString === '-') return '-'
     return new Date(dateString).toLocaleDateString('id-ID', {
-      year: '2-digit',
-      month: 'short',
+      year: 'numeric',
+      month: '2-digit',
       day: '2-digit'
     })
   }
@@ -1128,6 +1261,14 @@ export default function CustomersPage() {
       return customer.calculated_isolir_date
     }
     return customer.isolir_date
+  }
+
+  const formatIsolirDate = (dateStr: string | undefined | null) => {
+    if (!dateStr || dateStr === '-') return '-'
+    const dt = new Date(dateStr)
+    const datePart = dt.toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    const timeStr = getDefaultValue('isolate_time', '23:59')
+    return `${datePart} ${timeStr}`
   }
 
   const isCustomerIsolir = (customer: Customer) => {
@@ -1304,6 +1445,8 @@ export default function CustomersPage() {
         return 'text-error bg-error/10'
       case 'suspended':
         return 'text-warning bg-warning/10'
+      case 'pending':
+        return 'text-yellow-600 bg-yellow-100'
       case 'no_service':
         return 'text-blue-600 bg-blue-100'
       default:
@@ -1319,6 +1462,8 @@ export default function CustomersPage() {
         return 'Tidak Aktif'
       case 'suspended':
         return 'Ditangguh'
+      case 'pending':
+        return 'Menunggu Instalasi'
       case 'no_service':
         return 'Belum Ada Layanan'
       default:
@@ -1402,11 +1547,6 @@ export default function CustomersPage() {
   }
 
   // Handler functions for search and filter
-  const handleSearchChange = (value: string) => {
-    setSearchQuery(value)
-    setCurrentPage(1) // Reset to first page when searching
-  }
-
   const handleFilterChange = (value: string) => {
     setFilterStatus(value as any)
     setCurrentPage(1) // Reset to first page when filtering
@@ -1427,13 +1567,21 @@ export default function CustomersPage() {
     setCurrentPage(1) // Reset to first page when filtering
   }
 
+  const handleMitraFilterChange = (value: string) => {
+    setFilterMitra(value)
+    setCurrentPage(1)
+  }
+
   const clearAllFilters = () => {
     setFilterStatus('all')
     setFilterPackage('all')
     setFilterRouter('all')
     setFilterRegion('all')
-    setSearchQuery('')
+    setFilterMitra('all')
+    searchQueryRef.current = ''
+    setIsSearching(false)
     setCurrentPage(1) // Reset to first page
+    fetchCustomers()
   }
 
   const handlePageSizeChange = (value: string) => {
@@ -1510,6 +1658,17 @@ export default function CustomersPage() {
           </Button>
 
           <Button
+            variant="outline"
+            size="sm"
+            className="flex items-center space-x-2"
+            onClick={handleSyncMacFromRadius}
+            disabled={syncingMac}
+          >
+            <RefreshCw className={`h-4 w-4 ${syncingMac ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">{syncingMac ? 'Syncing...' : 'Sync MAC'}</span>
+          </Button>
+
+          <Button
             className="flex items-center space-x-2"
             onClick={() => {
               resetForm()
@@ -1536,8 +1695,11 @@ export default function CustomersPage() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+        <Card
+          className={`cursor-pointer transition-colors hover:bg-muted/50 ${viewMode === 'customers' && filterStatus === 'all' ? 'ring-2 ring-primary' : viewMode === 'identities' ? '' : ''}`}
+          onClick={() => { setViewMode('customers'); setFilterStatus('all') }}
+        >
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-foreground">Total Pelanggan</CardTitle>
             <Users className="h-4 w-4 text-muted-foreground" />
@@ -1548,7 +1710,10 @@ export default function CustomersPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card
+          className={`cursor-pointer transition-colors hover:bg-muted/50 ${filterStatus === 'active' && viewMode === 'customers' ? 'ring-2 ring-green-500' : ''}`}
+          onClick={() => { setViewMode('customers'); setFilterStatus('active') }}
+        >
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-foreground">Pelanggan Aktif</CardTitle>
             <Activity className="h-4 w-4 text-muted-foreground" />
@@ -1561,16 +1726,49 @@ export default function CustomersPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card
+          className={`cursor-pointer transition-colors hover:bg-muted/50 ${filterStatus === 'online' && viewMode === 'customers' ? 'ring-2 ring-green-600' : ''}`}
+          onClick={() => { setViewMode('customers'); setFilterStatus('online') }}
+        >
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-foreground">Pelanggan Online</CardTitle>
-            <Wifi className="h-4 w-4 text-muted-foreground" />
+            <Wifi className="h-4 w-4 text-green-600" />
           </CardHeader>
           <CardContent className="pt-0">
             <div className="text-2xl font-bold text-green-600">
               {stats?.onlineCustomers || 0}
             </div>
             <p className="text-xs text-muted-foreground">Real-time status</p>
+          </CardContent>
+        </Card>
+
+        <Card
+          className={`cursor-pointer transition-colors hover:bg-muted/50 ${filterStatus === 'suspended' && viewMode === 'customers' ? 'ring-2 ring-yellow-500' : ''}`}
+          onClick={() => { setViewMode('customers'); setFilterStatus('suspended') }}
+        >
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-foreground">Ditangguh</CardTitle>
+            <Shield className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="text-2xl font-bold text-warning">
+              {stats?.suspendedCustomers || 0}
+            </div>
+            <p className="text-xs text-muted-foreground">Status suspend</p>
+          </CardContent>
+        </Card>
+
+        <Card
+          className={`cursor-pointer transition-colors hover:bg-muted/50 ${viewMode === 'identities' ? 'ring-2 ring-blue-500' : ''}`}
+          onClick={() => { setViewMode('identities'); fetchIdentities(1) }}
+        >
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-foreground">Identitas</CardTitle>
+            <UserPlus className="h-4 w-4 text-blue-500" />
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="text-2xl font-bold text-blue-600">{identitiesTotal}</div>
+            <p className="text-xs text-muted-foreground">Tanpa layanan</p>
           </CardContent>
         </Card>
 
@@ -1583,20 +1781,7 @@ export default function CustomersPage() {
             <div className="text-2xl font-bold text-foreground">
               {stats?.newCustomersThisMonth || 0}
             </div>
-            <p className="text-xs text-muted-foreground">Bulan {new Date().toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-foreground">Ditangguh</CardTitle>
-            <Shield className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent className="pt-0">
-            <div className="text-2xl font-bold text-warning">
-              {stats?.suspendedCustomers || 0}
-            </div>
-            <p className="text-xs text-muted-foreground">Status suspend</p>
+            <p className="text-xs text-muted-foreground">Bulan {new Date().toLocaleDateString('id-ID', { month: '2-digit', year: 'numeric' })}</p>
           </CardContent>
         </Card>
       </div>
@@ -1605,17 +1790,11 @@ export default function CustomersPage() {
       <Card>
         <CardContent className="pt-6">
           <div className="flex flex-col sm:flex-row gap-4">
-            <div className="flex-1">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Cari pelanggan (nama, telepon, NIK, ID Pelanggan, PPPoE)..."
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-            </div>
+            <SearchBar
+              onSearch={handleSearch}
+              onSearchChange={setIsSearching}
+              placeholder="Cari pelanggan (nama, telepon, NIK, ID Pelanggan, PPPoE)..."
+            />
             <div className="flex items-center space-x-2">
               <select
                 value={filterStatus}
@@ -1626,6 +1805,7 @@ export default function CustomersPage() {
                 <option value="active">Aktif</option>
                 <option value="inactive">Tidak Aktif</option>
                 <option value="suspended">Ditangguh</option>
+                <option value="online">Online</option>
               </select>
               <Button
                 variant="outline"
@@ -1636,7 +1816,7 @@ export default function CustomersPage() {
                 <Filter className="h-4 w-4" />
                 {showAdvancedFilters ? 'Sembunyikan' : 'Filter Lanjutan'}
               </Button>
-              {(filterStatus !== 'all' || filterPackage !== 'all' || filterRouter !== 'all' || filterRegion !== 'all' || searchQuery) && (
+              {(filterStatus !== 'all' || filterPackage !== 'all' || filterRouter !== 'all' || filterRegion !== 'all' || filterMitra !== 'all' || searchQueryRef.current) && (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -1708,6 +1888,23 @@ export default function CustomersPage() {
                 </select>
               </div>
 
+              {/* Mitra Filter */}
+              <div>
+                <label className="block text-sm font-medium mb-2">Filter Mitra</label>
+                <select
+                  value={filterMitra}
+                  onChange={(e) => handleMitraFilterChange(e.target.value)}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                >
+                  <option value="all">Semua Mitra</option>
+                  {mitraList.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               {/* Active Filters Summary */}
               <div>
                 <label className="block text-sm font-medium mb-2">Filter Aktif</label>
@@ -1716,9 +1913,10 @@ export default function CustomersPage() {
                   {filterPackage !== 'all' && <div>• Paket: {packages.find(p => p.id.toString() === filterPackage)?.name}</div>}
                   {filterRouter !== 'all' && <div>• Router: {routers.find(r => r.id.toString() === filterRouter)?.name}</div>}
                   {filterRegion !== 'all' && <div>• Wilayah: {regions.find(r => r.id.toString() === filterRegion)?.name}</div>}
-                  {searchQuery && <div>• Pencarian: &quot;{searchQuery}&quot;</div>}
+                  {filterMitra !== 'all' && <div>• Mitra: {mitraList.find(m => m.id.toString() === filterMitra)?.name}</div>}
+                  {searchQueryRef.current && <div>• Pencarian: &quot;{searchQueryRef.current}&quot;</div>}
                   {filterStatus === 'all' && filterPackage === 'all' && filterRouter === 'all' &&
-                    filterRegion === 'all' && !searchQuery && <div>Tidak ada filter aktif</div>}
+                    filterRegion === 'all' && filterMitra === 'all' && !searchQueryRef.current && <div>Tidak ada filter aktif</div>}
                 </div>
               </div>
             </div>
@@ -1726,7 +1924,109 @@ export default function CustomersPage() {
         </Card>
       )}
 
-      {/* Customers Table */}
+      {/* Identities Table (shown when in identity view) */}
+      {viewMode === 'identities' && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle>Identitas Pelanggan Tanpa Layanan</CardTitle>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">
+                  dari {identitiesTotal} total data
+                </span>
+                <Button variant="outline" size="sm" onClick={() => setViewMode('customers')}>
+                  Kembali
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {identitiesLoading ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : identities.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                Tidak ada identitas pelanggan tanpa layanan
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b text-left">
+                      <th className="px-4 py-3 text-xs font-medium text-muted-foreground uppercase">ID Pelanggan</th>
+                      <th className="px-4 py-3 text-xs font-medium text-muted-foreground uppercase">Nama</th>
+                      <th className="px-4 py-3 text-xs font-medium text-muted-foreground uppercase">No. HP</th>
+                      <th className="px-4 py-3 text-xs font-medium text-muted-foreground uppercase">NIK</th>
+                      <th className="px-4 py-3 text-xs font-medium text-muted-foreground uppercase">Alamat</th>
+                      <th className="px-4 py-3 text-xs font-medium text-muted-foreground uppercase">Tgl Daftar</th>
+                      <th className="px-4 py-3 text-xs font-medium text-muted-foreground uppercase">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {identities.map((ident) => {
+                      const actualId = ident.id || ident.customer_id || ''
+                      return (
+                        <tr key={actualId} className="border-b hover:bg-muted/50">
+                          <td className="px-4 py-3 text-sm">{actualId}</td>
+                          <td className="px-4 py-3 text-sm font-medium">{ident.name}</td>
+                          <td className="px-4 py-3 text-sm">{ident.phone}</td>
+                          <td className="px-4 py-3 text-sm">{ident.nik || '-'}</td>
+                          <td className="px-4 py-3 text-sm max-w-[200px] truncate">{ident.address || ident.billing_address || '-'}</td>
+                          <td className="px-4 py-3 text-sm">{ident.created_at ? new Date(ident.created_at).toLocaleDateString('id-ID') : '-'}</td>
+                          <td className="px-4 py-3 text-sm flex gap-2">
+                            <Button variant="outline" size="sm" onClick={() => handleEditIdentity(ident)}>
+                              Edit
+                            </Button>
+                            <Button variant="destructive" size="sm" onClick={async () => {
+                              if (!window.confirm(`Hapus identitas ${ident.name}?`)) return
+                              try {
+                                await adminApi.delete(`/api/v1/customers/${actualId}`)
+                                fetchIdentities(identitiesPage)
+                                fetchDashboardStats()
+                              } catch (err: any) {
+                                alert(err.response?.data?.message || err.message || 'Gagal menghapus')
+                              }
+                            }}>
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {/* Identities Pagination */}
+            {identitiesTotal > pageSize && (
+              <div className="flex items-center justify-between mt-4">
+                <span className="text-sm text-muted-foreground">
+                  {identitiesTotal} total data
+                </span>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm"
+                    disabled={identitiesPage <= 1}
+                    onClick={() => fetchIdentities(identitiesPage - 1)}>
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <span className="text-sm text-muted-foreground">
+                    Hal {identitiesPage} dari {Math.ceil(identitiesTotal / pageSize)}
+                  </span>
+                  <Button variant="outline" size="sm"
+                    disabled={identitiesPage >= Math.ceil(identitiesTotal / pageSize)}
+                    onClick={() => fetchIdentities(identitiesPage + 1)}>
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Customers Table (only show when NOT in identity view) */}
+      {viewMode === 'customers' && (
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
@@ -2007,7 +2307,17 @@ export default function CustomersPage() {
                       )}
                     </div>
                   </th>
-                  <th className="text-left p-3 font-semibold text-foreground whitespace-nowrap w-40">Nama Pelanggan</th>
+                  <th
+                    className="text-left p-3 font-semibold text-foreground whitespace-nowrap cursor-pointer hover:bg-muted/50 transition-colors w-40"
+                    onClick={() => handleSort('name')}
+                  >
+                    <div className="flex items-center gap-1">
+                      Nama Pelanggan
+                      {sortField === 'name' && (
+                        sortDirection === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />
+                      )}
+                    </div>
+                  </th>
                   <th className="text-left p-3 font-semibold text-foreground whitespace-nowrap w-32">NIK</th>
                   <th className="text-left p-3 font-semibold text-foreground whitespace-nowrap w-36">Nomor Telepon</th>
                   <th className="text-left p-3 font-semibold text-foreground whitespace-nowrap w-64">Alamat Layanan</th>
@@ -2026,6 +2336,7 @@ export default function CustomersPage() {
                       )}
                     </div>
                   </th>
+                  <th className="text-left p-3 font-semibold text-foreground whitespace-nowrap w-24">Mitra</th>
                   <th className="text-left p-3 font-semibold text-foreground whitespace-nowrap w-40">PPPoE Username</th>
                   <th className="text-left p-3 font-semibold text-foreground whitespace-nowrap w-32">Tanggal Daftar</th>
                   <th className="text-left p-3 font-semibold text-foreground whitespace-nowrap w-32">Tanggal Aktif</th>
@@ -2046,7 +2357,7 @@ export default function CustomersPage() {
                 {customers.length > 0 ? (
                   customers.map((customer) => (
                     <tr
-                      key={customer.id}
+                      key={customer.service_number || customer.id}
                       className="border-b hover:bg-muted/30 transition-colors cursor-pointer hover:shadow-sm"
                       onClick={async () => {
                         console.log(`=== CLICK ON ${customer.customer_id} (${customer.pppoe_username}) ===`)
@@ -2066,7 +2377,7 @@ export default function CustomersPage() {
                         // Also update the customer in the table list
                         setCustomers(prev => {
                           const updated = prev.map(c =>
-                            c.id === customer.id ? { ...updatedCustomer } : c
+                            (c.service_number || c.id) === (customer.service_number || customer.id) ? { ...updatedCustomer } : c
                           )
 
                           console.log('Updated customers list after click:',
@@ -2087,8 +2398,8 @@ export default function CustomersPage() {
                       <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
-                          checked={selectedCustomers.has(customer.id)}
-                          onChange={(e) => handleSelectCustomer(customer.id, e.target.checked)}
+                          checked={selectedCustomers.has(`${customer.id}-${customer.service_number || customer.pppoe_username || 'no-service'}`)}
+                          onChange={() => handleSelectCustomer(customer)}
                           className="w-4 h-4 rounded border-gray-300"
                         />
                       </td>
@@ -2155,8 +2466,13 @@ export default function CustomersPage() {
                         </span>
                       </td>
                       <td className="p-3">
-                        <span className="text-sm text-foreground">
-                          {customer.region_id ? customer.region_id.toString().padStart(2, '0') : '-'}
+                        <span className="text-sm text-foreground whitespace-nowrap">
+                          {customer.region_name || '-'}
+                        </span>
+                      </td>
+                      <td className="p-3">
+                        <span className="text-sm text-foreground whitespace-nowrap">
+                          {customer.mitra_name || '-'}
                         </span>
                       </td>
                       <td className="p-3">
@@ -2172,14 +2488,14 @@ export default function CustomersPage() {
                       </td>
                       <td className="p-3">
                         <span className={`text-sm ${isCustomerIsolir(customer) ? 'text-error font-medium' : 'text-foreground'}`}>
-                          {formatDate(getIsolirDate(customer) || '-')}
+                          {formatIsolirDate(getIsolirDate(customer))}
                         </span>
                       </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={15} className="p-12 text-center text-muted-foreground">
+                    <td colSpan={16} className="p-12 text-center text-muted-foreground">
                       <div className="flex flex-col items-center space-y-2">
                         <Users className="h-12 w-12" />
                         <p>Tidak ada pelanggan ditemukan</p>
@@ -2193,8 +2509,10 @@ export default function CustomersPage() {
           </div>
         </CardContent>
       </Card>
+      )}
 
-      {/* Pagination Controls */}
+      {/* Pagination Controls (customers only) */}
+      {viewMode === 'customers' && (
       <div className="flex items-center justify-end mt-4">
         <div className="flex items-center border rounded-lg overflow-hidden border-gray-700 bg-gray-800">
           <Button
@@ -2235,6 +2553,7 @@ export default function CustomersPage() {
           </Button>
         </div>
       </div>
+      )}
 
       {/* Customer Detail Modal */}
       {showDetailModal && selectedCustomer && (
@@ -2303,7 +2622,23 @@ export default function CustomersPage() {
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Paket</p>
-                    <p className="font-medium text-foreground mt-1">{selectedCustomer.package_name || '-'}</p>
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      <p className="font-medium text-foreground">{selectedCustomer.package_name || '-'} {selectedCustomer.package_price ? `(Rp ${selectedCustomer.package_price?.toLocaleString('id-ID')})` : ''}</p>
+                      <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setShowPackageChangeModal(true)}>
+                        Upgrade/Downgrade
+                      </Button>
+                      <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={async () => {
+                        try {
+                          const res = await adminApi.get(`/api/v1/customers/${selectedCustomer.id}/package-history`)
+                          if (res.data?.success) {
+                            setPackageHistory(res.data.data || [])
+                            setShowPackageHistoryModal(true)
+                          }
+                        } catch { setPackageHistory([]); setShowPackageHistoryModal(true) }
+                      }}>
+                        Riwayat
+                      </Button>
+                    </div>
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Router</p>
@@ -2407,7 +2742,7 @@ export default function CustomersPage() {
                   <div>
                     <p className="text-sm text-muted-foreground">Tanggal Isolir</p>
                     <p className={`font-medium ${isCustomerIsolir(selectedCustomer) || selectedCustomer.status === 'suspended' || selectedCustomer.status === 'inactive' ? 'text-red-600' : 'text-foreground'}`}>
-                      {formatDate(getIsolirDate(selectedCustomer) || '-')}
+                      {formatIsolirDate(getIsolirDate(selectedCustomer))}
                     </p>
                   </div>
                 </div>
@@ -2415,9 +2750,25 @@ export default function CustomersPage() {
             </div>
             <DialogFooter className="flex justify-between">
               <div className="flex gap-2">
+                {selectedCustomer?.status === 'pending' && (
+                  <Button
+                    variant="outline"
+                    onClick={() => selectedCustomer && handleInstallationComplete(selectedCustomer)}
+                    disabled={submitting}
+                    className="flex items-center gap-2 bg-green-600 text-white hover:bg-green-700"
+                  >
+                    {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                    {submitting ? 'Memproses...' : 'Instalasi Selesai'}
+                  </Button>
+                )}
                 <Button
                   variant="destructive"
-                  onClick={() => selectedCustomer && handleDeleteCustomer(selectedCustomer.id)}
+                  onClick={() => {
+                    if (selectedCustomer) {
+                      const actualId = selectedCustomer.service_number || selectedCustomer.id;
+                      handleDeleteCustomer(actualId);
+                    }
+                  }}
                   disabled={submitting}
                   className="flex items-center gap-2"
                 >
@@ -2440,6 +2791,100 @@ export default function CustomersPage() {
                 </Button>
               </div>
             </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Package Change Modal */}
+      {showPackageChangeModal && selectedCustomer && (
+        <Dialog open={showPackageChangeModal} onOpenChange={setShowPackageChangeModal}>
+          <DialogContent className="max-w-md">
+            <DialogHeader><DialogTitle>Upgrade / Downgrade Paket</DialogTitle></DialogHeader>
+            <div className="space-y-4">
+              <div className="bg-muted/30 rounded-lg p-3 text-sm space-y-1">
+                <p><span className="text-muted-foreground">Pelanggan:</span> {selectedCustomer.name}</p>
+                <p><span className="text-muted-foreground">Paket Saat Ini:</span> {selectedCustomer.package_name} (Rp {selectedCustomer.package_price?.toLocaleString('id-ID')})</p>
+                <p><span className="text-muted-foreground">Tipe:</span> {selectedCustomer.billing_type === 'prepaid' ? 'Prabayar' : 'Pascabayar'}</p>
+                {selectedCustomer.billing_type === 'prepaid' && <p className="text-xs text-orange-500">Prabayar: tagihan akan otomatis diperbarui ke harga paket baru</p>}
+              </div>
+              <div>
+                <label className="text-sm font-medium">Pilih Paket Baru</label>
+                <select value={packageChange.new_package_id} onChange={(e) => setPackageChange({ new_package_id: e.target.value })} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm mt-1">
+                  <option value="">-- Pilih Paket --</option>
+                  {packages.map((pkg: any) => (
+                    <option key={pkg.id} value={pkg.id} disabled={String(pkg.id) === String(selectedCustomer.package_id)}>
+                      {pkg.name} — Rp {pkg.price?.toLocaleString('id-ID')}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex gap-3">
+                <Button variant="outline" className="flex-1" onClick={() => setShowPackageChangeModal(false)}>Batal</Button>
+                <Button className="flex-1" disabled={!packageChange.new_package_id} onClick={async () => {
+                  if (!packageChange.new_package_id) return
+                  try {
+                    const res = await adminApi.put(`/api/v1/customers/${selectedCustomer.id}`, { 
+                      ...selectedCustomer, 
+                      package_id: packageChange.new_package_id 
+                    })
+                    if (res.data?.success) {
+                      toast.success('Paket berhasil diubah')
+                      const historyRes = await adminApi.get(`/api/v1/customers/${selectedCustomer.id}/package-history`)
+                      if (historyRes.data?.success && historyRes.data.data?.length > 0) {
+                        const lastChange = historyRes.data.data[0]
+                        if (lastChange.invoice_updated) {
+                          toast.success('Tagihan diperbarui ke harga baru')
+                        }
+                      }
+                      setShowPackageChangeModal(false)
+                      setPackageChange({ new_package_id: '' })
+                      fetchCustomers()
+                    } else {
+                      toast.error(res.data?.message || 'Gagal mengubah paket')
+                    }
+                  } catch (e: any) {
+                    toast.error(e.response?.data?.message || 'Gagal mengubah paket')
+                  }
+                }}>
+                  Simpan
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Package History Modal */}
+      {showPackageHistoryModal && (
+        <Dialog open={showPackageHistoryModal} onOpenChange={setShowPackageHistoryModal}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader><DialogTitle>Riwayat Perubahan Paket</DialogTitle></DialogHeader>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/30">
+                    <th className="text-left p-2 font-medium">Tanggal</th>
+                    <th className="text-left p-2 font-medium">Paket Lama</th>
+                    <th className="text-left p-2 font-medium">Paket Baru</th>
+                    <th className="text-left p-2 font-medium">Harga</th>
+                    <th className="text-center p-2 font-medium">Inv</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {packageHistory.length === 0 ? (
+                    <tr><td colSpan={5} className="p-4 text-center text-muted-foreground">Belum ada riwayat perubahan paket</td></tr>
+                  ) : packageHistory.map((h: any) => (
+                    <tr key={h.id} className="border-b">
+                      <td className="p-2 text-xs">{new Date(h.changed_at).toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
+                      <td className="p-2 text-xs">{h.old_package_name || '-'}</td>
+                      <td className="p-2 text-xs font-medium">{h.new_package_name}</td>
+                      <td className="p-2 text-xs">Rp {h.old_price?.toLocaleString('id-ID')} → {h.new_price?.toLocaleString('id-ID')}</td>
+                      <td className="p-2 text-center">{h.invoice_updated ? <span className="text-green-500 text-xs">✓</span> : <span className="text-muted-foreground text-xs">-</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </DialogContent>
         </Dialog>
       )}
@@ -2718,7 +3163,7 @@ export default function CustomersPage() {
                         className="block w-full px-3 py-3 h-12 border border-gray-300 dark:border-gray-600 rounded-md text-base bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                       >
                         <option value="all">All Router (Bebas)</option>
-                        {Array.isArray(routers) && routers.filter(r => r.id !== 'all').map((router) => (
+                        {Array.isArray(routers) && routers.filter(r => String(r.id) !== 'all').map((router) => (
                           <option key={router.id} value={router.shortname}>
                             {router.shortname}
                           </option>
@@ -3074,6 +3519,28 @@ export default function CustomersPage() {
           </div>
 
           <DialogFooter>
+            {isIdentityEditing && editingIdentityId && (
+              <Button variant="destructive" disabled={submitting} onClick={async () => {
+                if (!window.confirm(`Hapus identitas ${identityFormData.name}?`)) return
+                setSubmitting(true)
+                try {
+                  await adminApi.delete(`/api/v1/customers/${editingIdentityId}`)
+                  setIdentityFormData({ customer_id: '', name: '', phone: '', nik: '', address: '' })
+                  setShowIdentityModal(false)
+                  fetchCustomers()
+                  fetchDashboardStats()
+                  setViewMode('identities')
+                  fetchIdentities(1)
+                } catch (err: any) {
+                  alert(err.response?.data?.message || err.message || 'Gagal menghapus')
+                } finally {
+                  setSubmitting(false)
+                }
+              }}>
+                {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                Hapus
+              </Button>
+            )}
             <Button variant="outline" onClick={() => setShowIdentityModal(false)}>Batal</Button>
             <Button
               className="bg-red-600 hover:bg-red-700 text-white"

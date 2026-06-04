@@ -16,6 +16,7 @@ import {
     FileImage
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
+import { CONFIG } from '@/lib/config';
 
 interface ProofUploadModalProps {
     isOpen: boolean;
@@ -120,8 +121,8 @@ export default function ProofUploadModal({
 
             const token = localStorage.getItem('customer_token');
             const endpoint = transactionId
-                ? `/api/v1/payment-upload/${transactionId}`
-                : `/api/v1/payment-upload/invoice/${invoiceId}`;
+                ? `${CONFIG.API_BASE_URL}/api/v1/payment-upload/${transactionId}`
+                : `${CONFIG.API_BASE_URL}/api/v1/payment-upload/invoice/${invoiceId}`;
 
             const response = await fetch(endpoint, {
                 method: 'POST',

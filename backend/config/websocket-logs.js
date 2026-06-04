@@ -15,6 +15,7 @@ let logWatcher = null;
  * Initialize WebSocket server for log streaming
  * @param {http.Server} server - HTTP server to attach WebSocket to
  */
+function initializeLogWebSocket(server) {
     // Create WebSocket server in noServer mode
     wss = new WebSocket.Server({
         noServer: true,

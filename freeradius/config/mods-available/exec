@@ -1,0 +1,7 @@
+# Execute external commands
+exec {
+    wait = yes
+    program = "/usr/bin/bash -c %{Exec-Program}"
+    input_pairs = "%{Acct-Session-Time} %{Acct-Terminate-Cause} %{Acct-Start-Time} %{Acct-Session-Time}"
+    shell_escape = yes
+}

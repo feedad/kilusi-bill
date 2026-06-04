@@ -68,7 +68,7 @@ export default function BlogListing() {
                                             <div className="flex items-center text-xs text-slate-500 mb-3 gap-4">
                                                 <div className="flex items-center gap-1">
                                                     <CalendarIcon className="w-4 h-4" />
-                                                    {new Date(post.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
+                                                    {new Date(post.created_at).toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' })}
                                                 </div>
                                             </div>
                                             <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-3 line-clamp-2 group-hover:text-blue-600 transition-colors">

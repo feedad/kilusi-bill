@@ -2,6 +2,7 @@
 import { MapContainer, TileLayer, Circle, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useEffect, useState } from 'react';
+import { CONFIG } from '@/lib/config';
 import ScrollAnimation from './ScrollAnimation';
 
 // Reset map view based on points
@@ -29,7 +30,7 @@ export default function MapSection() {
 
     useEffect(() => {
         // Fetch coverage data
-        fetch('/api/v1/landing/coverage')
+        fetch(`${CONFIG.API_BASE_URL}/api/v1/landing/coverage`)
             .then(res => res.json())
             .then(data => {
                 if (data.success) {

@@ -23,8 +23,8 @@ export function EditSSIDModal({ device, isOpen, onClose, onSave, loading }: Edit
     }
 
     return (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-            <Card className="max-w-md w-full">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={onClose}>
+            <Card className="max-w-md w-full" onClick={e => e.stopPropagation()}>
                 <CardHeader className="flex flex-row items-center justify-between">
                     <CardTitle className="text-lg">
                         <div className="flex items-center space-x-2">

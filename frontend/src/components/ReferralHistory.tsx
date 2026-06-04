@@ -134,7 +134,7 @@ export default function ReferralHistory({ customerId }: ReferralHistoryProps) {
                   </div>
                   {referralCode.expires_at && (
                     <div className="text-sm text-muted-foreground">
-                      Berlaku hingga {new Date(referralCode.expires_at).toLocaleDateString('id-ID')}
+                      Berlaku hingga {new Date(referralCode.expires_at).toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' })}
                     </div>
                   )}
                 </div>
@@ -251,7 +251,7 @@ export default function ReferralHistory({ customerId }: ReferralHistoryProps) {
 
                       <div className="flex items-center justify-between">
                         <div className="text-sm text-muted-foreground">
-                          {new Date(transaction.created_at).toLocaleDateString('id-ID')}
+                          {new Date(transaction.created_at).toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' })}
                         </div>
                         <div className="font-medium text-green-600">
                           +{formatCurrency(transaction.benefit_amount)}
@@ -260,7 +260,7 @@ export default function ReferralHistory({ customerId }: ReferralHistoryProps) {
 
                       {transaction.applied_date && (
                         <div className="text-sm text-green-600">
-                          Diterapkan pada {new Date(transaction.applied_date).toLocaleDateString('id-ID')}
+                          Diterapkan pada {new Date(transaction.applied_date).toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' })}
                         </div>
                       )}
                     </div>

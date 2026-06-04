@@ -55,7 +55,7 @@ const upload = multer({
  */
 router.post('/upload/:type', jwtAuth, async (req, res) => {
   const { type } = req.params;
-  
+
   if (!['logo', 'favicon'].includes(type)) {
     return res.status(400).json({
       success: false,
@@ -91,7 +91,41 @@ router.post('/upload/:type', jwtAuth, async (req, res) => {
 
     // Return the public URL
     const publicUrl = `/uploads/branding/${req.file.filename}`;
-    
+
+    // Save to database
+    try {
+      const { updateSetting } = require('../../../config/settingsManager');
+
+      // Get current branding
+      const { getSetting } = require('../../../config/settingsManager');
+      let branding = getSetting('branding');
+
+      // Parse branding if it's a string
+      if (branding && typeof branding === 'string') {
+        try {
+          branding = JSON.parse(branding);
+        } catch (e) {
+          branding = {};
+        }
+      } else if (!branding || typeof branding !== 'object') {
+        branding = {};
+      }
+
+      // Update the appropriate URL
+      if (type === 'logo') {
+        branding.logoUrl = publicUrl;
+      } else {
+        branding.faviconUrl = publicUrl;
+      }
+
+      // Save to database
+      await updateSetting('branding', JSON.stringify(branding));
+
+      console.log(`✅ Branding updated: ${type} = ${publicUrl}`);
+    } catch (error) {
+      console.error('Error saving branding to database:', error);
+    }
+
     res.json({
       success: true,
       message: `${type === 'logo' ? 'Logo' : 'Favicon'} berhasil diupload`,
@@ -112,13 +146,49 @@ router.post('/upload/:type', jwtAuth, async (req, res) => {
 router.get('/public', async (req, res) => {
   try {
     const { getSetting } = require('../../../config/settingsManager');
-    const branding = getSetting('branding') || {
-      siteTitle: 'Kilusi Bill',
-      titleType: 'text',
-      logoUrl: '',
-      faviconUrl: '/favicon.ico'
-    };
-    
+    let branding = getSetting('branding');
+
+    // Parse branding from JSON string if needed
+    if (branding && typeof branding === 'string') {
+      try {
+        branding = JSON.parse(branding);
+      } catch (e) {
+        console.error('Error parsing branding JSON:', e);
+        branding = null;
+      }
+    }
+
+    // Provide default if not set
+    if (!branding || !branding.siteTitle) {
+      branding = {
+        siteTitle: 'Kilusi Bill',
+        titleType: 'text',
+        logoUrl: '',
+        faviconUrl: '/favicon.ico'
+      };
+    }
+
+    // Check for uploaded logo/favicon files
+    const fs = require('fs');
+    const path = require('path');
+    const uploadDir = path.join(__dirname, '../../../public/uploads/branding');
+
+    if (fs.existsSync(uploadDir)) {
+      const files = fs.readdirSync(uploadDir);
+
+      // Check for logo
+      const logoFile = files.find(f => f.startsWith('logo'));
+      if (logoFile && !branding.logoUrl) {
+        branding.logoUrl = `/uploads/branding/${logoFile}`;
+      }
+
+      // Check for favicon
+      const faviconFile = files.find(f => f.startsWith('favicon'));
+      if (faviconFile && (!branding.faviconUrl || branding.faviconUrl === '/favicon.ico')) {
+        branding.faviconUrl = `/uploads/branding/${faviconFile}`;
+      }
+    }
+
     res.json({
       success: true,
       data: { branding }
@@ -184,7 +254,7 @@ router.get('/files', jwtAuth, async (req, res) => {
  */
 router.delete('/delete/:type', jwtAuth, async (req, res) => {
   const { type } = req.params;
-  
+
   if (!['logo', 'favicon'].includes(type)) {
     return res.status(400).json({
       success: false,
@@ -193,12 +263,44 @@ router.delete('/delete/:type', jwtAuth, async (req, res) => {
   }
 
   try {
+    const { updateSetting, getSetting } = require('../../../config/settingsManager');
     const files = fs.readdirSync(uploadDir);
     const targetFile = files.find(f => f.startsWith(type));
-    
+
     if (targetFile) {
+      // Delete file
       fs.unlinkSync(path.join(uploadDir, targetFile));
-      
+
+      // Update database to remove the URL
+      try {
+        let branding = getSetting('branding');
+
+        // Parse branding if it's a string
+        if (branding && typeof branding === 'string') {
+          try {
+            branding = JSON.parse(branding);
+          } catch (e) {
+            branding = {};
+          }
+        } else if (!branding || typeof branding !== 'object') {
+          branding = {};
+        }
+
+        // Remove the URL
+        if (type === 'logo') {
+          branding.logoUrl = '';
+        } else {
+          branding.faviconUrl = type === 'favicon' ? '' : '/favicon.ico';
+        }
+
+        // Save to database
+        await updateSetting('branding', JSON.stringify(branding));
+
+        console.log(`✅ Branding updated: ${type} removed`);
+      } catch (error) {
+        console.error('Error updating database after file deletion:', error);
+      }
+
       res.json({
         success: true,
         message: `${type === 'logo' ? 'Logo' : 'Favicon'} berhasil dihapus`

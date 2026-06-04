@@ -192,16 +192,33 @@ router.post('/customers/:id/activate', async (req, res) => {
                 throw new Error('Customer ID not found: ' + id);
             }
 
-            // 2. Link to ODP via cable_routes (if ODP selected)
+            // 2. Update services table as well (billing reads from services)
+            const BillingCycleService = require('../../../config/billing-cycle-service');
+            const activeDate = new Date();
+            const srvResult = await client.query(
+                'SELECT siklus FROM services WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1',
+                [id]
+            );
+            if (srvResult.rows.length > 0) {
+                const siklus = srvResult.rows[0].siklus || 'profile';
+                const isolirDate = await BillingCycleService.calculateIsolirDate(id, activeDate, null, siklus);
+                await client.query(`
+                    UPDATE services
+                    SET status = 'active',
+                        active_date = $1,
+                        isolir_date = $2,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE customer_id = $3
+                `, [activeDate, isolirDate, id]);
+            }
+
+            // 3. Link to ODP via cable_routes (if ODP selected)
             if (odp_id) {
-                // Check if port already used
                 const portCheck = await client.query(`
                     SELECT id FROM cable_routes WHERE odp_id = $1 AND port_number = $2 AND status = 'connected'
                 `, [odp_id, port_no]);
 
                 if (portCheck.rows.length > 0) {
-                    // Maybe warn or error? For now, we allow overwrite or handle it? 
-                    // Let's assume strict port enforcement:
                     throw new Error(`Port ${port_no} pada ODP selected sudah digunakan.`);
                 }
 
@@ -209,12 +226,27 @@ router.post('/customers/:id/activate', async (req, res) => {
                     INSERT INTO cable_routes (odp_id, customer_id, port_number, status, installation_date)
                     VALUES ($1, $2, $3, 'connected', CURRENT_DATE)
                 `, [odp_id, id, port_no]);
-
-                // Trigger on cable_routes should update used_ports count on ODPs table automatically
             }
 
             logger.info(`Technician ${req.user.username} activated customer ${id}`);
+
+            // 4. Generate magic token for customer portal access
+            const CustomerTokenService = require('../../services/customer-token-service');
+            try {
+                await CustomerTokenService.generateCustomerToken(id, '30d');
+                logger.info(`Magic token generated for customer ${id}`);
+            } catch (tokenError) {
+                logger.warn(`Failed to generate magic token for customer ${id}: ${tokenError.message}`);
+            }
         });
+
+        // 5. Use shared activation service for notifications + invoice + trial
+        try {
+            const activationService = require('../../../config/activation-service');
+            await activationService.activateCustomer(id, req.user?.username || 'technician');
+        } catch (actError) {
+            logger.error(`Activation service error for ${id}: ${actError.message}`);
+        }
 
         res.json({
             success: true,
@@ -522,6 +554,220 @@ router.post('/customers/:id/sync-olt-name', async (req, res) => {
     } catch (error) {
         logger.error('Error syncing OLT name:', error);
         res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// ==================== SUPPORT TICKETS FOR TECHNICIANS ====================
+
+// GET /api/v1/technician/tickets - Get tickets assigned to me
+router.get('/tickets', async (req, res) => {
+    try {
+        const userId = req.user.id;
+
+        const result = await query(`
+            SELECT
+                st.*,
+                c.name as customer_name,
+                c.phone as customer_phone,
+                c.address as customer_address
+            FROM support_tickets st
+            LEFT JOIN customers c ON st.customer_id = c.id
+            WHERE st.assigned_to_user = $1
+            ORDER BY st.updated_at DESC
+        `, [userId]);
+
+        res.json({
+            success: true,
+            data: result.rows
+        });
+    } catch (error) {
+        logger.error('Error fetching technician tickets:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch tickets'
+        });
+    }
+});
+
+// PUT /api/v1/technician/tickets/:id - Update ticket status or resolve
+router.put('/tickets/:id', async (req, res) => {
+    try {
+        const ticketId = req.params.id;
+        const { status, resolution_note } = req.body;
+
+        const validStatuses = ['in_progress', 'resolved'];
+        if (status && !validStatuses.includes(status)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Status tidak valid. Gunakan: in_progress, resolved'
+            });
+        }
+
+        // Check if ticket exists and is assigned to this technician
+        const existingTicket = await query(`
+            SELECT id, status, customer_phone, customer_name, ticket_number
+            FROM support_tickets
+            WHERE id = $1 AND assigned_to_user = $2
+        `, [ticketId, req.user.id]);
+
+        if (existingTicket.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Tiket tidak ditemukan atau bukan milik Anda'
+            });
+        }
+
+        const ticket = existingTicket.rows[0];
+
+        // Build update query
+        const updates = [];
+        const values = [];
+        let paramIndex = 1;
+
+        if (status) {
+            updates.push(`status = $${paramIndex++}`);
+            values.push(status);
+        }
+        if (resolution_note) {
+            updates.push(`resolution = $${paramIndex++}`);
+            values.push(resolution_note);
+        }
+        if (status === 'resolved') {
+            updates.push(`resolved_at = $${paramIndex++}`);
+            values.push(new Date());
+        }
+        updates.push(`updated_at = CURRENT_TIMESTAMP`);
+        values.push(ticketId);
+
+        const result = await query(`
+            UPDATE support_tickets
+            SET ${updates.join(', ')}
+            WHERE id = $${paramIndex}
+            RETURNING *
+        `, values);
+
+        // Send notification to customer if resolved
+        if (status === 'resolved') {
+            try {
+                const whatsappNotifications = require('../../../config/whatsapp-notifications');
+                await whatsappNotifications.sendTicketUpdatedNotification(
+                    ticket.customer_phone,
+                    {
+                        customerName: ticket.customer_name,
+                        ticketNumber: ticket.ticket_number,
+                        newStatus: 'Terselesaikan',
+                        assignedAgent: req.user.username,
+                        updateMessage: resolution_note || 'Terima kasih telah menggunakan layanan kami.'
+                    }
+                );
+                logger.info(`📱 Customer notified about resolved ticket ${ticket.ticket_number}`);
+            } catch (notifError) {
+                logger.error(`Failed to send customer notification:`, notifError.message);
+            }
+        }
+
+        res.json({
+            success: true,
+            message: 'Tiket berhasil diperbarui',
+            data: result.rows[0]
+        });
+
+    } catch (error) {
+        logger.error('Error updating ticket:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Gagal memperbarui tiket'
+        });
+    }
+});
+
+// POST /api/v1/technician/tickets/:id/messages - Add message to ticket
+router.post('/tickets/:id/messages', async (req, res) => {
+    try {
+        const ticketId = req.params.id;
+        const { message } = req.body;
+
+        if (!message) {
+            return res.status(400).json({
+                success: false,
+                message: 'Message wajib diisi'
+            });
+        }
+
+        // Check if ticket exists and is assigned to this technician
+        const ticketResult = await query(`
+            SELECT id, customer_phone, customer_name, ticket_number
+            FROM support_tickets
+            WHERE id = $1 AND assigned_to_user = $2
+        `, [ticketId, req.user.id]);
+
+        if (ticketResult.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Tiket tidak ditemukan atau bukan milik Anda'
+            });
+        }
+
+        const ticket = ticketResult.rows[0];
+
+        // Add message
+        await query(`
+            INSERT INTO support_ticket_messages (
+                ticket_id, sender_type, sender_name, message
+            ) VALUES ($1, 'technician', $2, $3)
+        `, [ticketId, req.user.username, message]);
+
+        // Update ticket updated_at
+        await query(`
+            UPDATE support_tickets
+            SET updated_at = CURRENT_TIMESTAMP
+            WHERE id = $1
+        `, [ticketId]);
+
+        res.json({
+            success: true,
+            message: 'Pesan berhasil ditambahkan'
+        });
+
+    } catch (error) {
+        logger.error('Error adding message to ticket:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Gagal menambah pesan'
+        });
+    }
+});
+
+// GET /api/v1/technician/tickets/stats - Get my performance stats
+router.get('/tickets/stats', async (req, res) => {
+    try {
+        const userId = req.user.id;
+
+        const result = await query(`
+            SELECT
+                COUNT(*) as total_assigned,
+                COUNT(CASE WHEN status = 'open' THEN 1 END) as pending,
+                COUNT(CASE WHEN status = 'in_progress' THEN 1 END) as in_progress,
+                COUNT(CASE WHEN status = 'resolved' THEN 1 END) as resolved,
+                COUNT(CASE WHEN status = 'closed' THEN 1 END) as closed,
+                AVG(CASE WHEN resolved_at IS NOT NULL
+                    THEN EXTRACT(EPOCH FROM (resolved_at - created_at))/3600
+                    END) as avg_resolution_hours
+            FROM support_tickets
+            WHERE assigned_to_user = $1
+        `, [userId]);
+
+        res.json({
+            success: true,
+            data: result.rows[0]
+        });
+
+    } catch (error) {
+        logger.error('Error fetching technician ticket stats:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Gagal mengambil statistik'
+        });
     }
 });
 

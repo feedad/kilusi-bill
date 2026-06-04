@@ -484,6 +484,7 @@ async function handleCreateInvoiceCommand(remoteJid, params) {
     const invoice = await billing.createInvoice({
       customer_id: customer.id,
       package_id: customer.package_id,
+      service_number: customer.service_number || null,
       amount: customer.package_price,
       due_date: new Date(new Date().setDate(parseInt(getSetting('billing_due_date', '1')))),
       status: 'unpaid',

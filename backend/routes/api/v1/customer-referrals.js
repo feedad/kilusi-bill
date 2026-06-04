@@ -39,10 +39,10 @@ const verifyCustomerToken = async (req, res, next) => {
       const decoded = jwt.verify(token, CUSTOMER_JWT_SECRET);
 
       if (decoded.type === 'customer' && decoded.customerId) {
-        // Get customer by ID
+        // Get customer by ID from customers_view to include all service data
         const query = `
           SELECT c.*
-          FROM customers c
+          FROM customers_view c
           WHERE c.id = $1
         `;
         const result = await pool.query(query, [decoded.customerId]);

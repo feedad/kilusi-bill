@@ -42,24 +42,16 @@ testtime    Cleartext-Password := "testtime"
 testbw      Cleartext-Password := "testbw"
             Service-Type = Framed-User,
             Framed-Protocol = PPP,
-            WISPr-Bandwidth-Max-Up := 1048576,      # 1 Mbps upload
-            WISPr-Bandwidth-Max-Down := 2097152,    # 2 Mbps download
+            WISPr-Bandwidth-Max-Up := 1048576,
+            WISPr-Bandwidth-Max-Down := 2097152,
             Reply-Message := "Bandwidth limited to 1/2 Mbps"
 
 # ===========================================
 # Default Fallthrough Users
 # ===========================================
 
-# This is a special entry that will match any user
-# Useful for testing and debugging
-# WARNING: This accepts any password! Remove in production!
-DEFAULT     Auth-Type := Accept
-            Reply-Message := "Default user authenticated (testing mode)"
-
-# This rejects any user that doesn't match above entries
-# This should be the LAST entry in the file
-DEFAULT    Auth-Type := Reject
-           Reply-Message = "Access denied - User not found or incorrect password"
+# DEFAULT entries removed - authentication is handled by SQL module
+# Do not add DEFAULT Auth-Type := Accept in production as it bypasses SQL authentication
 
 # ===========================================
 # Example User Configurations

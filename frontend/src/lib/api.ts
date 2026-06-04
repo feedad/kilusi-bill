@@ -2,6 +2,25 @@ import axios from 'axios'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || ''
 
+// Safe localStorage access for SSR
+function safeGetItem(key: string): string | null {
+  if (typeof window === 'undefined') return null
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function safeRemoveItem(key: string): void {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // Ignore errors
+  }
+}
+
 export const api = axios.create({
   baseURL: API_BASE_URL,
   headers: {
@@ -28,12 +47,12 @@ api.interceptors.request.use(
 
       if (isCustomerRoute) {
         // Customer portal: prioritize customer_token
-        token = localStorage.getItem('customer_token')
+        token = safeGetItem('customer_token')
         tokenSource = 'customer_token'
 
         // Fallback to auth-storage if customer_token not found
         if (!token) {
-          const authStorage = localStorage.getItem('auth-storage')
+          const authStorage = safeGetItem('auth-storage')
           if (authStorage) {
             const parsed = JSON.parse(authStorage)
             token = parsed.state?.token
@@ -42,7 +61,7 @@ api.interceptors.request.use(
         }
       } else {
         // Admin portal: use auth-storage
-        const authStorage = localStorage.getItem('auth-storage')
+        const authStorage = safeGetItem('auth-storage')
         if (authStorage) {
           const parsed = JSON.parse(authStorage)
           token = parsed.state?.token
@@ -102,14 +121,14 @@ api.interceptors.response.use(
         if (isCustomerRoute) {
           // Only clear customer auth for customer routes
           console.log('🔑 Clearing customer auth tokens only')
-          localStorage.removeItem('customer_token')
-          localStorage.removeItem('customer_data')
+          safeRemoveItem('customer_token')
+          safeRemoveItem('customer_data')
         } else if (isAdminRoute) {
           // Only clear admin auth for admin routes
           console.log('🔑 Clearing admin auth tokens only')
-          localStorage.removeItem('auth-storage')
-          localStorage.removeItem('auth_token')
-          localStorage.removeItem('user_data')
+          safeRemoveItem('auth-storage')
+          safeRemoveItem('auth_token')
+          safeRemoveItem('user_data')
         } else {
           // Unknown route - don't clear anything, just log
           console.log('🔑 401 on unknown route type, not clearing any tokens')
@@ -226,7 +245,7 @@ export const endpoints = {
     nasDetail: (id: string) => `/api/v1/radius/nas/${id}`,
     testNas: (id: string) => `/api/v1/radius/nas/${id}/test`,
     snmpStats: (id: string) => `/api/v1/radius/nas/${id}/snmp-stats`,
-    connectionStatus: (username: string) => `/api/v1/radius/connection-status/${username}`,
+    connectionStatus: (username: string) => `/api/v1/radius/connection-status/${encodeURIComponent(username)}`,
   },
 
   // Technician

@@ -49,6 +49,16 @@ function generateTicketNumber() {
     return `TKT-${year}${month}${day}-${random}`;
 }
 
+/**
+ * Calculate price with tax
+ */
+function calculatePriceWithTax(price, taxRate) {
+    if (!price) return 0;
+    const rate = parseFloat(taxRate) || 0;
+    const amount = Number(price) + (Number(price) * rate / 100);
+    return Math.round(amount);
+}
+
 // ============================================
 // PACKAGES MANAGEMENT
 // ============================================
@@ -184,7 +194,7 @@ async function deletePackage(id) {
 async function getCustomers(filters = {}) {
     try {
         let sql = `
-            SELECT c.*, p.name as package_name, p.price as package_price 
+            SELECT c.*, p.name as package_name, p.price as package_price, p.group as package_group, p.speed
             FROM customers_view c
             LEFT JOIN packages p ON c.package_id = p.id
         `;
@@ -400,7 +410,7 @@ async function getInvoices(filters = {}) {
 async function getInvoiceById(id) {
     try {
         const sql = `
-            SELECT i.*, 
+            SELECT i.*,
                    c.name as customer_name, c.phone as customer_phone,
                    p.name as package_name
             FROM invoices i
@@ -411,6 +421,27 @@ async function getInvoiceById(id) {
         return await getOne(sql, [id]);
     } catch (error) {
         logger.error('Error getting invoice by ID:', error);
+        return null;
+    }
+}
+
+/**
+ * Get payment by ID
+ */
+async function getPaymentById(id) {
+    try {
+        const sql = `
+            SELECT p.*,
+                   i.invoice_number,
+                   i.customer_id,
+                   i.amount as invoice_amount
+            FROM payments p
+            JOIN invoices i ON p.invoice_id = i.id
+            WHERE p.id = $1
+        `;
+        return await getOne(sql, [id]);
+    } catch (error) {
+        logger.error('Error getting payment by ID:', error);
         return null;
     }
 }
@@ -468,10 +499,10 @@ async function createInvoice(invoiceData) {
 
         const sql = `
             INSERT INTO invoices (
-                customer_id, package_id, invoice_number, amount, due_date, 
-                status, notes
+                customer_id, package_id, invoice_number, amount, total_amount, due_date, 
+                status, notes, service_number
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING *
         `;
 
@@ -480,14 +511,54 @@ async function createInvoice(invoiceData) {
             invoiceData.package_id,
             invoiceNumber,
             invoiceData.amount,
+            invoiceData.total_amount || invoiceData.amount, // Fallback to amount if total missing
             invoiceData.due_date,
             invoiceData.status || 'unpaid',
-            invoiceData.notes || null
+            invoiceData.notes || null,
+            invoiceData.service_number || null
         ];
 
         const result = await query(sql, values);
-        logger.info('Invoice created:', result.rows[0]);
-        return result.rows[0];
+        const invoice = result.rows[0];
+        logger.info('Invoice created:', invoice);
+
+        // Push to autopay if enabled (non-blocking — failure doesn't fail invoice creation)
+        try {
+            const autopayService = require('../services/autopay-service');
+            if (autopayService.isEnabled()) {
+                const customerResult = await query('SELECT name FROM customers WHERE id = $1', [invoiceData.customer_id]);
+                const customerName = customerResult.rows[0]?.name || 'Unknown';
+
+                let uniqueCode = null;
+                let amountWithCode = null;
+                try {
+                    const uniqueCodeGenerator = require('./unique-code');
+                    if (uniqueCodeGenerator.isEnabled()) {
+                        uniqueCode = await uniqueCodeGenerator.generateCode();
+                        amountWithCode = uniqueCodeGenerator.calculateAmountWithCode(invoice.total_amount || invoice.amount, uniqueCode);
+                        await query(
+                            `UPDATE invoices SET unique_code = $1, amount_with_code = $2 WHERE id = $3`,
+                            [uniqueCode, amountWithCode, invoice.id]
+                        );
+                        invoice.unique_code = uniqueCode;
+                        invoice.amount_with_code = amountWithCode;
+                    }
+                } catch (ucError) {
+                    logger.error(`[Autopay] Unique code generation failed for ${invoice.invoice_number}:`, ucError.message);
+                }
+
+                await autopayService.pushInvoice({
+                    ...invoice,
+                    customer_name: customerName,
+                    amount: amountWithCode || invoice.total_amount || invoice.amount,
+                    unique_code: uniqueCode || 0
+                });
+            }
+        } catch (autopayError) {
+            logger.error(`[Autopay] Failed to push invoice ${invoice.invoice_number}:`, autopayError.message);
+        }
+
+        return invoice;
     } catch (error) {
         logger.error('Error creating invoice:', error);
         throw error;
@@ -588,9 +659,9 @@ async function getBillingStats() {
             SELECT 
                 (SELECT COUNT(*) FROM customers WHERE status = 'active') as active_customers,
                 (SELECT COUNT(*) FROM customers) as total_customers,
-                (SELECT COUNT(*) FROM invoices WHERE status = 'unpaid') as unpaid_invoices,
+                (SELECT COUNT(*) FROM invoices WHERE status IN ('unpaid', 'suspended')) as unpaid_invoices,
                 (SELECT COUNT(*) FROM invoices WHERE status = 'paid') as paid_invoices,
-                (SELECT COALESCE(SUM(amount), 0) FROM invoices WHERE status = 'unpaid') as total_unpaid,
+                (SELECT COALESCE(SUM(amount), 0) FROM invoices WHERE status IN ('unpaid', 'suspended')) as total_unpaid,
                 (SELECT COALESCE(SUM(amount), 0) FROM invoices WHERE status = 'paid' 
                  AND EXTRACT(MONTH FROM payment_date) = EXTRACT(MONTH FROM CURRENT_DATE)) as monthly_revenue
         `);
@@ -731,7 +802,7 @@ async function updateCustomerIsolirStatus(phone, status) {
 
         // Update services table
         await query('UPDATE services SET status = $1, updated_at = NOW() WHERE customer_id = $2', [serviceStatus, customer.id]);
-        
+
         logger.info(`Customer ${phone} isolir status updated to ${status}`);
         return true;
     } catch (error) {
@@ -755,28 +826,28 @@ async function switchCustomerPackage(phone, packageId, saveHistory = true) {
         // Looking at CustomerService.updateCustomer, it updates ALL fields from the passed object.
         // So we need to reconstruct the object or update CustomerService to handle partials.
         // The implementation above passed all fields.
-        
+
         const updateData = {
-           name: customer.name,
-           phone: customer.phone,
-           pppoe_username: customer.pppoe_username,
-           email: customer.email,
-           address: customer.address,
-           latitude: customer.latitude,
-           longitude: customer.longitude,
-           package_id: packageId,
-           pppoe_profile: customer.pppoe_profile,
-           status: customer.status,
-           cable_type: customer.cable_type,
-           cable_length: customer.cable_length,
-           port_number: customer.port_number,
-           cable_status: customer.cable_status || 'connected',
-           cable_notes: customer.cable_notes,
-           device_id: customer.device_id
+            name: customer.name,
+            phone: customer.phone,
+            pppoe_username: customer.pppoe_username,
+            email: customer.email,
+            address: customer.address,
+            latitude: customer.latitude,
+            longitude: customer.longitude,
+            package_id: packageId,
+            pppoe_profile: customer.pppoe_profile,
+            status: customer.status,
+            cable_type: customer.cable_type,
+            cable_length: customer.cable_length,
+            port_number: customer.port_number,
+            cable_status: customer.cable_status || 'connected',
+            cable_notes: customer.cable_notes,
+            device_id: customer.device_id
         };
 
         await CustomerService.updateCustomer(customer.id, updateData);
-        
+
         logger.info(`Customer ${phone} package switched to ${packageId}`);
         return true;
     } catch (error) {
@@ -785,11 +856,65 @@ async function switchCustomerPackage(phone, packageId, saveHistory = true) {
     }
 }
 
+/**
+ * Set customer status by ID (updates services table)
+ */
+async function setCustomerStatusById(id, status) {
+    try {
+        const sql = 'UPDATE services SET status = $1, updated_at = NOW() WHERE customer_id = $2';
+        await query(sql, [status, id]);
+        logger.info(`Customer services status updated for customer_id=${id} to '${status}'`);
+        return true;
+    } catch (error) {
+        logger.error(`Error updating customer status for customer_id=${id}:`, error);
+        throw error;
+    }
+}
+
+/**
+ * Get customer by username/code
+ */
+async function getCustomerByUsername(username) {
+    try {
+        const sql = `
+            SELECT c.*, p.name as package_name, p.price as package_price
+            FROM customers_view c
+            LEFT JOIN packages p ON c.package_id = p.id
+            WHERE c.username = $1 OR c.pppoe_username = $1
+        `;
+        return await getOne(sql, [username]);
+    } catch (error) {
+        logger.error('Error getting customer by username:', error);
+        return null;
+    }
+}
+
+/**
+ * Get invoices by customer ID/username/phone and date range
+ */
+async function getInvoicesByCustomerAndDateRange(customerIdentifier, startDate, endDate) {
+    try {
+        const sql = `
+            SELECT i.*
+            FROM invoices i
+            JOIN customers c ON i.customer_id = c.id
+            WHERE (c.username = $1 OR c.id::text = $1 OR c.phone = $1)
+              AND i.created_at >= $2
+              AND i.created_at <= $3
+        `;
+        return await getAll(sql, [customerIdentifier, startDate, endDate]);
+    } catch (error) {
+        logger.error('Error in getInvoicesByCustomerAndDateRange:', error);
+        return [];
+    }
+}
+
 module.exports = {
     // Utilities
     normalizePhone,
     generateInvoiceNumber,
     generateTicketNumber,
+    calculatePriceWithTax,
     initializeBilling,
 
     // Packages
@@ -805,6 +930,7 @@ module.exports = {
     getCustomerById,
     getCustomerByPhone,
     getCustomerByPPPoE,
+    getCustomerByUsername,
     generateCustomerId,
     createCustomer,
     updateCustomer,
@@ -815,16 +941,22 @@ module.exports = {
     getActiveCustomers,
     updateCustomerIsolirStatus,
     switchCustomerPackage,
+    setCustomerStatusById,
 
     // Invoices
     getInvoices,
     getInvoiceById,
     getCustomerInvoices,
+    getInvoicesByCustomer: getCustomerInvoices, // alias
     getInvoicesByPhone,
     createInvoice,
     updateInvoice,
     markInvoicePaid,
+    getInvoicesByCustomerAndDateRange,
     getAllInvoices, // alias
+
+    // Payments
+    getPaymentById,
 
     // Statistics
     getBillingStats,

@@ -18,11 +18,26 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     setMounted(true)
     // Get theme from localStorage or system preference
-    const storedTheme = localStorage.getItem('customer-theme') as Theme
-    if (storedTheme) {
-      setTheme(storedTheme)
-    } else {
-      // Check system preference
+    if (typeof window !== 'undefined') {
+      try {
+        const storedTheme = localStorage.getItem('customer-theme') as Theme
+        if (storedTheme) {
+          // Validate theme value
+          const parsed = storedTheme === 'light' || storedTheme === 'dark' ? storedTheme : null
+          if (parsed) {
+            setTheme(parsed)
+          } else {
+            // Clear invalid data
+            localStorage.removeItem('customer-theme')
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to parse theme from localStorage:', error)
+        // Clear corrupted data
+        localStorage.removeItem('customer-theme')
+      }
+
+      // Use system preference if no valid stored theme
       const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
       setTheme(systemTheme)
     }

@@ -4,13 +4,14 @@
  */
 
 const { Pool } = require('pg');
-const { getSetting } = require('./settingsManager');
 const { logger } = require('./logger');
 
 let pool = null;
 
 /**
  * Initialize PostgreSQL connection pool
+ * Note: Database config comes from environment variables, not settingsManager,
+ * to avoid circular dependency (DB → settingsManager → DB)
  */
 function initializePool() {
     if (pool) {
@@ -18,14 +19,14 @@ function initializePool() {
     }
 
     const config = {
-        host: getSetting('postgres_host') || 'localhost',
-        port: parseInt(getSetting('postgres_port')) || 5432,
-        database: getSetting('postgres_database') || 'kilusi_bill',
-        user: getSetting('postgres_user') || 'postgres',
-        password: getSetting('postgres_password') || '',
-        max: parseInt(getSetting('postgres_pool_max')) || 20,
-        idleTimeoutMillis: parseInt(getSetting('postgres_idle_timeout')) || 30000,
-        connectionTimeoutMillis: parseInt(getSetting('postgres_connection_timeout')) || 5000,
+        host: process.env.POSTGRES_HOST || 'localhost',
+        port: parseInt(process.env.POSTGRES_PORT) || 5432,
+        database: process.env.POSTGRES_DATABASE || 'kilusi_bill',
+        user: process.env.POSTGRES_USER || 'postgres',
+        password: process.env.POSTGRES_PASSWORD || '',
+        max: parseInt(process.env.POSTGRES_POOL_MAX) || 20,
+        idleTimeoutMillis: parseInt(process.env.POSTGRES_IDLE_TIMEOUT) || 30000,
+        connectionTimeoutMillis: parseInt(process.env.POSTGRES_CONNECTION_TIMEOUT) || 5000,
     };
 
     pool = new Pool(config);

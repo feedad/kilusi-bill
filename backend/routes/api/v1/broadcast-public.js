@@ -79,4 +79,119 @@ router.get('/messages/active', async (req, res) => {
   }
 });
 
+/**
+ * GET /api/v1/broadcast-public/payment-settings
+ * Get payment settings including bank accounts (public for WhatsApp broadcast)
+ */
+router.get('/payment-settings', async (req, res) => {
+  try {
+    const settingsManager = require('../../../config/settingsManager');
+
+    // Get payment settings from app_config
+    let paymentSettings = settingsManager.getSetting('payment_settings') || settingsManager.getSetting('paymentSettings');
+
+    if (typeof paymentSettings === 'string') {
+      try {
+        paymentSettings = JSON.parse(paymentSettings);
+      } catch (e) {
+        paymentSettings = {};
+      }
+    }
+
+    // If no bank_accounts in settings, try to get from payment_gateway_settings table
+    if (!paymentSettings || !paymentSettings.bank_accounts || paymentSettings.bank_accounts.length === 0) {
+      const result = await query(
+        "SELECT config FROM payment_gateway_settings WHERE gateway = 'manual' LIMIT 1"
+      );
+
+      if (result.rows.length > 0) {
+        let conf = result.rows[0].config;
+        if (typeof conf === 'string') {
+          try { conf = JSON.parse(conf); } catch (e) { conf = {}; }
+        }
+        if (conf.bank_accounts) {
+          paymentSettings = {
+            ...paymentSettings,
+            bank_accounts: conf.bank_accounts
+          };
+        }
+      }
+    }
+
+    // Format bank accounts for WhatsApp template
+    let formattedBankAccounts = '';
+    if (paymentSettings && paymentSettings.bank_accounts && paymentSettings.bank_accounts.length > 0) {
+      formattedBankAccounts = paymentSettings.bank_accounts.map((account, index) => {
+        const emoji = ['💳', '🏦', '🏛️'][index % 3];
+        return `${emoji} ${account.bank_name}: ${account.account_number}\n   a.n ${account.account_name}`;
+      }).join('\n\n');
+    }
+
+    res.json({
+      success: true,
+      data: {
+        bank_accounts: paymentSettings?.bank_accounts || [],
+        formatted_bank_accounts: formattedBankAccounts
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching payment settings:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch payment settings',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/v1/broadcast-public/customers-preview
+ * Get preview of customers data for broadcast (with sample data)
+ */
+router.get('/customers-preview', async (req, res) => {
+  try {
+    const { limit = 5 } = req.query;
+
+    // Get sample customers for preview
+    const result = await query(`
+      SELECT
+        c.id,
+        c.nama_customer,
+        c.no_layanan,
+        c.phone,
+        c.alamat,
+        c.status,
+        p.name as package_name,
+        p.price as package_price,
+        p.profile
+      FROM customers c
+      LEFT JOIN packages p ON c.package_id = p.id
+      WHERE c.status = 'active'
+      ORDER BY c.created_at DESC
+      LIMIT $1
+    `, [limit]);
+
+    const customers = result.rows.map(c => ({
+      ...c,
+      nama_pelanggan: c.nama_customer,
+      profile: c.profile || c.package_name,
+      harga: c.package_price ? `Rp ${Math.round(c.package_price).toLocaleString('id-ID')}` : 'Rp 0',
+      phone: c.phone || '62xxxxxxxx',
+      jenis_tagihan: c.billing_cycle || 'Bulanan'
+    }));
+
+    res.json({
+      success: true,
+      data: customers
+    });
+  } catch (error) {
+    console.error('Error fetching customers preview:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch customers preview',
+      error: error.message
+    });
+  }
+});
+
 module.exports = router;

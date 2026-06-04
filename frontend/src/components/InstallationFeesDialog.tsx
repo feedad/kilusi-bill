@@ -364,11 +364,11 @@ export default function InstallationFeesDialog({ open, onOpenChange }: Installat
                         </div>
                         <div>
                           <span className="font-medium">Dibuat:</span>
-                          <p>{new Date(fee.created_at).toLocaleDateString('id-ID')}</p>
+                          <p>{new Date(fee.created_at).toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' })}</p>
                         </div>
                         <div>
                           <span className="font-medium">Diperbarui:</span>
-                          <p>{new Date(fee.updated_at).toLocaleDateString('id-ID')}</p>
+                          <p>{new Date(fee.updated_at).toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' })}</p>
                         </div>
                       </div>
                     </div>

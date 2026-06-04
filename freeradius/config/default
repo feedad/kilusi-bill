@@ -53,7 +53,7 @@ server default {
     # Authorize Section
     # ===========================================
     authorize {
-        filter_username
+        # filter_username    # Disabled: allow spaces in usernames (e.g., "teh eha")
         preprocess
         chap
         mschap
@@ -81,6 +81,9 @@ server default {
         Auth-Type MS-CHAP {
             mschap
         }
+        Auth-Type mschap {
+            mschap
+        }
         eap
     }
 
@@ -103,6 +106,17 @@ server default {
         sql
         exec
         attr_filter.accounting_response
+    }
+
+    # ===========================================
+    # Post-Accounting Section - Run after accounting
+    # ===========================================
+    post-accounting {
+        # Mark hotspot voucher as used when session ends
+        exec-wait
+        update {
+            &request: += &session-state:
+        }
     }
 
     # ===========================================

@@ -121,12 +121,13 @@ export default function AccountingPage() {
       id: string
       name: string
       amount: number
-      category: string
+      category_id: number | null
       frequency: 'daily' | 'weekly' | 'monthly'
       nextDate: string
       enabled: boolean
     }>
   })
+  const [deletedRecurringIds, setDeletedRecurringIds] = useState<string[]>([])
 
   const [formData, setFormData] = useState({
     type: '' as 'revenue' | 'expense' | '',
@@ -135,7 +136,7 @@ export default function AccountingPage() {
     description: '',
     reference_type: '',
     reference_id: '',
-    date: new Date().toISOString().split('T')[0],
+    date: (() => { const d = new Date(); const p = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; })(),
     attachment_url: '',
     notes: ''
   })
@@ -152,7 +153,7 @@ export default function AccountingPage() {
     const date = new Date(dateString)
     return date.toLocaleDateString('id-ID', {
       day: 'numeric',
-      month: 'long',
+      month: '2-digit',
       year: 'numeric'
     })
   }
@@ -202,8 +203,9 @@ export default function AccountingPage() {
         break
     }
 
-    setFilterStartDate(startDate.toISOString().split('T')[0])
-    setFilterEndDate(endDate.toISOString().split('T')[0])
+    const p = (n: number) => String(n).padStart(2, '0')
+    setFilterStartDate(`${startDate.getFullYear()}-${p(startDate.getMonth()+1)}-${p(startDate.getDate())}`)
+    setFilterEndDate(`${endDate.getFullYear()}-${p(endDate.getMonth()+1)}-${p(endDate.getDate())}`)
   }
 
   const clearDateFilters = () => {
@@ -319,8 +321,8 @@ export default function AccountingPage() {
   const fetchCategories = async () => {
     try {
       const response = await adminApi.get('/api/v1/accounting/categories')
-      if (response.data.success && response.data.data?.categories) {
-        setCategories(response.data.data.categories)
+      if (response.data.success && Array.isArray(response.data.data)) {
+        setCategories(response.data.data)
       } else {
         setCategories([])
       }
@@ -373,16 +375,35 @@ export default function AccountingPage() {
 
   const fetchAutoExpenseSettings = async () => {
     try {
-      const response = await adminApi.get('/api/v1/auto-expenses/settings')
-      if (response.data.success) {
-        const settings = response.data.data
+      const [settingsRes, recurringRes] = await Promise.all([
+        adminApi.get('/api/v1/auto-expenses/settings'),
+        adminApi.get('/api/v1/auto-expenses/recurring')
+      ])
 
+      if (settingsRes.data.success) {
+        const s = settingsRes.data.data
         setAutoExpenseSettings(prev => ({
           ...prev,
-          technicianFeeEnabled: settings.technician_fee_enabled?.isActive && settings.technician_fee_enabled?.value === 'true',
-          technicianFee: parseInt(settings.technician_fee_amount?.value) || 0,
-          marketingFeeEnabled: settings.marketing_fee_enabled?.isActive && settings.marketing_fee_enabled?.value === 'true',
-          marketingFee: parseInt(settings.marketing_fee_amount?.value) || 0
+          technicianFeeEnabled: s.technician_fee_enabled?.isActive && s.technician_fee_enabled?.value === 'true',
+          technicianFee: parseInt(s.technician_fee_amount?.value) || 0,
+          marketingFeeEnabled: s.marketing_fee_enabled?.isActive && s.marketing_fee_enabled?.value === 'true',
+          marketingFee: parseInt(s.marketing_fee_amount?.value) || 0
+        }))
+      }
+
+      if (recurringRes.data.success) {
+        const list = recurringRes.data.data || []
+        setAutoExpenseSettings(prev => ({
+          ...prev,
+          recurringExpenses: list.map((r: { id: number; name: string; amount: number; category_id: number | null; frequency: string; next_date: string; is_active: boolean }) => ({
+            id: String(r.id),
+            name: r.name,
+            amount: Number(r.amount),
+            category_id: r.category_id,
+            frequency: r.frequency as 'daily' | 'weekly' | 'monthly',
+            nextDate: r.next_date,
+            enabled: r.is_active
+          }))
         }))
       }
     } catch (error) {
@@ -516,7 +537,7 @@ export default function AccountingPage() {
           description: '',
           reference_type: '',
           reference_id: '',
-          date: new Date().toISOString().split('T')[0],
+          date: (() => { const d = new Date(); const p = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; })(),
           attachment_url: '',
           notes: ''
         })
@@ -672,7 +693,8 @@ export default function AccountingPage() {
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
-        a.download = `laporan-${reportType === 'detailed' ? 'rinci-harian' : 'keuangan'}-${new Date().toISOString().split('T')[0]}.html`
+        const d = new Date(); const p = (n: number) => String(n).padStart(2, '0'); const ts = `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`
+        a.download = `laporan-${reportType === 'detailed' ? 'rinci-harian' : 'keuangan'}-${ts}.html`
         document.body.appendChild(a)
         a.click()
         document.body.removeChild(a)
@@ -718,7 +740,8 @@ export default function AccountingPage() {
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
-        a.download = `laporan-keuangan-${new Date().toISOString().split('T')[0]}.csv`
+        const d = new Date(); const p = (n: number) => String(n).padStart(2, '0'); const ts = `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`
+        a.download = `laporan-keuangan-${ts}.csv`
         document.body.appendChild(a)
         a.click()
         document.body.removeChild(a)
@@ -873,7 +896,8 @@ export default function AccountingPage() {
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
-        a.download = `laporan-keuangan-${new Date().toISOString().split('T')[0]}.html`
+        const d = new Date(); const p = (n: number) => String(n).padStart(2, '0'); const ts = `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`
+        a.download = `laporan-keuangan-${ts}.html`
         document.body.appendChild(a)
         a.click()
         document.body.removeChild(a)
@@ -902,7 +926,10 @@ export default function AccountingPage() {
           </Button>
           <Button
             variant="outline"
-            onClick={() => setShowAutoExpenseDialog(true)}
+            onClick={() => {
+              setDeletedRecurringIds([])
+              setShowAutoExpenseDialog(true)
+            }}
           >
             <Settings className="h-4 w-4 mr-2" />
             Pengeluaran Otomatis
@@ -1594,12 +1621,12 @@ export default function AccountingPage() {
                     <Button
                       onClick={() => {
                         const newExpense = {
-                          id: Date.now().toString(),
+                          id: `new_${Date.now()}`,
                           name: '',
                           amount: 0,
-                          category: '',
+                          category_id: null,
                           frequency: 'monthly' as const,
-                          nextDate: new Date().toISOString().split('T')[0],
+                          nextDate: (() => { const d = new Date(); const p = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; })(),
                           enabled: true
                         }
                         setAutoExpenseSettings(prev => ({
@@ -1640,7 +1667,19 @@ export default function AccountingPage() {
                                 }}
                                 className="h-4 w-4"
                               />
-                              <span className="font-medium">{expense.name || 'Tanpa Nama'}</span>
+                              <Input
+                                value={expense.name}
+                                onChange={(e) => {
+                                  setAutoExpenseSettings(prev => ({
+                                    ...prev,
+                                    recurringExpenses: prev.recurringExpenses.map(exp =>
+                                      exp.id === expense.id ? { ...exp, name: e.target.value } : exp
+                                    )
+                                  }))
+                                }}
+                                placeholder="Nama pengeluaran"
+                                className="font-medium h-8"
+                              />
                             </div>
                             <Button
                               variant="outline"
@@ -1650,6 +1689,9 @@ export default function AccountingPage() {
                                   ...prev,
                                   recurringExpenses: prev.recurringExpenses.filter(exp => exp.id !== expense.id)
                                 }))
+                                if (!expense.id.startsWith('new_')) {
+                                  setDeletedRecurringIds(prev => [...prev, expense.id])
+                                }
                               }}
                               className="text-red-600 hover:text-red-700"
                             >
@@ -1659,22 +1701,74 @@ export default function AccountingPage() {
                           <div className="grid grid-cols-2 gap-3 text-sm">
                             <div>
                               <Label className="text-xs text-gray-500">Jumlah</Label>
-                              <p className="font-medium">Rp {expense.amount.toLocaleString()}</p>
+                              <Input
+                                type="number"
+                                value={expense.amount || ''}
+                                onChange={(e) => {
+                                  setAutoExpenseSettings(prev => ({
+                                    ...prev,
+                                    recurringExpenses: prev.recurringExpenses.map(exp =>
+                                      exp.id === expense.id ? { ...exp, amount: Number(e.target.value) } : exp
+                                    )
+                                  }))
+                                }}
+                                className="h-8"
+                              />
                             </div>
                             <div>
                               <Label className="text-xs text-gray-500">Frekuensi</Label>
-                              <p className="font-medium capitalize">
-                                {expense.frequency === 'daily' ? 'Harian' :
-                                  expense.frequency === 'weekly' ? 'Mingguan' : 'Bulanan'}
-                              </p>
+                              <select
+                                value={expense.frequency}
+                                onChange={(e) => {
+                                  setAutoExpenseSettings(prev => ({
+                                    ...prev,
+                                    recurringExpenses: prev.recurringExpenses.map(exp =>
+                                      exp.id === expense.id ? { ...exp, frequency: e.target.value as 'daily' | 'weekly' | 'monthly' } : exp
+                                    )
+                                  }))
+                                }}
+                                className="flex h-8 w-full rounded-md border border-input bg-white dark:bg-gray-800 px-3 py-1 text-sm shadow-sm transition-colors text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                <option value="daily">Harian</option>
+                                <option value="weekly">Mingguan</option>
+                                <option value="monthly">Bulanan</option>
+                              </select>
                             </div>
                             <div>
                               <Label className="text-xs text-gray-500">Tanggal Berikutnya</Label>
-                              <p className="font-medium">{new Date(expense.nextDate).toLocaleDateString('id-ID')}</p>
+                              <Input
+                                type="date"
+                                value={expense.nextDate ? expense.nextDate.split('T')[0] : ''}
+                                onChange={(e) => {
+                                  setAutoExpenseSettings(prev => ({
+                                    ...prev,
+                                    recurringExpenses: prev.recurringExpenses.map(exp =>
+                                      exp.id === expense.id ? { ...exp, nextDate: e.target.value } : exp
+                                    )
+                                  }))
+                                }}
+                                className="h-8"
+                              />
                             </div>
                             <div>
                               <Label className="text-xs text-gray-500">Kategori</Label>
-                              <p className="font-medium">{expense.category || 'Belum dipilih'}</p>
+                              <select
+                                value={expense.category_id ?? ''}
+                                onChange={(e) => {
+                                  setAutoExpenseSettings(prev => ({
+                                    ...prev,
+                                    recurringExpenses: prev.recurringExpenses.map(exp =>
+                                      exp.id === expense.id ? { ...exp, category_id: e.target.value ? Number(e.target.value) : null } : exp
+                                    )
+                                  }))
+                                }}
+                                className="flex h-8 w-full rounded-md border border-input bg-white dark:bg-gray-800 px-3 py-1 text-sm shadow-sm transition-colors text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                <option value="">Belum dipilih</option>
+                                {categories.filter(c => c.type === 'expense').map(cat => (
+                                  <option key={cat.id} value={cat.id}>{cat.name}</option>
+                                ))}
+                              </select>
                             </div>
                           </div>
                         </div>
@@ -1712,6 +1806,32 @@ export default function AccountingPage() {
                   value: autoExpenseSettings.marketingFee.toString(),
                   isActive: true
                 })
+
+                // Delete removed recurring expenses
+                for (const id of deletedRecurringIds) {
+                  await adminApi.delete(`/api/v1/auto-expenses/recurring/${id}`)
+                }
+                setDeletedRecurringIds([])
+
+                // Save recurring expenses
+                for (const expense of autoExpenseSettings.recurringExpenses) {
+                  const payload = {
+                    name: expense.name || 'Pengeluaran Berjadwal',
+                    amount: expense.amount,
+                    categoryId: expense.category_id,
+                    frequency: expense.frequency,
+                    nextDate: expense.nextDate,
+                    isActive: expense.enabled
+                  }
+                  if (expense.id.startsWith('new_')) {
+                    const res = await adminApi.post('/api/v1/auto-expenses/recurring', payload)
+                    if (res.data?.data?.id) {
+                      expense.id = String(res.data.data.id)
+                    }
+                  } else {
+                    await adminApi.put(`/api/v1/auto-expenses/recurring/${expense.id}`, payload)
+                  }
+                }
 
                 alert('Pengaturan berhasil disimpan!')
                 setShowAutoExpenseDialog(false)

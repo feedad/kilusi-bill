@@ -525,11 +525,44 @@ router.get('/summary', async (req, res) => {
 
     const result = await query(queryText, queryParams)
 
+    // Also get admin fee totals from invoices, split by fee_bearer
+    // Only merchant-borne fees reduce our actual revenue
+    let feeQuery = `
+      SELECT
+        COALESCE(SUM(payment_fee_amount) FILTER (WHERE fee_bearer = 'merchant'), 0) as merchant_borne_fee,
+        COALESCE(SUM(payment_fee_amount) FILTER (WHERE fee_bearer = 'customer'), 0) as customer_borne_fee,
+        COALESCE(SUM(payment_fee_amount), 0) as total_admin_fee
+      FROM invoices WHERE status = 'paid' AND payment_fee_amount > 0
+    `
+    let feeParams = []
+    let feeIdx = 1
+    if (start_date) {
+      feeQuery = `
+        SELECT
+          COALESCE(SUM(payment_fee_amount) FILTER (WHERE fee_bearer = 'merchant'), 0) as merchant_borne_fee,
+          COALESCE(SUM(payment_fee_amount) FILTER (WHERE fee_bearer = 'customer'), 0) as customer_borne_fee,
+          COALESCE(SUM(payment_fee_amount), 0) as total_admin_fee
+        FROM invoices WHERE status = 'paid' AND payment_fee_amount > 0
+          AND payment_date >= $1 AND payment_date <= $2
+      `
+      feeParams = [start_date, end_date]
+    } else if (start_date) {
+      feeQuery += ` AND payment_date >= $${feeIdx++}`
+      feeParams.push(start_date)
+    }
+
+    const feeResult = await query(feeQuery, feeParams)
+    const merchantFee = parseFloat(feeResult.rows[0].merchant_borne_fee) || 0
+    const adminFee = parseFloat(feeResult.rows[0].total_admin_fee) || 0
+
     const summary = {
       revenue: 0,
       revenue_count: 0,
       expense: 0,
       expense_count: 0,
+      admin_fee: adminFee,
+      merchant_borne_fee: merchantFee,
+      customer_borne_fee: adminFee - merchantFee,
       profit: 0,
       total_transactions: 0
     }
@@ -544,7 +577,9 @@ router.get('/summary', async (req, res) => {
       }
     })
 
-    summary.profit = summary.revenue - summary.expense
+    // Only merchant-borne fees reduce our actual profit
+    // Customer-borne fees are paid by customers on top of our price, not our expense
+    summary.profit = summary.revenue - summary.expense - merchantFee
     summary.total_transactions = summary.revenue_count + summary.expense_count
 
     res.json({
@@ -604,16 +639,54 @@ router.get('/report/profit-loss', async (req, res) => {
 
     const result = await query(queryText, queryParams)
 
-    const reportData = result.rows.map(row => ({
-      period: row.period,
-      revenue: parseFloat(row.revenue),
-      expense: parseFloat(row.expense),
-      profit: parseFloat(row.profit),
-      total_transactions: parseInt(row.total_transactions),
-      profit_margin: parseFloat(row.revenue) > 0
-        ? ((parseFloat(row.profit) / parseFloat(row.revenue)) * 100).toFixed(2)
-        : 0
-    }))
+    // Get admin fees grouped by same period, split by fee_bearer
+    // Only merchant-borne fees reduce our profit
+    let feeQuery = `SELECT DATE_TRUNC($1, i.payment_date) as period,
+      COALESCE(SUM(i.payment_fee_amount) FILTER (WHERE i.fee_bearer = 'merchant'), 0) as merchant_fee,
+      COALESCE(SUM(i.payment_fee_amount), 0) as total_fee
+      FROM invoices i WHERE i.status = 'paid' AND i.payment_fee_amount > 0`
+    const feeParams = [group_by]
+    let feeIdx = 2
+    if (start_date) {
+      feeQuery += ` AND i.payment_date >= $${feeIdx++}`
+      feeParams.push(start_date)
+    }
+    if (end_date) {
+      feeQuery += ` AND i.payment_date <= $${feeIdx++}`
+      feeParams.push(end_date)
+    }
+    feeQuery += ` GROUP BY DATE_TRUNC($1, i.payment_date)`
+
+    const feeResult = await query(feeQuery, feeParams)
+
+    // Build a map of period -> fees
+    const feeMap = {}
+    feeResult.rows.forEach(row => {
+      const key = new Date(row.period).toISOString()
+      feeMap[key] = {
+        merchant_fee: parseFloat(row.merchant_fee) || 0,
+        total_fee: parseFloat(row.total_fee) || 0
+      }
+    })
+
+    const reportData = result.rows.map(row => {
+      const fees = feeMap[new Date(row.period).toISOString()] || { merchant_fee: 0, total_fee: 0 }
+      const revenue = parseFloat(row.revenue)
+      const expense = parseFloat(row.expense)
+      // Only merchant-borne fees reduce our actual profit
+      const profit = revenue - expense - fees.merchant_fee
+
+      return {
+        period: row.period,
+        revenue,
+        expense,
+        admin_fee: fees.total_fee,
+        merchant_borne_fee: fees.merchant_fee,
+        profit,
+        total_transactions: parseInt(row.total_transactions),
+        profit_margin: revenue > 0 ? ((profit / revenue) * 100).toFixed(2) : '0.00'
+      }
+    })
 
     res.json({
       success: true,

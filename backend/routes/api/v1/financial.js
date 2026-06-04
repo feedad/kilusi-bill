@@ -491,4 +491,95 @@ router.get('/categories', async (req, res) => {
     }
 });
 
+// GET /api/v1/financial/admin-fee-report - Admin fee summary by payment method and period
+router.get('/admin-fee-report', async (req, res) => {
+    try {
+        const start_date = req.query.start_date || '';
+        const end_date = req.query.end_date || '';
+
+        let dateFilter = '';
+        let params = [];
+        let paramIdx = 1;
+
+        if (start_date) {
+            dateFilter += ` AND pt.created_at >= $${paramIdx}`;
+            params.push(start_date);
+            paramIdx++;
+        }
+        if (end_date) {
+            dateFilter += ` AND pt.created_at <= $${paramIdx}`;
+            params.push(end_date);
+            paramIdx++;
+        }
+
+        // Summary by payment method
+        const methodRes = await query(`
+            SELECT 
+                pt.payment_method,
+                COUNT(*) as transaction_count,
+                SUM(pt.fee_amount) as total_fee
+            FROM payment_transactions pt
+            WHERE pt.fee_amount > 0 ${dateFilter}
+            GROUP BY pt.payment_method
+            ORDER BY total_fee DESC
+        `, params);
+
+        // Summary by month
+        const monthParams = [...params];
+        const monthRes = await query(`
+            SELECT 
+                TO_CHAR(pt.created_at, 'YYYY-MM') as month,
+                COUNT(*) as transaction_count,
+                SUM(pt.fee_amount) as total_fee
+            FROM payment_transactions pt
+            WHERE pt.fee_amount > 0 ${dateFilter}
+            GROUP BY TO_CHAR(pt.created_at, 'YYYY-MM')
+            ORDER BY month DESC
+        `, monthParams);
+
+        // Grand total
+        const totalRes = await query(`
+            SELECT 
+                COUNT(*) as transaction_count,
+                SUM(fee_amount) as total_fee
+            FROM payment_transactions
+            WHERE fee_amount > 0 ${dateFilter}
+        `, params);
+
+        // Invoice fee total for cross-check
+        const invoiceFeeRes = await query(`
+            SELECT SUM(payment_fee_amount) as total_invoice_fee
+            FROM invoices
+            WHERE payment_fee_amount > 0 ${dateFilter.replace(/pt\./g, 'i.').replace(/pt\.created_at/g, 'i.payment_date')}
+        `, []);
+
+        res.json({
+            success: true,
+            data: {
+                by_method: methodRes.rows.map(r => ({
+                    payment_method: r.payment_method,
+                    transaction_count: parseInt(r.transaction_count),
+                    total_fee: parseFloat(r.total_fee) || 0
+                })),
+                by_month: monthRes.rows.map(r => ({
+                    month: r.month,
+                    transaction_count: parseInt(r.transaction_count),
+                    total_fee: parseFloat(r.total_fee) || 0
+                })),
+                grand_total: {
+                    transaction_count: parseInt(totalRes.rows[0].transaction_count) || 0,
+                    total_fee: parseFloat(totalRes.rows[0].total_fee) || 0,
+                    total_invoice_fee: parseFloat(invoiceFeeRes.rows[0]?.total_invoice_fee) || 0
+                }
+            }
+        });
+    } catch (error) {
+        logger.error('Error fetching admin fee report:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Terjadi kesalahan saat mengambil laporan admin fee'
+        });
+    }
+});
+
 module.exports = router;

@@ -1,5 +1,6 @@
 'use client';
 
+import { CONFIG } from '@/lib/config'
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Navbar from '@/components/landing/Navbar';
@@ -7,13 +8,25 @@ import Footer from '@/components/landing/Footer';
 import { CalendarIcon, ArrowLeftIcon, ShareIcon } from '@heroicons/react/24/outline';
 import { notFound } from 'next/navigation';
 
-export default function BlogDetail({ params }) {
-    const [post, setPost] = useState(null);
+interface BlogPost {
+    id: string;
+    title: string;
+    slug: string;
+    excerpt: string;
+    content: string;
+    cover_image: string;
+    is_published: boolean;
+    created_at: string;
+    views?: number;
+}
+
+export default function BlogDetail({ params }: { params: { slug: string } }) {
+    const [post, setPost] = useState<BlogPost | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(false);
 
     useEffect(() => {
-        fetch(`/api/v1/blog/posts/${params.slug}`)
+        fetch(`${CONFIG.API_BASE_URL}/api/v1/blog/posts/${params.slug}`)
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
@@ -64,9 +77,9 @@ export default function BlogDetail({ params }) {
                     <div className="flex items-center text-slate-500 mb-8 border-b border-slate-200 dark:border-slate-800 pb-8">
                         <div className="flex items-center gap-2 mr-6">
                             <CalendarIcon className="w-5 h-5" />
-                            {new Date(post.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
+                            {new Date(post.created_at).toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' })}
                         </div>
-                        {post.views > 0 && <span className="text-sm bg-slate-200 dark:bg-slate-800 px-2 py-1 rounded">{post.views} views</span>}
+                        {(post.views !== undefined && post.views > 0) && <span className="text-sm bg-slate-200 dark:bg-slate-800 px-2 py-1 rounded">{post.views} views</span>}
                     </div>
 
                     {post.cover_image && (

@@ -27,10 +27,12 @@ router.get('/', async (req, res) => {
     const limitNum = parseInt(limit, 10);
     const offset = (pageNum - 1) * limitNum;
 
-    let countQuery = `SELECT COUNT(*) as total FROM regions`;
+    let countQuery = `SELECT COUNT(*) as total FROM regions r`;
     let dataQuery = `
-      SELECT id, name, district, regency, province, created_at, updated_at, disabled_at
-      FROM regions
+      SELECT r.id, r.name, r.district, r.regency, r.province, r.created_at, r.updated_at, r.disabled_at, r.mitra_id,
+             m.name as mitra_name
+      FROM regions r
+      LEFT JOIN mitra m ON m.id = r.mitra_id
     `;
 
     let params = [];
@@ -38,13 +40,13 @@ router.get('/', async (req, res) => {
 
     // Add search condition
     if (search) {
-      conditions.push(`(name ILIKE $${params.length + 1} OR district ILIKE $${params.length + 1} OR regency ILIKE $${params.length + 1} OR province ILIKE $${params.length + 1})`);
+      conditions.push(`(r.name ILIKE $${params.length + 1} OR r.district ILIKE $${params.length + 1} OR r.regency ILIKE $${params.length + 1} OR r.province ILIKE $${params.length + 1})`);
       params.push(`%${search}%`);
     }
 
     // Add disabled filter condition (default: exclude disabled)
     if (include_disabled === 'false') {
-      conditions.push(`disabled_at IS NULL`);
+      conditions.push(`r.disabled_at IS NULL`);
     }
 
     if (conditions.length > 0) {
@@ -53,7 +55,7 @@ router.get('/', async (req, res) => {
       dataQuery += whereClause;
     }
 
-    dataQuery += ` ORDER BY name ASC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+    dataQuery += ` ORDER BY r.name ASC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
     params.push(limitNum, offset);
 
     // Execute both queries
@@ -91,7 +93,7 @@ router.get('/:id', async (req, res) => {
     const { id } = req.params;
 
     const result = await pool.query(
-      'SELECT id, name, district, regency, province, created_at, updated_at, disabled_at FROM regions WHERE id = $1',
+      'SELECT r.id, r.name, r.district, r.regency, r.province, r.created_at, r.updated_at, r.disabled_at, r.mitra_id, m.name as mitra_name FROM regions r LEFT JOIN mitra m ON m.id = r.mitra_id WHERE r.id = $1',
       [id]
     );
 
@@ -119,7 +121,7 @@ router.get('/:id', async (req, res) => {
 // Create new region
 router.post('/', async (req, res) => {
   try {
-    const { name, district, regency, province } = req.body;
+    const { name, district, regency, province, mitra_id } = req.body;
 
     // Validation
     if (!name || name.trim() === '') {
@@ -144,10 +146,10 @@ router.post('/', async (req, res) => {
 
     // Insert new region
     const result = await pool.query(
-      `INSERT INTO regions (name, district, regency, province, disabled_at)
-       VALUES ($1, $2, $3, $4, NULL)
-       RETURNING id, name, district, regency, province, created_at, updated_at, disabled_at`,
-      [name.trim(), district?.trim() || null, regency?.trim() || null, province?.trim() || null]
+      `INSERT INTO regions (name, district, regency, province, mitra_id, disabled_at)
+       VALUES ($1, $2, $3, $4, $5, NULL)
+       RETURNING id, name, district, regency, province, mitra_id, created_at, updated_at, disabled_at`,
+      [name.trim(), district?.trim() || null, regency?.trim() || null, province?.trim() || null, mitra_id || null]
     );
 
     res.status(201).json({
@@ -168,7 +170,7 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, district, regency, province } = req.body;
+    const { name, district, regency, province, mitra_id } = req.body;
 
     // Validation
     if (!name || name.trim() === '') {
@@ -204,10 +206,10 @@ router.put('/:id', async (req, res) => {
     // Update region
     const result = await pool.query(
       `UPDATE regions
-       SET name = $1, district = $2, regency = $3, province = $4, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $5
-       RETURNING id, name, district, regency, province, created_at, updated_at, disabled_at`,
-      [name.trim(), district?.trim() || null, regency?.trim() || null, province?.trim() || null, id]
+       SET name = $1, district = $2, regency = $3, province = $4, mitra_id = $5, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $6
+       RETURNING id, name, district, regency, province, mitra_id, created_at, updated_at, disabled_at`,
+      [name.trim(), district?.trim() || null, regency?.trim() || null, province?.trim() || null, mitra_id || null, id]
     );
 
     res.json({

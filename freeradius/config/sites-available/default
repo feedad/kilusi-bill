@@ -50,10 +50,24 @@ server default {
     }
 
     # ===========================================
+    # CoA (Change of Authorization) Listener
+    # For disconnecting users and changing attributes
+    # ===========================================
+    listen {
+        type = coa
+        ipaddr = *
+        port = 3799
+        limit {
+            max_connections = 16
+            lifetime = 0
+            idle_timeout = 30
+        }
+    }
+
+    # ===========================================
     # Authorize Section
     # ===========================================
     authorize {
-        filter_username
         preprocess
         chap
         mschap
@@ -79,6 +93,9 @@ server default {
             chap
         }
         Auth-Type MS-CHAP {
+            mschap
+        }
+        Auth-Type mschap {
             mschap
         }
         eap

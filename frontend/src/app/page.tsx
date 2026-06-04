@@ -1,6 +1,8 @@
 'use client';
+
 import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
+import { CONFIG } from '@/lib/config';
 import HeroSection from '@/components/landing/HeroSection';
 import BannerSection from '@/components/landing/BannerSection';
 import FeaturesSection from '@/components/landing/FeaturesSection';
@@ -8,8 +10,7 @@ import PricingSection from '@/components/landing/PricingSection';
 import TestimonialSection from '@/components/landing/TestimonialSection';
 import BlogSection from '@/components/landing/BlogSection';
 import Footer from '@/components/landing/Footer';
-import Link from 'next/link';
-
+import Navbar from '@/components/landing/Navbar';
 import ScrollAnimation from '@/components/landing/ScrollAnimation';
 
 // Dynamically import MapSection to avoid SSR issues with Leaflet
@@ -17,8 +18,6 @@ const MapSection = dynamic(() => import('@/components/landing/MapSection'), {
   ssr: false,
   loading: () => <div className="w-full h-[500px] bg-slate-100 dark:bg-slate-900 animate-pulse flex items-center justify-center">Loading Map...</div>
 });
-
-import Navbar from '@/components/landing/Navbar';
 
 export default function Home() {
   const [content, setContent] = useState({
@@ -30,7 +29,7 @@ export default function Home() {
 
   useEffect(() => {
     // Fetch editable content
-    fetch('/api/v1/landing/content')
+    fetch(`${CONFIG.API_BASE_URL}/api/v1/landing/content`)
       .then(res => res.json())
       .then(data => {
         if (data.success) {

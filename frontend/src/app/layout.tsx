@@ -6,6 +6,12 @@ import { ThemeProvider } from '@/contexts/ThemeContext'
 import { AuthProvider } from '@/components/providers/AuthProvider'
 import { QueryProvider } from '@/components/providers/QueryProvider'
 import { Toaster } from 'react-hot-toast'
+import dynamic from 'next/dynamic'
+
+// Dynamically import BrandingProvider to prevent SSR issues
+const BrandingProvider = dynamic(() => import('@/components/providers/BrandingProvider').then(mod => ({ default: mod.default })), {
+  ssr: false,
+})
 
 const dmSans = DM_Sans({
   subsets: ['latin'],
@@ -13,6 +19,7 @@ const dmSans = DM_Sans({
   display: 'swap',
 })
 
+// Default metadata (will be overridden by BrandingProvider)
 export const metadata: Metadata = {
   title: 'Kilusi Bill - ISP Management System',
   description: 'Complete ISP billing and management solution',
@@ -40,33 +47,35 @@ export default function RootLayout({
         <ThemeProvider>
           <QueryProvider>
             <AuthProvider>
-              <div id="root">
-                {children}
-              </div>
-              <div id="modal-root" />
-              <Toaster
-                position="top-right"
-                toastOptions={{
-                  duration: 4000,
-                  style: {
-                    background: 'hsl(var(--background))',
-                    color: 'hsl(var(--foreground))',
-                    border: '1px solid hsl(var(--border))',
-                  },
-                  success: {
-                    iconTheme: {
-                      primary: 'hsl(142, 76%, 36%)',
-                      secondary: 'hsl(var(--background))',
+              <BrandingProvider>
+                <div id="root">
+                  {children}
+                </div>
+                <div id="modal-root" />
+                <Toaster
+                  position="top-right"
+                  toastOptions={{
+                    duration: 4000,
+                    style: {
+                      background: 'hsl(var(--background))',
+                      color: 'hsl(var(--foreground))',
+                      border: '1px solid hsl(var(--border))',
                     },
-                  },
-                  error: {
-                    iconTheme: {
-                      primary: 'hsl(0, 84%, 60%)',
-                      secondary: 'hsl(var(--background))',
+                    success: {
+                      iconTheme: {
+                        primary: 'hsl(142, 76%, 36%)',
+                        secondary: 'hsl(var(--background))',
+                      },
                     },
-                  },
-                }}
-              />
+                    error: {
+                      iconTheme: {
+                        primary: 'hsl(0, 84%, 60%)',
+                        secondary: 'hsl(var(--background))',
+                      },
+                    },
+                  }}
+                />
+              </BrandingProvider>
             </AuthProvider>
           </QueryProvider>
         </ThemeProvider>

@@ -30,6 +30,7 @@ import {
   Download
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
+import { customerAPI } from '@/lib/customer-api'
 
 interface WiFiSettings {
   ssid: string
@@ -96,23 +97,32 @@ export default function WiFiSettingsPage() {
   const fetchWiFiData = async () => {
     try {
       setLoading(true)
-      // In a real implementation, this would fetch from your API
-      // const [settingsRes, devicesRes, statsRes] = await Promise.all([
-      //   fetch('/api/v1/customer/wifi/settings'),
-      //   fetch('/api/v1/customer/wifi/devices'),
-      //   fetch('/api/v1/customer/wifi/stats')
-      // ])
 
-      // Mock data for demonstration
-      const mockSettings: WiFiSettings = {
-        ssid: 'Kilusi_Home_50MBPS',
-        password: 'Kilusi12345',
+      // Fetch real data from customer radius API
+      const result = await customerAPI.getRadiusInfo()
+
+      let ssid = 'KilusiNet'
+      let password = '********'
+      let status: 'online' | 'offline' = 'offline'
+      let connectedCount = 0
+
+      if (result.success && result.data) {
+        ssid = result.data.deviceInfo?.ssid || ssid
+        password = result.data.deviceInfo?.wifiPassword || password
+        status = result.data.deviceInfo?.status === 'online' ? 'online' : 'offline'
+        connectedCount = result.data.trafficStats?.connectedDevices || 0
+      }
+
+      // Build settings from real data, keep unsupported features as defaults
+      const realSettings: WiFiSettings = {
+        ssid,
+        password,
         security: 'WPA2',
         band: 'dual',
         guest_network: {
-          enabled: true,
-          ssid: 'Kilusi_Guest',
-          password: 'Guest123',
+          enabled: false,
+          ssid: `${ssid}_Guest`,
+          password: '********',
           bandwidth_limit: 5
         },
         device_limit: 10,
@@ -130,51 +140,31 @@ export default function WiFiSettingsPage() {
         }
       }
 
-      const mockDevices: ConnectedDevice[] = [
-        {
-          id: '1',
-          name: "Budi's iPhone",
-          mac: 'AA:BB:CC:DD:EE:FF',
-          ip: '192.168.1.101',
-          type: 'smartphone',
-          connected_at: '2025-01-19T08:30:00Z',
-          bandwidth_used: 245760000,
-          is_active: true
-        },
-        {
-          id: '2',
-          name: "Budi's Laptop",
-          mac: 'BB:CC:DD:EE:FF:AA',
-          ip: '192.168.1.102',
-          type: 'laptop',
-          connected_at: '2025-01-19T09:15:00Z',
-          bandwidth_used: 1048576000,
-          is_active: true
-        },
-        {
-          id: '3',
-          name: "Samsung Tablet",
-          mac: 'CC:DD:EE:FF:AA:BB',
-          ip: '192.168.1.103',
-          type: 'tablet',
-          connected_at: '2025-01-18T14:20:00Z',
-          bandwidth_used: 524288000,
-          is_active: false
-        }
-      ]
+      // Connected devices from GenieACS AssociatedDevice (via API)
+      const apiDevices = result.data?.connectedDevices || []
+      const realDevices: ConnectedDevice[] = apiDevices.map((dev: any, idx: number) => ({
+        id: String(idx + 1),
+        name: dev.name || 'Unknown Device',
+        mac: dev.mac || '-',
+        ip: dev.ip || '-',
+        type: 'other',
+        connected_at: new Date().toISOString(),
+        bandwidth_used: 0,
+        is_active: dev.status === 'online'
+      }))
 
-      const mockStats: WiFiStats = {
-        connected_devices: 2,
-        total_devices: 15,
-        bandwidth_used: 1572864000,
-        signal_strength: 85,
-        uptime: 172800,
-        data_today: 2147483648
+      const realStats: WiFiStats = {
+        connected_devices: connectedCount,
+        total_devices: 10,
+        bandwidth_used: result.data?.trafficStats?.dataUsage?.totalBytes || 0,
+        signal_strength: status === 'online' ? 85 : 0,
+        uptime: status === 'online' ? 172800 : 0,
+        data_today: result.data?.trafficStats?.dataUsage?.totalBytes || 0
       }
 
-      setWiFiSettings(mockSettings)
-      setConnectedDevices(mockDevices)
-      setWifiStats(mockStats)
+      setWiFiSettings(realSettings)
+      setConnectedDevices(realDevices)
+      setWifiStats(realStats)
     } catch (error) {
       toast.error('❌ Gagal memuat data WiFi')
     } finally {
@@ -187,19 +177,17 @@ export default function WiFiSettingsPage() {
 
     setSaving(true)
     try {
-      // In a real implementation, this would save to your API
-      // await fetch('/api/v1/customer/wifi/settings', {
-      //   method: 'PUT',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify(wifiSettings)
-      // })
-
-      // Mock save
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      // Save SSID via customer API
+      if (wifiSettings.ssid) {
+        const result = await customerAPI.updateSSID(wifiSettings.ssid.trim())
+        if (!result.success) {
+          throw new Error(result.message || 'Gagal menyimpan SSID')
+        }
+      }
 
       toast.success('✅ Pengaturan WiFi berhasil disimpan!')
-    } catch (error) {
-      toast.error('❌ Gagal menyimpan pengaturan WiFi')
+    } catch (error: any) {
+      toast.error('❌ Gagal menyimpan pengaturan WiFi: ' + error.message)
     } finally {
       setSaving(false)
     }
@@ -604,7 +592,7 @@ export default function WiFiSettingsPage() {
                               <p className="text-sm text-gray-600">IP: {device.ip} • MAC: {device.mac}</p>
                               <div className="flex items-center space-x-4 mt-1">
                                 <span className="text-xs text-gray-500">
-                                  Terhubung: {new Date(device.connected_at).toLocaleDateString('id-ID')}
+                                  Terhubung: {new Date(device.connected_at).toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' })}
                                 </span>
                                 <span className="text-xs text-gray-500">
                                   Data: {formatBytes(device.bandwidth_used)}

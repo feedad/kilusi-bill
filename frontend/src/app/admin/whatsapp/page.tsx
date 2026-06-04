@@ -6,6 +6,8 @@ import { useWhatsAppWebSocket } from '@/hooks/useWhatsAppWebSocket'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card'
 import { whatsappAPI } from '@/lib/whatsapp-api'
+import { CONFIG } from '@/lib/config'
+import { adminApi } from '@/lib/api-clients'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -56,6 +58,9 @@ import RealTimeAnalytics from '@/components/WhatsApp/RealTimeAnalytics'
 import MessageQueueMonitor from '@/components/WhatsApp/MessageQueueMonitor'
 import RealTimeNotifications from '@/components/WhatsApp/RealTimeNotifications'
 import GatewaySettings from '@/components/WhatsApp/GatewaySettings'
+import { OmnichatDashboard } from '@/components/WhatsApp/Omnichat'
+import CreateTemplateModal from '@/components/WhatsApp/CreateTemplateModal'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 
 export default function WhatsAppDashboard() {
   const {
@@ -81,17 +86,370 @@ export default function WhatsAppDashboard() {
   const [currentPage, setCurrentPage] = useState(1)
   const [messagesPerPage] = useState(20)
 
-  // Broadcast states
-  const [broadcastType, setBroadcastType] = useState<'all' | 'region'>('all')
+  // Omnichat status state
+  const [omnichatStatus, setOmnichatStatus] = useState<{
+    connected: boolean
+    api_url: string
+    api_key_valid: boolean
+    gateway: string
+    fallback_enabled: boolean
+    daily_messages?: number
+    delivery_rate?: number
+  }>({ connected: false, api_url: '', api_key_valid: false, gateway: 'omnichat', fallback_enabled: false })
+  
+  // Baileys status state
+  const [baileysStatus, setBaileysStatus] = useState<{
+    connected: boolean;
+    qr: string | null;
+    pairingCode: string | null;
+    user: any;
+    loading: boolean;
+  }>({ connected: false, qr: null, pairingCode: null, user: null, loading: false })
+  const [loadingOmnichat, setLoadingOmnichat] = useState(false)
+
+  // Omnichat settings state (for Settings tab)
+  const [omnichatSettings, setOmnichatSettings] = useState({
+    api_url: 'https://whatsapp.kilusi.id/api',
+    api_key: '',
+    timeout: 30000,
+    retry_count: 3,
+    sync_enabled: false,
+    sync_schedule: 'daily',
+    sync_time: '02:00',
+    sync_tags_enabled: true
+  })
+  const [savingSettings, setSavingSettings] = useState(false)
+  const [settingsMessage, setSettingsMessage] = useState('')
+
+  // Baileys specific settings state
+  const [baileysDelaySettings, setBaileysDelaySettings] = useState({
+    min: '100',
+    max: '600'
+  })
+
+  // Fetch Omnichat status
+  const fetchOmnichatStatus = async () => {
+    try {
+      setLoadingOmnichat(true)
+
+      // Fetch both status and stats in parallel
+      const [statusResponse, statsResponse] = await Promise.all([
+        fetch(`${CONFIG.API_BASE_URL}/api/v1/omnichat/status`),
+        fetch(`${CONFIG.API_BASE_URL}/api/v1/omnichat/stats`)
+      ])
+
+      const statusData = await statusResponse.json()
+      const statsData = await statsResponse.json()
+
+      if (statusData.success) {
+        setOmnichatStatus(prev => ({
+          ...prev,
+          connected: statusData.data.connected,
+          api_key_valid: statusData.data.api_key_valid,
+          gateway: statusData.data.provider || 'omnichat',
+          fallback_enabled: statusData.data.fallback_enabled
+        }))
+      }
+
+      if (statsData.success) {
+        setOmnichatStatus(prev => ({
+          ...prev,
+          daily_messages: statsData.data.daily_messages,
+          delivery_rate: statsData.data.delivery_rate
+        }))
+      }
+    } catch (error) {
+      console.error('Error fetching Omnichat status:', error)
+    } finally {
+      setLoadingOmnichat(false)
+    }
+  }
+
+  // Fetch Baileys status & QR
+  const fetchBaileysStatus = async () => {
+    try {
+      const response = await adminApi.get('/api/v1/baileys/status')
+      if (response.data.success) {
+        setBaileysStatus(prev => ({
+          ...prev,
+          connected: response.data.data.connected,
+          user: response.data.data.user
+        }))
+        
+        // If not connected, try to fetch QR
+        if (!response.data.data.connected) {
+          try {
+            const qrResponse = await adminApi.get('/api/v1/baileys/qr')
+            if (qrResponse.data.success) {
+              setBaileysStatus(prev => ({ ...prev, qr: qrResponse.data.data.qr }))
+            }
+          } catch (qrErr) {
+            console.warn('QR not available yet:', qrErr)
+          }
+        }
+      }
+    } catch (error: any) {
+      // Don't log 401 errors repeatedly - user just needs to login
+      if (error?.response?.status !== 401) {
+        console.error('Error fetching Baileys status:', error)
+      }
+    }
+  }
+  const fetchOmnichatSettings = async () => {
+    try {
+      const response = await adminApi.get('/api/v1/settings/omnichat')
+      if (response.data.success && response.data.data) {
+        setOmnichatSettings(prev => ({
+          ...prev,
+          api_url: response.data.data.kilusi_omnichat_api_url || prev.api_url,
+          api_key: response.data.data.kilusi_omnichat_api_key || '',
+          timeout: response.data.data.kilusi_omnichat_timeout || prev.timeout,
+          retry_count: response.data.data.kilusi_omnichat_retry_count || prev.retry_count,
+          sync_enabled: response.data.data.omnichat_sync_enabled || prev.sync_enabled,
+          sync_schedule: response.data.data.omnichat_sync_schedule || prev.sync_schedule,
+          sync_time: response.data.data.omnichat_sync_time || prev.sync_time,
+          sync_tags_enabled: response.data.data.omnichat_sync_tags_enabled !== undefined ? response.data.data.omnichat_sync_tags_enabled : prev.sync_tags_enabled
+        }))
+      }
+    } catch (error) {
+      console.error('Error fetching Omnichat settings:', error)
+    }
+  }
+
+  // Save Omnichat settings to database
+  const saveOmnichatSettings = async () => {
+    try {
+      setSavingSettings(true)
+      setSettingsMessage('')
+
+      // Save API URL
+      const response = await adminApi.post('/api/v1/settings', {
+        key: 'kilusi_omnichat_api_url',
+        value: omnichatSettings.api_url
+      })
+
+      if (!response.data.success) throw new Error('Failed to save API URL')
+
+      // Save API key if provided
+      if (omnichatSettings.api_key) {
+        const keyResponse = await adminApi.post('/api/v1/settings', {
+          key: 'kilusi_omnichat_api_key',
+          value: omnichatSettings.api_key
+        })
+
+        if (!keyResponse.data.success) throw new Error('Failed to save API Key')
+      }
+
+      // Save other settings
+      await adminApi.post('/api/v1/settings', {
+        key: 'kilusi_omnichat_timeout',
+        value: omnichatSettings.timeout.toString()
+      })
+
+      await adminApi.post('/api/v1/settings', {
+        key: 'kilusi_omnichat_retry_count',
+        value: omnichatSettings.retry_count.toString()
+      })
+
+      await adminApi.post('/api/v1/settings', {
+        key: 'omnichat_sync_enabled',
+        value: omnichatSettings.sync_enabled.toString()
+      })
+
+      await adminApi.post('/api/v1/settings', {
+        key: 'omnichat_sync_schedule',
+        value: omnichatSettings.sync_schedule
+      })
+
+      await adminApi.post('/api/v1/settings', {
+        key: 'omnichat_sync_time',
+        value: omnichatSettings.sync_time
+      })
+
+      setSettingsMessage('Settings saved successfully!')
+      setTimeout(() => setSettingsMessage(''), 3000)
+
+      // Refresh status
+      fetchOmnichatStatus()
+    } catch (error: any) {
+      setSettingsMessage('Failed to save settings: ' + error.message)
+    } finally {
+      setSavingSettings(false)
+    }
+  }
+
+  // Meta templates state (separate from local templates)
+  const [metaTemplateList, setMetaTemplateList] = useState<any[]>([])
+  const [loadingMetaTemplates, setLoadingMetaTemplates] = useState(false)
+  const [showCreateMetaTemplateModal, setShowCreateMetaTemplateModal] = useState(false)
+
+  // Unified templates state
+  const [templates, setTemplates] = useState<any[]>([])
+  const [loadingTemplates, setLoadingTemplates] = useState(false)
+  const [showCreateTemplateModal, setShowCreateTemplateModal] = useState(false)
+  const [showMetaSubmitDialog, setShowMetaSubmitDialog] = useState(false)
+  const [metaSubmitId, setMetaSubmitId] = useState<number | null>(null)
+  const [metaCategory, setMetaCategory] = useState('UTILITY')
+  const [metaLanguage, setMetaLanguage] = useState('id')
+  const [showQRModal, setShowQRModal] = useState(false)
+
+  // Fetch all templates
+  const fetchTemplates = async () => {
+    setLoadingTemplates(true)
+    try {
+      const response = await adminApi.get('/api/v1/whatsapp-templates')
+      if (response.data.success) {
+        setTemplates(response.data.data || [])
+      }
+    } catch (error) {
+      console.error('Error fetching templates:', error)
+    } finally {
+      setLoadingTemplates(false)
+    }
+  }
+
+  // Handle submit to Meta
+  const handleSubmitToMeta = async (id: number, category: string, language: string) => {
+    try {
+      const response = await adminApi.post(`/api/v1/whatsapp-templates/${id}/submit-meta`, {
+        meta_category: category,
+        meta_language: language
+      })
+
+      if (response.data.success) {
+        alert(`Template berhasil dikirim ke Meta! ID: ${response.data.data?.meta_response?.templateId || '-'}`)
+        fetchTemplates()
+      } else {
+        alert('Gagal submit ke Meta: ' + (response.data.message || 'Unknown error'))
+      }
+    } catch (error: any) {
+      alert('Error: ' + error.message)
+    }
+  }
+
+  // Handle test template
+  const handleTestTemplate = async (id: number) => {
+    const phoneNumber = prompt('Masukkan nomor WhatsApp untuk test (628xxx):')
+    if (!phoneNumber) return
+
+    const testVariables = {
+      customerName: 'John Doe',
+      amount: 'Rp 100.000',
+      dueDate: '30 Desember 2026',
+      invoiceNumber: 'INV-2026-001'
+    }
+
+    try {
+      const response = await adminApi.post(`/api/v1/whatsapp-templates/${id}/send-local`, {
+        phone_number: phoneNumber,
+        variables: testVariables
+      })
+
+      if (response.data.success) {
+        alert('Pesan test berhasil dikirim! Silakan cek WhatsApp.')
+      } else {
+        alert('Gagal kirim pesan: ' + (response.data.message || 'Unknown error'))
+      }
+    } catch (error: any) {
+      alert('Error: ' + error.message)
+    }
+  }
+
+  // Handle create Meta template (separate from local template)
+  const handleCreateMetaTemplate = async (template: any) => {
+    try {
+      // Convert to Omnichat API format
+      const templateData: any = {
+        name: template.name,
+        category: template.category,
+        language: template.language,
+        components: []
+      }
+
+      // Add header if enabled
+      if (template.header.enabled) {
+        templateData.components.push({
+          type: 'HEADER',
+          format: template.header.type,
+          text: template.header.text
+        })
+      }
+
+      // Add body (required)
+      templateData.components.push({
+        type: 'BODY',
+        text: template.body.text
+      })
+
+      // Add footer if enabled
+      if (template.footer.enabled) {
+        templateData.components.push({
+          type: 'FOOTER',
+          text: template.footer.text
+        })
+      }
+
+      // Add buttons if enabled
+      if (template.buttons.enabled && template.buttons.buttons.length > 0) {
+        templateData.components.push({
+          type: 'BUTTONS',
+          buttons: template.buttons.buttons.map((btn: any) => ({
+            type: btn.type,
+            text: btn.text,
+            url: btn.url,
+            phoneNumber: btn.phoneNumber
+          }))
+        })
+      }
+
+      const response = await fetch(`${CONFIG.API_BASE_URL}/api/v1/meta-templates/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(templateData)
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        alert('Template berhasil dikirim ke Meta untuk approval! Silakan cek status di Meta Business Suite.')
+        // Refresh template list
+        fetchMetaTemplates()
+      } else {
+        alert('Gagal membuat template: ' + (result.message || 'Unknown error'))
+      }
+    } catch (error: any) {
+      throw error
+    }
+  }
+
+  // Fetch Meta templates from Omnichat
+  const fetchMetaTemplates = async () => {
+    setLoadingMetaTemplates(true)
+    try {
+      const response = await fetch(`${CONFIG.API_BASE_URL}/api/v1/meta-templates/list`)
+      const result = await response.json()
+
+      if (result.success) {
+        setMetaTemplateList(result.data || [])
+      }
+    } catch (error) {
+      console.error('Error fetching Meta templates:', error)
+    } finally {
+      setLoadingMetaTemplates(false)
+    }
+  }
+  const [broadcastType, setBroadcastType] = useState<'all' | 'region' | 'overdue' | 'expiring_soon'>('all')
   const [customerStatus, setCustomerStatus] = useState<'all' | 'active'>('active')
   const [selectedRegion, setSelectedRegion] = useState<string>('')
   const [selectedTemplate, setSelectedTemplate] = useState<string>('')
+  const [templateVariables, setTemplateVariables] = useState<Record<string, string>>({})
   const [customMessage, setCustomMessage] = useState<string>('')
   const [showPreview, setShowPreview] = useState<boolean>(false)
   const [isSending, setIsSending] = useState<boolean>(false)
   const [sendingProgress, setSendingProgress] = useState<number>(0)
   const [sentCount, setSentCount] = useState<number>(0)
   const [failedCount, setFailedCount] = useState<number>(0)
+  const [previewData, setPreviewData] = useState<any>(null)
 
   // Scheduling states
   const [scheduleMode, setScheduleMode] = useState<boolean>(false)
@@ -186,41 +544,73 @@ export default function WhatsAppDashboard() {
     fetchRegionsData()
   }, [])
 
+  // Fetch all status on mount
+  useEffect(() => {
+    fetchOmnichatStatus()
+    fetchBaileysStatus()
+    
+    // Set interval to refresh QR/Status
+    const interval = setInterval(() => {
+      fetchBaileysStatus()
+    }, 10000)
+    
+    return () => clearInterval(interval)
+  }, [])
 
-  // Templates state
-  const [templates, setTemplates] = useState<any[]>([])
-  const [isLoadingTemplates, setIsLoadingTemplates] = useState(false)
-  const [showCreateTemplateModal, setShowCreateTemplateModal] = useState(false)
+  // Fetch payment settings for bank accounts
+  useEffect(() => {
+    fetchPaymentSettings()
+  }, [])
+
+  // Fetch payment settings
+  const [paymentSettings, setPaymentSettings] = useState<any>(null)
+  const fetchPaymentSettings = async () => {
+    try {
+      const response = await fetch(`${CONFIG.API_BASE_URL}/api/v1/broadcast-public/payment-settings`)
+      const result = await response.json()
+      if (result.success) {
+        setPaymentSettings(result.data)
+      }
+    } catch (error) {
+      console.error('Error fetching payment settings:', error)
+    }
+  }
+
+  // Templates state - editingTemplateId is from old implementation
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null)
   const [newTemplate, setNewTemplate] = useState({
     id: '',
     name: '',
     content: '',
     category: 'billing',
-    enabled: true
+    enabled: true,
+    meta_name: ''
   })
   const [isCreatingTemplate, setIsCreatingTemplate] = useState(false)
   const [isCreatingDefaults, setIsCreatingDefaults] = useState(false)
   const [hasCreatedDefaults, setHasCreatedDefaults] = useState(false)
+  const [availableVariables, setAvailableVariables] = useState<string[]>([])
 
   // Use a ref to prevent multiple default template creations
   const defaultTemplatesCreatedRef = useRef(false)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Get recipient count based on selection
   const getRecipientCount = () => {
     if (broadcastType === 'all') {
-      // Use customerStats API data for "all" selection
-      if (customerStatus === 'active') {
-        return customerStats.active
-      } else {
-        return customerStats.total
-      }
-    } else if (selectedRegion) {
+      return customerStats.active || 0
+    } else if (broadcastType === 'region' && selectedRegion) {
       const region = regions.find(r => r.id === selectedRegion)
       if (region) {
         return customerStatus === 'active' ? region.activeCount : region.customerCount
       }
       return 0
+    } else if (broadcastType === 'overdue') {
+      // Will be fetched from API when needed
+      return 'N/A'
+    } else if (broadcastType === 'expiring_soon') {
+      // Will be fetched from API when needed
+      return 'N/A'
     }
     return 0
   }
@@ -240,100 +630,101 @@ export default function WhatsAppDashboard() {
     }
   }
 
-  const handleSendBroadcast = async () => {
-    if (scheduleMode && scheduledAt) {
-      // Schedule the broadcast
-      try {
-        const recipients = getBroadcastRecipients()
-        const message = getFinalMessage()
+  const handleSendBroadcast = async (dryRun: boolean = false) => {
+    if (!selectedTemplate) {
+      alert('Silakan pilih template terlebih dahulu')
+      return
+    }
 
-        const result = await whatsappAPI.scheduleMessage({
-          recipient: recipients[0] || 'all_customers',
-          message: message,
-          scheduledAt: scheduledAt,
-          templateId: selectedTemplate || undefined,
-          variables: getTemplateVariables(),
-          recurring: recurringPattern || undefined
-        })
+    try {
+      setIsSending(true)
+      setSentCount(0)
+      setFailedCount(0)
+      setSendingProgress(0)
 
-        if (result.success) {
-          console.log('Broadcast scheduled successfully:', result)
-          // Reset form
-          setScheduleMode(false)
-          setScheduledAt('')
-          setRecurringPattern('')
-          setShowPreview(false)
-          alert('Broadcast berhasil dijadwalkan!')
-          // Refresh scheduled messages
-          fetchScheduledMessages()
-        } else {
-          console.error('Failed to schedule broadcast:', result.error)
-          alert(`Gagal menjadwalkan broadcast: ${result.error}`)
-        }
-      } catch (error) {
-        console.error('Error scheduling broadcast:', error)
-        alert('Terjadi kesalahan saat menjadwalkan broadcast')
+      // Determine recipient_type based on current selection
+      let recipientType: 'all_active' | 'region' | 'overdue' | 'expiring_soon' = 'all_active'
+      if (broadcastType === 'region') {
+        recipientType = 'region'
+      } else if (broadcastType === 'overdue') {
+        recipientType = 'overdue'
+      } else if (broadcastType === 'expiring_soon') {
+        recipientType = 'expiring_soon'
+      } else {
+        recipientType = 'all_active'
       }
-    } else {
-      // Send immediately
-      try {
-        setIsSending(true)
-        setSentCount(0)
-        setFailedCount(0)
-        setSendingProgress(0)
 
-        const recipients = getBroadcastRecipients()
-        const message = getFinalMessage()
+      // Build request body for dynamic broadcast API
+      const requestBody = {
+        template_id: selectedTemplate,
+        recipient_type: recipientType,
+        region_id: recipientType === 'region' ? selectedRegion : undefined,
+        dry_run: dryRun // true for preview, false for actual send
+      }
 
-        if (recipients.length === 0) {
-          alert('Silakan pilih penerima terlebih dahulu')
-          setIsSending(false)
-          return
-        }
+      setSendingProgress(25)
 
-        // Create and execute broadcast
-        const broadcastData = {
-          name: `Broadcast ${new Date().toLocaleString('id-ID')}`,
-          message: message,
-          recipients: recipients,
-          templateId: selectedTemplate || undefined,
-          variables: getTemplateVariables()
-        }
+      // Get auth token
+      const token = localStorage.getItem('token') || sessionStorage.getItem('token')
 
-        setSendingProgress(25) // Start progress
+      const response = await fetch(`${CONFIG.API_BASE_URL}/api/v1/broadcasts/send-dynamic`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(requestBody)
+      })
 
-        const createResult = await whatsappAPI.createBroadcast(broadcastData)
+      setSendingProgress(50)
 
-        if (createResult.success) {
-          setSendingProgress(50) // Created broadcast
+      const result = await response.json()
 
-          const executeResult = await whatsappAPI.executeBroadcast(createResult.data.id)
+      if (result.success) {
+        setSendingProgress(100)
 
-          if (executeResult.success) {
-            setSendingProgress(100) // Completed
-
-            // Update with actual results from backend
-            setSentCount(executeResult.data.sentCount || 0)
-            setFailedCount(executeResult.data.failedCount || 0)
-
-            console.log('Broadcast sent successfully:', executeResult)
-            alert(`Broadcast berhasil dikirim! ${executeResult.data.sentCount || 0} berhasil, ${executeResult.data.failedCount || 0} gagal`)
-          } else {
-            console.error('Failed to execute broadcast:', executeResult.error)
-            alert(`Gagal mengirim broadcast: ${executeResult.error}`)
-          }
+        if (dryRun) {
+          // Show preview with personalized messages
+          setShowPreview(true)
+          setPreviewData(result.data)
         } else {
-          console.error('Failed to create broadcast:', createResult.error)
-          alert(`Gagal membuat broadcast: ${createResult.error}`)
+          // Show actual send results
+          setSentCount(result.data.sent || 0)
+          setFailedCount(result.data.failed || 0)
+
+          const successRate = result.data.success_rate || 0
+          let message = `Broadcast selesai!\n` +
+            `✅ Terkirim: ${result.data.sent}\n` +
+            `❌ Gagal: ${result.data.failed}\n` +
+            `📊 Success Rate: ${successRate}%`
+
+          if (result.data.errors && result.data.errors.length > 0) {
+            message += `\n\nError Samples:\n${result.data.errors.slice(0, 3).map((e: any) =>
+              `- ${e.customer}: ${e.error}`
+            ).join('\n')}`
+          }
+
+          alert(message)
+          setShowPreview(false)
         }
-      } catch (error) {
-        console.error('Error sending broadcast:', error)
-        alert('Terjadi kesalahan saat mengirim broadcast')
-      } finally {
-        setIsSending(false)
+      } else {
+        console.error('Failed to send broadcast:', result.error)
+        alert(`Gagal: ${result.message || result.error}`)
+      }
+    } catch (error) {
+      console.error('Error sending broadcast:', error)
+      alert('Terjadi kesalahan saat mengirim broadcast')
+    } finally {
+      setIsSending(false)
+      if (!dryRun) {
         setShowPreview(false)
       }
     }
+  }
+
+  // New handler for preview button
+  const handlePreviewDynamic = async () => {
+    await handleSendBroadcast(true) // dry_run = true
   }
 
   const getBroadcastRecipients = () => {
@@ -367,124 +758,97 @@ export default function WhatsAppDashboard() {
   }
 
   const getTemplateVariables = () => {
-    // Extract variables from selected template
-    const template = templates.find(t => t.id === selectedTemplate)
-    if (!template || !template.variables) return {}
+    // Return user-defined variables from state
+    return templateVariables
+  }
 
-    // Return mock variables based on template variables
-    const variables: any = {}
+  // Handle template selection with variable initialization
+  const handleTemplateChange = (templateId: string) => {
+    setSelectedTemplate(templateId)
 
-    // Common variables
-    template.variables.forEach((variable: string) => {
-      switch (variable) {
-        case 'customerName':
-        case 'customer_name':
-          variables[variable] = 'John Doe'
-          break
-        case 'invoiceNumber':
-        case 'invoice_number':
-          variables[variable] = 'INV-2024-001'
-          break
-        case 'amount':
-          variables[variable] = '{{amount}}'
-          break
-        case 'dueDate':
-        case 'due_date':
-          variables[variable] = '31 Desember 2024'
-          break
-        case 'packageName':
-        case 'package_name':
-          variables[variable] = 'Premium Package'
-          break
-        case 'packageSpeed':
-        case 'package_speed':
-          variables[variable] = '100 Mbps'
-          break
-        case 'paymentMethod':
-        case 'payment_method':
-          variables[variable] = 'Transfer Bank'
-          break
-        case 'paymentDate':
-        case 'payment_date':
-          variables[variable] = '15 Desember 2024'
-          break
-        case 'referenceNumber':
-        case 'reference_number':
-          variables[variable] = 'REF-123456'
-          break
-        case 'discount':
-          variables[variable] = '20'
-          break
-        case 'expiry_date':
-          variables[variable] = '31 Desember 2024'
-          break
-        case 'company_name':
-          variables[variable] = 'Kilusi Bill'
-          break
-        case 'supportNumber':
-        case 'support_number':
-          variables[variable] = '628123456789'
-          break
-        case 'disruption_type':
-          variables[variable] = 'Maintenance Jaringan'
-          break
-        case 'affected_area':
-          variables[variable] = 'Jakarta Selatan'
-          break
-        case 'estimated_resolution':
-          variables[variable] = '2 jam'
-          break
-        case 'support_phone':
-          variables[variable] = '628123456789'
-          break
-        case 'announcement_content':
-          variables[variable] = 'Pembaruan sistem akan dilakukan pada tanggal 31 Desember 2024'
-          break
-        case 'reason':
-          variables[variable] = 'Pembayaran terlambat'
-          break
-        case 'days_remaining':
-          variables[variable] = '3 hari'
-          break
-        case 'days_overdue':
-          variables[variable] = '5 hari'
-          break
-        case 'username':
-          variables[variable] = 'john.doe'
-          break
-        case 'wifi_password':
-          variables[variable] = 'MyWifi123'
-          break
-        case 'notes':
-          variables[variable] = 'Tagihan bulanan untuk layanan internet'
-          break
-        case 'month':
-          variables[variable] = 'Desember 2024'
-          break
-        case 'date':
-          variables[variable] = '31 Desember 2024'
-          break
-        case 'time':
-          variables[variable] = '23:00 - 01:00 WIB'
-          break
-        case 'duration':
-          variables[variable] = '2 jam'
-          break
-        case 'feature_name':
-          variables[variable] = 'Dashboard Monitoring Baru'
-          break
-        case 'feature_description':
-          variables[variable] = 'Monitor real-time status koneksi Anda'
-          break
-        case 'holiday_name':
-          variables[variable] = 'Natal'
-          break
-        default:
-          variables[variable] = `[${variable}]`
-      }
-    })
+    // Get template details
+    const template = templates.find(t => t.id === templateId)
+    if (template && template.variables) {
+      // Initialize variables with default values
+      const defaults: Record<string, string> = {}
 
-    return variables
+      template.variables.forEach((variable: string) => {
+        defaults[variable] = getDefaultVariableValue(variable)
+      })
+
+      setTemplateVariables(defaults)
+    } else {
+      setTemplateVariables({})
+    }
+  }
+
+  // Get default value for a variable
+  const getDefaultVariableValue = (variable: string): string => {
+    const defaults: Record<string, string> = {
+      // Billing & Invoice variables
+      customerName: 'Pelanggan',
+      customer_name: 'Pelanggan',
+      nama_pelanggan: 'John Doe',
+      month: new Date().toLocaleString('en-GB', { month: '2-digit' }),
+      year: new Date().getFullYear().toString(),
+      invoiceNumber: 'INV-2026-001',
+      amount: 'Rp 150.000',
+      dueDate: '30 Maret 2026',
+      paymentDate: new Date().toLocaleString('id-ID'),
+      paymentMethod: 'Transfer Bank',
+      payment_accounts: 'BCA: 1234567890 a.n Kilusi Bill',
+      companyName: 'Kilusi Bill',
+      supportNumber: '62811225323',
+
+      // Package variables
+      packageName: 'Paket Home 10Mbps',
+      packageSpeed: '10 Mbps',
+      profile: 'Paket Home 10Mbps',
+      harga: 'Rp 150.000/bulan',
+      jenis_tagihan: 'Bulanan Prabayar',
+
+      // Service variables
+      username: 'user001',
+      wifiPassword: 'password123',
+      activationTime: '1-2',
+
+      // Registration variables
+      no_layanan: 'INV-2026-001',
+      phone: '62811225323',
+      alamat_pasang: 'Jl. Contoh No. 123, Jakarta',
+      tgl_aktif: new Date().toLocaleString('id-ID'),
+      tgl_isolir: '31 Desember 2026',
+      link_client_area: 'https://client.kilusi.id/login',
+
+      // Bank accounts - from payment settings
+      daftar_akun_bank: paymentSettings?.formatted_bank_accounts || '💳 BCA: 1234567890\n  a.n KILUSI DIGITAL NETWORK',
+      bank_accounts: paymentSettings?.bank_accounts?.map((acc: any) =>
+        `${acc.bank_name}: ${acc.account_number}`
+      ).join('\n') || 'BCA: 1234567890\nMandiri: 0987654321',
+
+      // Upgrade variables
+      oldPackage: 'Paket Basic',
+      oldSpeed: '5 Mbps',
+      newPackage: 'Paket Pro',
+      newSpeed: '10 Mbps',
+      additionalCost: 'Rp 50.000',
+
+      // Maintenance variables
+      maintenanceDate: new Date().toLocaleString('id-ID'),
+      maintenanceTime: '00:00 - 04:00 WIB',
+      duration: '4',
+      processingTime: '5-10',
+
+      // Payment accounts
+      paymentAccounts: 'BCA: 1234567890\nMandiri: 0987654321',
+
+      // Expiration variables
+      expiryDate: '31 Maret 2026',
+      daysRemaining: '7',
+      daysOverdue: '3'
+    }
+
+    return defaults[variable] || `[${variable}]`
   }
 
   const fetchScheduledMessages = async () => {
@@ -532,35 +896,37 @@ export default function WhatsAppDashboard() {
 
       if (response.success && response.data) {
         setAllMessages(response.data.messages || [])
-        setHistoryPagination(response.data.pagination || {
-          page: 1,
+        setHistoryPagination({
+          page: response.data.page || 1,
           limit: messagesPerPage,
-          total: 0,
-          totalPages: 0,
-          hasNext: false,
-          hasPrev: false
+          total: response.data.total || 0,
+          totalPages: response.data.totalPages || 0,
+          hasNext: (response.data.page || 1) < (response.data.totalPages || 1),
+          hasPrev: (response.data.page || 1) > 1
         })
       } else {
         console.error('Failed to fetch message history:', response.error || response.message)
         // Show user-friendly error message for rate limiting
         if (response.error?.includes('Too many requests')) {
-          setError('Too many requests. Please wait a moment before refreshing.')
-          setTimeout(() => setError(null), 3000)
+          setSettingsMessage('Too many requests. Please wait a moment before refreshing.')
+          setTimeout(() => setSettingsMessage(''), 3000)
         }
       }
     } catch (error) {
       console.error('Error fetching message history:', error)
       // Handle JSON parsing errors from rate limiting
       if (error instanceof SyntaxError && error.message.includes('Too many r')) {
-        setError('Too many requests. Please wait a moment before refreshing.')
-        setTimeout(() => setError(null), 3000)
+        setSettingsMessage('Too many requests. Please wait a moment before refreshing.')
+        setTimeout(() => setSettingsMessage(''), 3000)
       }
     } finally {
       setIsLoadingHistory(false)
     }
   }
 
-  // Fetch templates from backend
+  // Old template system - disabled in favor of Meta Templates
+  // TODO: Remove old template system after Meta templates fully implemented
+  /*
   const fetchTemplates = async () => {
     setIsLoadingTemplates(true)
     try {
@@ -592,6 +958,7 @@ export default function WhatsAppDashboard() {
       setIsLoadingTemplates(false)
     }
   }
+  */
 
   // Helper function to extract variables from template content
   const extractVariablesFromContent = (content: string): string[] => {
@@ -707,7 +1074,7 @@ export default function WhatsAppDashboard() {
       // Generate mock variables for this template
       const variables = generateMockVariables(template.variables || [])
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://192.168.1.235:3000'}/api/v1/whatsapp/templates/${templateId}/test`, {
+      const response = await fetch(`${CONFIG.API_BASE_URL}/api/v1/whatsapp/templates/${templateId}/test`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -769,6 +1136,18 @@ export default function WhatsAppDashboard() {
     return mockData
   }
 
+  // Fetch available variables from backend (union of all template variables)
+  const fetchAvailableVariables = async () => {
+    try {
+      const response = await adminApi.get('/api/v1/whatsapp-templates/available-variables')
+      if (response.data?.success && response.data?.data?.variables) {
+        setAvailableVariables(response.data.data.variables)
+      }
+    } catch (error) {
+      console.error('Error fetching available variables:', error)
+    }
+  }
+
   // Edit template function
   const handleEditTemplate = (templateId: string) => {
     const template = templates.find(t => t.id === templateId)
@@ -778,16 +1157,39 @@ export default function WhatsAppDashboard() {
     }
 
     // Set the form with template data
+    // Auto-suggest version suffix for meta_name if template was already submitted
+    let suggestedMetaName = template.meta_name || ''
+    if (!suggestedMetaName && (template.meta_status === 'approved' || template.meta_status === 'rejected' || template.meta_status === 'pending_approval')) {
+      // Find next version: template_id → template_id_v2, template_id_v3, etc.
+      const existingVersions = templates
+        .filter(t => t.template_id === template.template_id || (t.meta_name && t.meta_name.startsWith(template.template_id + '_v')))
+      if (existingVersions.length > 0) {
+        let maxVersion = 1
+        existingVersions.forEach(t => {
+          const name = t.meta_name || t.template_id
+          const match = name.match(/_v(\d+)$/)
+          if (match) maxVersion = Math.max(maxVersion, parseInt(match[1]))
+        })
+        suggestedMetaName = `${template.template_id}_v${maxVersion + 1}`
+      } else {
+        suggestedMetaName = `${template.template_id}_v2`
+      }
+    }
+
     setNewTemplate({
-      id: template.id,
+      id: template.template_id,
       name: template.name,
       content: template.content,
       category: template.category,
-      enabled: template.enabled
+      enabled: template.enabled,
+      meta_name: suggestedMetaName
     })
 
-    // Set edit mode
+    // Set edit mode (use database ID for editing)
     setEditingTemplateId(templateId)
+
+    // Fetch available variables dynamically
+    fetchAvailableVariables()
 
     // Show the create modal in edit mode
     setShowCreateTemplateModal(true)
@@ -802,36 +1204,24 @@ export default function WhatsAppDashboard() {
 
     setIsCreatingTemplate(true)
     try {
-      let response
+      let result
       const isEditMode = editingTemplateId !== null
 
       if (isEditMode) {
-        // Update existing template
-        response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://192.168.1.235:3000'}/api/v1/whatsapp/templates/${editingTemplateId}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(newTemplate)
-        })
+        // Update existing template - using adminApi with JWT auth
+        const response = await adminApi.put(`/api/v1/whatsapp-templates/${editingTemplateId}`, newTemplate)
+        result = response.data
       } else {
         // Check if template ID already exists
-        if (templates.some(t => t.id === newTemplate.id)) {
+        if (templates.some(t => t.template_id === newTemplate.id)) {
           alert('Template with this ID already exists')
           return
         }
 
-        // Create new template
-        response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://192.168.1.235:3000'}/api/v1/whatsapp/templates`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(newTemplate)
-        })
+        // Create new template - using adminApi with JWT auth
+        const response = await adminApi.post('/api/v1/whatsapp-templates', newTemplate)
+        result = response.data
       }
-
-      const result = await response.json()
 
       if (result.success) {
         alert(`Template ${isEditMode ? 'updated' : 'created'} successfully!`)
@@ -843,15 +1233,17 @@ export default function WhatsAppDashboard() {
           name: '',
           content: '',
           category: 'billing',
-          enabled: true
+          enabled: true,
+          meta_name: ''
         })
         fetchTemplates() // Refresh templates
       } else {
         alert(`Failed to ${isEditMode ? 'update' : 'create'} template: ` + (result.message || 'Unknown error'))
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error(`Error ${editingTemplateId ? 'updating' : 'creating'} template:`, error)
-      alert(`Error ${editingTemplateId ? 'updating' : 'creating'} template: ` + (error instanceof Error ? error.message : 'Unknown error'))
+      const errorMsg = error.response?.data?.message || error.message || 'Unknown error'
+      alert(`Error ${editingTemplateId ? 'updating' : 'creating'} template: ${errorMsg}`)
     } finally {
       setIsCreatingTemplate(false)
     }
@@ -915,7 +1307,7 @@ export default function WhatsAppDashboard() {
     if (!confirmed) return
 
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://192.168.1.235:3000'}/api/v1/whatsapp/clear-session`, {
+      const response = await fetch(`${CONFIG.API_BASE_URL}/api/v1/whatsapp/clear-session`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
@@ -942,9 +1334,12 @@ export default function WhatsAppDashboard() {
   }
 
   const getConnectionStatus = () => {
-    if (status?.connected) {
+    // Use Omnichat status first, fall back to Baileys status
+    const isConnected = omnichatStatus.connected || status?.connected
+
+    if (isConnected) {
       return { text: 'Connected', color: 'bg-green-500', badge: 'default' }
-    } else if (connecting) {
+    } else if (connecting || loadingOmnichat) {
       return { text: 'Connecting', color: 'bg-yellow-500', badge: 'secondary' }
     } else {
       return { text: 'Disconnected', color: 'bg-red-500', badge: 'destructive' }
@@ -966,49 +1361,73 @@ export default function WhatsAppDashboard() {
   const queueStatusInfo = getQueueStatus()
 
   return (
+    <>
+      {/* QR Code Modal for Baileys */}
+      <Dialog open={showQRModal} onOpenChange={setShowQRModal}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Scan WhatsApp QR Code</DialogTitle>
+            <DialogDescription>
+              Buka WhatsApp di HP Anda &gt; Menu &gt; Perangkat Tertaut &gt; Tautkan Perangkat.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col items-center justify-center p-6 bg-white rounded-lg">
+            {baileysStatus.qr ? (
+              <div className="relative group">
+                <img 
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(baileysStatus.qr)}`} 
+                  alt="WhatsApp QR Code"
+                  className="w-64 h-64 border-8 border-gray-100 rounded-xl"
+                />
+                <div className="mt-4 text-center text-sm text-gray-500 animate-pulse">
+                  Menunggu scan...
+                </div>
+              </div>
+            ) : (
+              <div className="w-64 h-64 flex flex-col items-center justify-center border-2 border-dashed rounded-xl bg-gray-50">
+                <Loader2 className="w-8 h-8 animate-spin text-gray-400 mb-3" />
+                <p className="text-sm font-medium text-gray-600">Menunggu QR Code</p>
+                <p className="mt-1 text-xs text-gray-400 text-center px-4">
+                  Server sedang mencoba terhubung ke WhatsApp. QR Code akan muncul otomatis saat koneksi berhasil.
+                </p>
+                <p className="mt-2 text-xs text-amber-500">
+                  Jika terlalu lama, cek koneksi internet server.
+                </p>
+              </div>
+            )}
+          </div>
+          <div className="flex justify-center pb-4">
+            <Button variant="ghost" size="sm" onClick={() => fetchBaileysStatus()}>
+              <RefreshCw className="w-4 h-4 mr-2" /> Refresh QR
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     <div className="space-y-6">
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-2">
             <Smartphone className="w-8 h-8 text-green-500" />
-            WhatsApp Notifications
+            Omnichat WhatsApp
           </h1>
           <p className="text-gray-600">
-            Manage WhatsApp notification system, templates, and message delivery
+            WhatsApp Business API integration with Omnichat gateway
           </p>
-        </div>
-
-        <div className="flex items-center gap-2">
           <Button
             variant="outline"
             size="sm"
-            onClick={fetchStatus}
-            disabled={loading}
+            className="mt-2"
+            onClick={() => {
+              fetchStatus()
+              fetchOmnichatStatus()
+              fetchBaileysStatus()
+            }}
+            disabled={loading || loadingOmnichat}
           >
-            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
+            <RefreshCw className={`w-4 h-4 mr-2 ${(loading || loadingOmnichat) ? 'animate-spin' : ''}`} />
+            Refresh Status
           </Button>
-
-          {/* Connection Control Button */}
-          {status?.connected ? (
-            <Button variant="outline" size="sm" onClick={disconnect} disabled={loading}>
-              <PowerOff className="w-4 h-4 mr-2" />
-              Disconnect
-            </Button>
-          ) : (
-            <Button variant="outline" size="sm" onClick={connect} disabled={connecting}>
-              <QrCode className="w-4 h-4 mr-2" />
-              {connecting ? 'Connecting...' : 'Connect'}
-            </Button>
-          )}
-
-          <SettingsModal>
-            <Button variant="outline" size="sm">
-              <Settings className="w-4 h-4 mr-2" />
-              Settings
-            </Button>
-          </SettingsModal>
         </div>
       </div>
 
@@ -1033,16 +1452,61 @@ export default function WhatsAppDashboard() {
           <CardHeader className="pb-3">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
               <Smartphone className="w-4 h-4" />
-              Connection Status
+              Omnichat (Meta)
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="flex items-center gap-2">
-              <div className={`w-3 h-3 rounded-full ${connectionStatus.color}`} />
-              <span className="text-2xl font-bold">{connectionStatus.text}</span>
+              <div className={`w-3 h-3 rounded-full ${omnichatStatus.connected ? 'bg-green-500' : 'bg-red-500'}`} />
+              <span className="text-2xl font-bold">{omnichatStatus.connected ? 'Connected' : 'Disconnected'}</span>
             </div>
-            {status?.phoneNumber && (
-              <p className="text-sm text-gray-500 mt-1">{status.phoneNumber}</p>
+            <div className="flex items-center gap-2 mt-1">
+              <Badge variant="outline" className="text-xs">
+                Cloud API
+              </Badge>
+              {omnichatStatus.api_key_valid && (
+                <Badge variant="default" className="text-xs bg-green-500">
+                  API Valid
+                </Badge>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <QrCode className="w-4 h-4" />
+              Baileys (Local)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-2">
+              <div className={`w-3 h-3 rounded-full ${baileysStatus.connected ? 'bg-green-500' : 'bg-red-500'}`} />
+              <span className="text-2xl font-bold">{baileysStatus.connected ? 'Connected' : 'Offline'}</span>
+            </div>
+            {baileysStatus.connected ? (
+              <div className="flex flex-col gap-1 mt-1">
+                <span className="text-xs text-gray-500">Device: {baileysStatus.user?.name || baileysStatus.user?.id || 'Connected Device'}</span>
+                <Button variant="link" size="sm" className="h-auto p-0 text-red-500 justify-start" onClick={async () => {
+                  if(confirm('Disconnect Baileys?')) {
+                    await adminApi.post('/api/v1/baileys/logout');
+                    fetchBaileysStatus();
+                  }
+                }}>Disconnect</Button>
+              </div>
+            ) : (
+              <div className="mt-1 flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => setShowQRModal(true)}>
+                  Scan QR
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => {
+                  const phone = prompt('Masukkan nomor HP (628xxx):');
+                  if(phone) adminApi.post('/api/v1/baileys/pair', { phone }).then(res => {
+                    if(res.data.success) alert('Pairing Code: ' + res.data.data.code);
+                  });
+                }}>Pairing</Button>
+              </div>
             )}
           </CardContent>
         </Card>
@@ -1055,10 +1519,10 @@ export default function WhatsAppDashboard() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{status?.dailyCount || 0}</div>
+            <div className="text-2xl font-bold">{omnichatStatus.daily_messages || status?.dailyCount || 0}</div>
             <div className="flex items-center gap-1 mt-1">
               <TrendingUp className="w-3 h-3 text-green-500" />
-              <span className="text-xs text-gray-500">12% from yesterday</span>
+              <span className="text-xs text-gray-500">Via Omnichat API</span>
             </div>
           </CardContent>
         </Card>
@@ -1083,19 +1547,19 @@ export default function WhatsAppDashboard() {
           <CardHeader className="pb-3">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
               <Zap className="w-4 h-4" />
-              Success Rate
+              Delivery Rate
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{status?.successRate || 0}%</div>
-            <Progress value={status?.successRate || 0} className="mt-2" />
+            <div className="text-2xl font-bold">{omnichatStatus.delivery_rate || status?.successRate || 0}%</div>
+            <Progress value={omnichatStatus.delivery_rate || status?.successRate || 0} className="mt-2" />
           </CardContent>
         </Card>
       </div>
 
       {/* Main Content Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-7">
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="dashboard">
             <BarChart3 className="w-4 h-4 mr-2" />
             Dashboard
@@ -1106,929 +1570,662 @@ export default function WhatsAppDashboard() {
           </TabsTrigger>
           <TabsTrigger value="send">
             <Send className="w-4 h-4 mr-2" />
-            Send
+            Send Broadcast
           </TabsTrigger>
-          <TabsTrigger value="queue">
-            <Clock className="w-4 h-4 mr-2" />
-            Queue
-          </TabsTrigger>
-          <TabsTrigger value="analytics">
-            <TrendingUp className="w-4 h-4 mr-2" />
-            Analytics
-          </TabsTrigger>
-          <TabsTrigger value="test">
-            <TestTube className="w-4 h-4 mr-2" />
-            Test
-          </TabsTrigger>
-          <TabsTrigger value="gateway">
+          <TabsTrigger value="settings">
             <Settings className="w-4 h-4 mr-2" />
-            Gateway
+            Settings
           </TabsTrigger>
         </TabsList>
 
-        {/* Dashboard Tab - Message History */}
+        {/* Dashboard Tab - Omnichat Overview */}
         <TabsContent value="dashboard" className="space-y-4">
-          {/* Real-Time Notifications */}
-          <RealTimeNotifications />
+          <OmnichatDashboard />
+        </TabsContent>
 
+        {/* Templates Tab - Unified Template Management */}
+        <TabsContent value="templates" className="space-y-4">
+          {/* Template List */}
           <Card>
             <CardHeader>
               <div className="flex justify-between items-center">
                 <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <MessageSquare className="w-5 h-5" />
-                    Message History
-                  </CardTitle>
+                  <CardTitle>WhatsApp Templates</CardTitle>
                   <CardDescription>
-                    Riwayat pesan WhatsApp yang terkirim
+                    Kelola template yang bisa digunakan lokal atau dikirim ke Meta untuk approval
                   </CardDescription>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => fetchMessageHistory(currentPage)}
-                    disabled={isLoadingHistory}
-                  >
-                    <RefreshCw className={`w-4 h-4 mr-2 ${isLoadingHistory ? 'animate-spin' : ''}`} />
-                    Refresh
-                  </Button>
-                  {selectedMessages.length === 0 ? (
-                    <>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={selectAllFailedMessages}
-                        disabled={failedMessageIds.length === 0}
-                      >
-                        <CheckSquare className="w-4 h-4 mr-2" />
-                        Select All Failed ({failedMessageIds.length})
-                      </Button>
-                    </>
-                  ) : (
-                    <>
-                      <span className="text-sm text-gray-500">
-                        {selectedMessages.length} selected
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={clearAllSelections}
-                      >
-                        <Square className="w-4 h-4 mr-2" />
-                        Clear Selection
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          // Bulk resend logic here
-                          console.log('Resending messages:', selectedMessages)
-                          setSelectedMessages([])
-                        }}
-                      >
-                        <RedoIcon className="w-4 h-4 mr-2" />
-                        Resend Selected
-                      </Button>
-                    </>
-                  )}
-                </div>
+                <Button onClick={() => { fetchAvailableVariables(); setShowCreateTemplateModal(true) }}>
+                  <MessageSquare className="w-4 h-4 mr-2" />
+                  Buat Template
+                </Button>
               </div>
             </CardHeader>
             <CardContent>
-              {/* Only show messages when not loading and messages exist */}
-              {!isLoadingHistory && currentMessages.length > 0 && (
-                <div className="space-y-2">
-                  {currentMessages.map((msg) => (
-                    <div key={msg.id} className="flex items-start gap-3 py-3 border-b last:border-b-0 hover:bg-gray-50">
-                      <input
-                        type="checkbox"
-                        className="mt-1 w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
-                        disabled={msg.status === 'success'}
-                        checked={selectedMessages.includes(msg.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedMessages([...selectedMessages, msg.id])
-                          } else {
-                            setSelectedMessages(selectedMessages.filter(id => id !== msg.id))
-                          }
-                        }}
-                      />
-
-                      <div className="flex-1 min-w-0">
+              {loadingTemplates ? (
+                <div className="text-center py-8">
+                  <RefreshCw className="w-6 h-6 mx-auto animate-spin text-gray-400 mb-4" />
+                  <p className="text-gray-500">Loading templates...</p>
+                </div>
+              ) : templates.length === 0 ? (
+                <div className="text-center py-8">
+                  <MessageSquare className="w-12 h-12 mx-auto text-gray-400 mb-4" />
+                  <h3 className="text-lg font-semibold mb-2">Belum Ada Template</h3>
+                  <p className="text-gray-500">
+                    Buat template pertama Anda untuk memulai
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {templates.map((template) => (
+                    <div key={template.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/30">
+                      <div className="flex-1">
                         <div className="flex items-center gap-2 mb-1">
-                          <Badge variant={msg.status === 'success' ? 'default' : 'destructive'} className="text-xs">
-                            {msg.status === 'success' ? '✓ Terkirim' : '✗ Gagal'}
+                          <h4 className="font-medium">{template.name}</h4>
+                          <Badge variant={template.enabled ? 'default' : 'secondary'}>
+                            {template.enabled ? 'Aktif' : 'Nonaktif'}
                           </Badge>
-                          <span className="text-xs text-gray-500">{msg.time}</span>
-                          <span className="text-xs font-medium text-gray-700">{msg.type}</span>
-                        </div>
-                        <p className="text-sm text-gray-900 mb-1">{msg.message}</p>
-                        <div className="flex items-center justify-between">
-                          <p className="text-xs text-gray-500">{msg.recipient}</p>
-                          {msg.status === 'failed' && msg.error && (
-                            <p className="text-xs text-red-600">{msg.error}</p>
+                          {template.meta_status !== 'local' && (
+                            <Badge variant="outline" className="text-[10px] uppercase font-mono text-gray-500">
+                              Meta: {template.meta_name || template.name}
+                            </Badge>
                           )}
                         </div>
+                        <p className="text-sm text-gray-600 line-clamp-2">
+                          {template.content.substring(0, 100)}...
+                        </p>
+                        {template.variables && template.variables.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {template.variables.map((v: string, i: number) => (
+                              <Badge key={i} variant="secondary" className="text-xs">
+                                {'{{' + v + '}}'}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-2">
-                        {msg.status === 'failed' && (
+                        <Button variant="outline" size="sm" onClick={() => handleEditTemplate(template.id)}>
+                          Edit
+                        </Button>
+                        
+                        {/* Meta Status Logic */}
+                        {template.meta_status === 'local' ? (
                           <Button
-                            variant="ghost"
                             size="sm"
-                            onClick={() => console.log('Resend message:', msg.id)}
-                            className="h-6 px-2 text-xs"
+                            onClick={() => { setMetaSubmitId(template.id); setMetaCategory('UTILITY'); setMetaLanguage('id'); setShowMetaSubmitDialog(true) }}
+                            className="bg-blue-600 hover:bg-blue-700"
                           >
-                            <RedoIcon className="w-3 h-3 mr-1" />
-                            Resend
+                            <MessageSquare className="w-4 h-4 mr-2" />
+                            Submit ke Meta
                           </Button>
-                        )}
-                        {msg.status === 'success' ? (
-                          <CheckCircle className="w-4 h-4 text-green-500" />
+                        ) : (template.meta_status === 'approved' || template.meta_status === 'APPROVED') ? (
+                          <Badge variant="default" className="bg-green-600">
+                            ✓ Approved
+                          </Badge>
+                        ) : (template.meta_status === 'rejected' || template.meta_status === 'REJECTED') ? (
+                          <Badge variant="destructive">
+                            ✕ Rejected
+                          </Badge>
                         ) : (
-                          <AlertCircle className="w-4 h-4 text-red-500" />
+                          <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 border-yellow-200">
+                            ⏳ Pending / In Review
+                          </Badge>
                         )}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleTestTemplate(template.id)}
+                        >
+                          Test Send
+                        </Button>
                       </div>
                     </div>
                   ))}
                 </div>
               )}
+            </CardContent>
+          </Card>
 
-              {/* Loading State */}
-              {isLoadingHistory && (
-                <div className="flex justify-center items-center py-8">
-                  <Loader2 className="w-6 h-6 animate-spin mr-2" />
-                  <span className="text-gray-500">Loading message history...</span>
-                </div>
-              )}
-
-              {/* Empty State */}
-              {!isLoadingHistory && currentMessages.length === 0 && (
-                <div className="text-center py-8">
-                  <MessageSquare className="w-12 h-12 mx-auto text-gray-400 mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">No Messages Found</h3>
-                  <p className="text-gray-500">
-                    No WhatsApp messages found in the history. Start sending messages to see them here.
-                  </p>
-                </div>
-              )}
-
-              {/* Pagination Controls */}
-              {!isLoadingHistory && historyPagination.totalPages > 1 && (
-                <div className="flex items-center justify-between mt-6 pt-4 border-t">
-                  <div className="text-sm text-gray-500">
-                    Showing {historyPagination.total > 0 ? ((historyPagination.page - 1) * historyPagination.limit) + 1 : 0} to {Math.min(historyPagination.page * historyPagination.limit, historyPagination.total)} of {historyPagination.total} messages
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        const newPage = currentPage - 1
-                        setCurrentPage(newPage)
-                        fetchMessageHistory(newPage)
-                      }}
-                      disabled={!historyPagination.hasPrev || isLoadingHistory}
-                    >
-                      <ChevronLeft className="w-4 h-4 mr-1" />
-                      Previous
-                    </Button>
-
-                    <div className="flex items-center gap-1">
-                      {/* Show current page and some surrounding pages */}
-                      {(() => {
-                        const pages = []
-                        const currentPageNum = historyPagination.page
-                        const totalPagesNum = historyPagination.totalPages
-
-                        // Always show page 1
-                        if (currentPageNum > 3) {
-                          pages.push(1)
-                          if (currentPageNum > 4) {
-                            pages.push('...')
-                          }
-                        }
-
-                        // Show pages around current
-                        for (let i = Math.max(1, currentPageNum - 1); i <= Math.min(totalPagesNum, currentPageNum + 1); i++) {
-                          pages.push(i)
-                        }
-
-                        // Always show last page
-                        if (currentPageNum < totalPagesNum - 2) {
-                          if (currentPageNum < totalPagesNum - 3) {
-                            pages.push('...')
-                          }
-                          pages.push(totalPagesNum)
-                        }
-
-                        return pages.map((page, index) => {
-                          if (page === '...') {
-                            return <span key={`ellipsis-${index}`} className="px-2">...</span>
-                          }
-                          return (
-                            <Button
-                              key={page}
-                              variant={currentPageNum === page ? "default" : "outline"}
-                              size="sm"
-                              onClick={() => {
-                                setCurrentPage(page)
-                                fetchMessageHistory(page)
-                              }}
-                              className="w-8 h-8 p-0"
-                            >
-                              {page}
-                            </Button>
-                          )
-                        })
-                      })()}
-                    </div>
-
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        const newPage = currentPage + 1
-                        setCurrentPage(newPage)
-                        fetchMessageHistory(newPage)
-                      }}
-                      disabled={!historyPagination.hasNext || isLoadingHistory}
-                    >
-                      Next
-                      <ChevronRight className="w-4 h-4 ml-1" />
-                    </Button>
-                  </div>
-                </div>
-              )}
+          {/* Template Usage Info */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Mode Penggunaan Template</CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm space-y-2">
+              <div className="flex items-start gap-2">
+                <Badge variant="outline" className="mt-1">LOCAL</Badge>
+                <p>
+                  <strong>Mode Lokal:</strong> Kirim pesan langsung tanpa perlu approval Meta.
+                  Cocok untuk testing dan pesan internal.
+                </p>
+              </div>
+              <div className="flex items-start gap-2">
+                <Badge variant="default" className="mt-1 bg-green-600">META</Badge>
+                <p>
+                  <strong>Mode Meta:</strong> Kirim pesan menggunakan template yang sudah di-approve oleh Meta.
+                  Perlu submit template ke Meta terlebih dahulu.
+                </p>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
 
-        {/* Templates Tab */}
-        <TabsContent value="templates" className="space-y-4">
-          <div className="flex justify-between items-center">
-            <h3 className="text-lg font-semibold">Message Templates</h3>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={fetchTemplates} disabled={isLoadingTemplates}>
-                <RefreshCw className={`w-4 h-4 mr-2 ${isLoadingTemplates ? 'animate-spin' : ''}`} />
-                Refresh
-              </Button>
-              {templates.length === 0 && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={createDefaultTemplates}
-                  disabled={isLoadingTemplates || isCreatingDefaults}
-                >
-                  <FileText className={`w-4 h-4 mr-2 ${isCreatingDefaults ? 'animate-spin' : ''}`} />
-                  {isCreatingDefaults ? 'Creating...' : 'Create Default Templates'}
-                </Button>
-              )}
-              <Button onClick={() => {
-                console.log('Opening create template modal...')
-                try {
-                  setShowCreateTemplateModal(true)
-                } catch (error) {
-                  console.error('Error opening modal:', error)
-                  alert('Error opening create template modal')
-                }
-              }}>
-                <MessageSquare className="w-4 h-4 mr-2" />
-                New Template
-              </Button>
-            </div>
-          </div>
-
-          {isLoadingTemplates ? (
-            <div className="text-center py-8">
-              <Loader2 className="w-8 h-8 mx-auto animate-spin mb-4" />
-              <p className="text-gray-500">Loading templates...</p>
-            </div>
-          ) : templates.length === 0 ? (
-            <div className="text-center py-8">
-              <MessageSquare className="w-12 h-12 mx-auto text-gray-400 mb-4" />
-              <h3 className="text-lg font-semibold mb-2">No Templates Found</h3>
-              <p className="text-gray-500 mb-4">
-                Create your first message template to get started
-              </p>
-              <Button onClick={() => {
-                console.log('Opening create template modal from empty state...')
-                try {
-                  setShowCreateTemplateModal(true)
-                } catch (error) {
-                  console.error('Error opening modal:', error)
-                  alert('Error opening create template modal')
-                }
-              }}>
-                <MessageSquare className="w-4 h-4 mr-2" />
-                Create Template
-              </Button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {templates.map((template) => (
-                <Card key={template.id} className={template.enabled ? '' : 'opacity-60'}>
-                  <CardHeader className="pb-3">
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-base">{template.name}</CardTitle>
-                      <div className="flex items-center gap-2">
-                        <Badge variant={template.enabled ? 'default' : 'secondary'}>
-                          {template.enabled ? 'Active' : 'Inactive'}
-                        </Badge>
-                        <Badge variant="outline" className="text-xs">
-                          {template.category}
-                        </Badge>
-                      </div>
-                    </div>
-                    <CardDescription>
-                      {(template.content || '').substring(0, 100)}
-                      {(template.content?.length || 0) > 100 ? '...' : ''}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
-                      {/* Variables */}
-                      {template.variables && template.variables.length > 0 && (
-                        <div>
-                          <p className="text-xs text-gray-500 mb-1">Variables:</p>
-                          <div className="flex flex-wrap gap-1">
-                            {template.variables.map((variable: string, index: number) => (
-                              <span key={index} className="inline-block bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded">
-                                {`{{${variable}}}`}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Stats and Actions */}
-                      <div className="flex items-center justify-between">
-                        <div className="text-sm text-gray-500">
-                          Used {template.usageCount || 0} times
-                        </div>
-                        <div className="flex gap-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              const phoneNumber = prompt('Enter phone number for test (6281234567890):')
-                              if (phoneNumber) {
-                                testTemplate(template.id, phoneNumber)
-                              }
-                            }}
-                          >
-                            <TestTube className="w-3 h-3 mr-1" />
-                            Test
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleEditTemplate(template.id)}
-                          >
-                            <FileText className="w-3 h-3 mr-1" />
-                            Edit
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
-        </TabsContent>
-
-        {/* Send Message Tab - Broadcast */}
+        {/* Send Broadcast Tab */}
         <TabsContent value="send" className="space-y-4">
           <Card>
             <CardHeader>
-              <div className="flex justify-between items-center">
-                <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <Send className="w-5 h-5" />
-                    Broadcast Message
-                  </CardTitle>
-                  <CardDescription>
-                    Kirim pesan WhatsApp ke pelanggan berdasarkan wilayah atau semua pelanggan
-                  </CardDescription>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={fetchRegionsData}
-                  disabled={loadingRegions}
-                >
-                  <RefreshCw className={`w-4 h-4 mr-2 ${loadingRegions ? 'animate-spin' : ''}`} />
-                  Refresh Data
-                </Button>
-              </div>
+              <CardTitle>Send Broadcast Message</CardTitle>
+              <CardDescription>
+                Kirim pesan WhatsApp broadcast ke pelanggan menggunakan template
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              {/* Recipient Selection */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="text-sm font-medium mb-2 block">Pilih Penerima</label>
-                  <select
-                    value={broadcastType}
-                    onChange={(e) => setBroadcastType(e.target.value as 'all' | 'region')}
-                    className="w-full p-2 border rounded-md bg-background text-sm"
-                  >
-                    <option value="">Pilih tipe penerima</option>
-                    <option value="all">🌐 Semua Pelanggan</option>
-                    <option value="region">📍 Berdasarkan Wilayah</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium mb-2 block">Status Pelanggan</label>
-                  <select
-                    value={customerStatus}
-                    onChange={(e) => setCustomerStatus(e.target.value as 'all' | 'active')}
-                    className="w-full p-2 border rounded-md bg-background text-sm"
-                  >
-                    <option value="">Pilih status pelanggan</option>
-                    <option value="active">✅ Pelanggan Aktif Saja ({customerStats.active.toLocaleString()} pelanggan)</option>
-                    <option value="all">👥 Semua Pelanggan ({customerStats.total.toLocaleString()} pelanggan)</option>
-                  </select>
-                </div>
-
-                {broadcastType === 'region' && (
-                  <div>
-                    <label className="text-sm font-medium mb-2 block">Pilih Wilayah</label>
-                    <select
-                      value={selectedRegion}
-                      onChange={(e) => setSelectedRegion(e.target.value)}
-                      disabled={loadingRegions}
-                      className="w-full p-2 border rounded-md bg-background text-sm disabled:opacity-50"
-                    >
-                      <option value="">
-                        {loadingRegions ? "Memuat wilayah..." : "Pilih wilayah"}
-                      </option>
-                      {loadingRegions && (
-                        <option value="loading" disabled>
-                          🔄 Memuat data wilayah...
-                        </option>
-                      )}
-                      {!loadingRegions && regions.length === 0 && (
-                        <option value="no-data" disabled>
-                          ❌ Tidak ada data wilayah
-                        </option>
-                      )}
-                      {regions.map((region) => (
-                        <option key={region.id} value={region.id}>
-                          {region.name} ({customerStatus === 'active'
-                            ? `${region.activeCount} aktif`
-                            : `${region.customerCount} total`
-                          })
-                        </option>
+              {/* Template Selection */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Pilih Template</label>
+                <Select value={selectedTemplate} onValueChange={handleTemplateChange}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select a template..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {templates
+                      .filter(t => t.enabled)
+                      .map((template) => (
+                        <SelectItem key={template.id} value={template.id}>
+                          <div className="flex items-center gap-2">
+                            <span>{template.name}</span>
+                            <Badge variant="outline" className="text-xs">
+                              {template.meta_status === 'approved' ? 'META' : 'LOCAL'}
+                            </Badge>
+                          </div>
+                        </SelectItem>
                       ))}
-                    </select>
-                  </div>
-                )}
+                  </SelectContent>
+                </Select>
               </div>
 
-              {/* Message Template Selection */}
-              <div>
-                <label className="text-sm font-medium mb-2 block">Pilih Template Pesan</label>
-                <select
-                  value={selectedTemplate}
-                  onChange={(e) => setSelectedTemplate(e.target.value)}
-                  className="w-full p-2 border rounded-md bg-background text-sm"
-                >
-                  <option value="">Pilih template atau ketik custom message</option>
-                  {templates
-                    .sort((a, b) => a.name.localeCompare(b.name)) // Sort by name alphabetically
-                    .map((template) => (
-                      <option key={template.id} value={template.id}>
-                        {template.name} {template.category && `[${template.category}]`} {!template.enabled && '(Disabled)'}
-                      </option>
-                    ))}
-                </select>
+              {/* Template Variables Info */}
+              {selectedTemplate && (() => {
+                const template = templates.find(t => t.id === selectedTemplate)
+                if (!template || !template.variables || template.variables.length === 0) {
+                  return null
+                }
 
-                {selectedTemplate && (
-                  <div className="mt-2 p-3 bg-gray-50 rounded-lg">
-                    <div className="flex items-start justify-between mb-2">
-                      <p className="text-xs font-medium text-gray-700">Template Preview:</p>
-                      <Badge variant="outline" className="text-xs">
-                        {templates.find(t => t.id === selectedTemplate)?.category}
-                      </Badge>
+                return (
+                  <div className="space-y-3 p-4 bg-green-50 rounded-lg border border-green-200">
+                    <div className="flex items-center justify-between">
+                      <label className="text-sm font-medium text-green-800">✅ Template Variables (Auto-Populated)</label>
+                      <span className="text-xs text-green-600 bg-green-100 px-2 py-1 rounded-full">
+                        Automatic from Database
+                      </span>
                     </div>
-                    <p className="text-sm text-gray-600 whitespace-pre-line">
-                      {getFinalMessage()}
-                    </p>
-                    {templates.find(t => t.id === selectedTemplate)?.variables?.length > 0 && (
-                      <div className="mt-2 pt-2 border-t border-gray-200">
-                        <p className="text-xs text-gray-500 mb-1">Variables used:</p>
-                        <div className="flex flex-wrap gap-1">
-                          {templates.find(t => t.id === selectedTemplate)?.variables.map((variable: string, index: number) => (
-                            <span key={index} className="inline-block bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded">
-                              {`{${variable}}`}
-                            </span>
-                          ))}
+                    <div className="text-sm text-green-700 mb-3">
+                      Variabel di bawah ini akan otomatis diisi dengan data asli dari database untuk setiap pelanggan.
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                      {template.variables.map((variable: string) => (
+                        <div key={variable} className="flex items-center gap-2 bg-white px-3 py-2 rounded border border-green-300">
+                          <Badge variant="outline" className="text-xs font-mono">
+                            {'{{' + variable + '}}'}
+                          </Badge>
+                          <span className="text-xs text-muted-foreground truncate flex-1">
+                            {getDefaultVariableValue(variable)}
+                          </span>
                         </div>
-                      </div>
-                    )}
+                      ))}
+                    </div>
                   </div>
-                )}
-              </div>
+                )
+              })()}
 
-              {/* Custom Message */}
-              <div>
-                <label className="text-sm font-medium mb-2 block">Custom Message (Opsional)</label>
-                <Textarea
-                  placeholder="Ketik pesan custom di sini..."
-                  value={customMessage}
-                  onChange={(e) => setCustomMessage(e.target.value)}
-                  rows={6}
-                  className="resize-none"
-                />
-              </div>
+              {/* Recipient Selection */}
+              <div className="space-y-4">
+                <label className="text-sm font-medium">Pilih Penerima</label>
 
-              {/* Scheduling Options */}
-              <div className="border-t pt-6">
-                <div className="flex items-center gap-2 mb-4">
-                  <input
-                    type="checkbox"
-                    id="scheduleMode"
-                    checked={scheduleMode}
-                    onChange={(e) => setScheduleMode(e.target.checked)}
-                    className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
-                  />
-                  <label htmlFor="scheduleMode" className="text-sm font-medium cursor-pointer">
-                    Jadwalkan Pengiriman
+                {/* Info banner about dynamic data */}
+                <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
+                  <div className="flex items-start gap-2">
+                    <span className="text-lg">📊</span>
+                    <div className="text-sm text-blue-800">
+                      <div className="font-medium mb-1">Pesan Personal untuk Setiap Pelanggan</div>
+                      <div className="text-xs">
+                        Setiap pelanggan akan menerima pesan dengan data mereka sendiri (nama, invoice, paket, dll).
+                        Tidak perlu mengisi variabel manual - sistem akan mengambil data dari database secara otomatis.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Recipient Type Selection */}
+                <div className="grid grid-cols-2 gap-3">
+                  <label className={`flex items-center gap-2 p-3 border rounded-lg cursor-pointer hover:bg-muted/50 ${broadcastType === 'all' ? 'bg-primary/10 border-primary' : ''}`}>
+                    <input
+                      type="radio"
+                      name="recipientType"
+                      value="all"
+                      checked={broadcastType === 'all'}
+                      onChange={() => setBroadcastType('all')}
+                      className="w-4 h-4"
+                    />
+                    <div className="flex-1">
+                      <div className="font-medium text-sm">Semua Pelanggan Aktif</div>
+                      <div className="text-xs text-muted-foreground">Kirim ke semua pelanggan dengan status aktif</div>
+                    </div>
+                  </label>
+
+                  <label className={`flex items-center gap-2 p-3 border rounded-lg cursor-pointer hover:bg-muted/50 ${broadcastType === 'overdue' ? 'bg-primary/10 border-primary' : ''}`}>
+                    <input
+                      type="radio"
+                      name="recipientType"
+                      value="overdue"
+                      checked={broadcastType === 'overdue'}
+                      onChange={() => setBroadcastType('overdue')}
+                      className="w-4 h-4"
+                    />
+                    <div className="flex-1">
+                      <div className="font-medium text-sm">Pelanggan Menunggak</div>
+                      <div className="text-xs text-muted-foreground">Hanya pelanggan dengan invoice jatuh tempo</div>
+                    </div>
+                  </label>
+
+                  <label className={`flex items-center gap-2 p-3 border rounded-lg cursor-pointer hover:bg-muted/50 ${broadcastType === 'expiring_soon' ? 'bg-primary/10 border-primary' : ''}`}>
+                    <input
+                      type="radio"
+                      name="recipientType"
+                      value="expiring_soon"
+                      checked={broadcastType === 'expiring_soon'}
+                      onChange={() => setBroadcastType('expiring_soon')}
+                      className="w-4 h-4"
+                    />
+                    <div className="flex-1">
+                      <div className="font-medium text-sm">Paket Hampir Expire</div>
+                      <div className="text-xs text-muted-foreground">Pelanggan dengan paket expire dalam 7 hari</div>
+                    </div>
+                  </label>
+
+                  <label className={`flex items-center gap-2 p-3 border rounded-lg cursor-pointer hover:bg-muted/50 ${broadcastType === 'region' ? 'bg-primary/10 border-primary' : ''}`}>
+                    <input
+                      type="radio"
+                      name="recipientType"
+                      value="region"
+                      checked={broadcastType === 'region'}
+                      onChange={() => setBroadcastType('region')}
+                      className="w-4 h-4"
+                    />
+                    <div className="flex-1">
+                      <div className="font-medium text-sm">Per Region</div>
+                      <div className="text-xs text-muted-foreground">Filter berdasarkan area/wilayah</div>
+                    </div>
                   </label>
                 </div>
 
-                {scheduleMode && (
-                  <div className="space-y-4 pl-6 border-l-2 border-blue-200">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-sm font-medium mb-2 block">Tanggal & Waktu</label>
-                        <input
-                          type="datetime-local"
-                          value={scheduledAt}
-                          onChange={(e) => setScheduledAt(e.target.value)}
-                          min={new Date(Date.now() + 60000).toISOString().slice(0, 16)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-sm font-medium mb-2 block">Pola Pengulangan (Opsional)</label>
-                        <Select value={recurringPattern} onValueChange={setRecurringPattern}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Tidak berulang" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="">Tidak berulang</SelectItem>
-                            <SelectItem value="daily">Harian</SelectItem>
-                            <SelectItem value="weekly">Mingguan</SelectItem>
-                            <SelectItem value="monthly">Bulanan</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-
-                    {scheduledAt && (
-                      <div className="p-3 bg-blue-50 rounded-lg">
-                        <p className="text-sm text-blue-800">
-                          📅 Pesan akan dikirim pada: <strong>{new Date(scheduledAt).toLocaleString('id-ID')}</strong>
-                          {recurringPattern && ` (berulang: ${recurringPattern === 'daily' ? 'Harian' : recurringPattern === 'weekly' ? 'Mingguan' : 'Bulanan'})`}
-                        </p>
-                      </div>
-                    )}
+                {/* Region Selection */}
+                {broadcastType === 'region' && (
+                  <div>
+                    <Select value={selectedRegion} onValueChange={setSelectedRegion}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select region..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {regions.map((region) => (
+                          <SelectItem key={region.id} value={region.id}>
+                            {region.name} ({region.customerCount} pelanggan)
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 )}
               </div>
 
-              {/* Preview and Send Section */}
-              <div className="border-t pt-6">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <div className="text-sm text-gray-600">
-                      <strong>Total Penerima:</strong> {getRecipientCount().toLocaleString()} pelanggan
-                      {customerStatus === 'active' && (
-                        <Badge variant="secondary" className="ml-2">
-                          <UserCheck className="w-3 h-3 mr-1" />
-                          Aktif
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="text-xs text-gray-500">
-                      {broadcastType === 'all'
-                        ? `Semua ${customerStatus === 'active' ? 'wilayah' : 'pelanggan'}`
-                        : `Wilayah ${regions.find(r => r.id === selectedRegion)?.name || '-'}`
-                      } • Estimasi waktu: {Math.ceil(getRecipientCount() / 10)} menit
-                    </p>
-                  </div>
+              {/* Recipient Count */}
+              <div className="bg-muted/50 p-4 rounded-lg">
+                <div className="text-sm text-muted-foreground">
+                  Tipe Penerima: <span className="font-semibold text-foreground capitalize">{broadcastType.replace('_', ' ')}</span>
+                  {selectedRegion && broadcastType === 'region' && (
+                    <span> - {regions.find(r => r.id === selectedRegion)?.name}</span>
+                  )}
+                </div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  Klik &ldquo;Preview Personalized&rdquo; untuk melihat preview pesan untuk setiap pelanggan
+                </div>
+              </div>
 
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      onClick={handlePreview}
-                      disabled={(!selectedTemplate && !customMessage.trim()) || (selectedTemplate && !templates.find(t => t.id === selectedTemplate)?.enabled)}
-                    >
+              {/* Action Buttons */}
+              <div className="flex gap-3">
+                <Button
+                  onClick={handlePreviewDynamic}
+                  disabled={!selectedTemplate || isSending}
+                  variant="outline"
+                  className="flex-1"
+                >
+                  {isSending ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Loading...
+                    </>
+                  ) : (
+                    <>
                       <Eye className="w-4 h-4 mr-2" />
-                      Preview
-                    </Button>
+                      Preview Personalized
+                    </>
+                  )}
+                </Button>
+                <Button
+                  onClick={() => handleSendBroadcast(false)}
+                  disabled={!selectedTemplate || isSending}
+                  className="flex-1"
+                >
+                  {isSending ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Sending...
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-4 h-4 mr-2" />
+                      Send Broadcast
+                    </>
+                  )}
+                </Button>
+              </div>
 
-                    <Button
-                      onClick={handleSendBroadcast}
-                      disabled={Boolean(!status?.connected) || Boolean(!selectedTemplate && !customMessage.trim()) || Boolean(getRecipientCount() === 0) || Boolean(isSending) || Boolean(scheduleMode && !scheduledAt) || Boolean(selectedTemplate && !templates.find(t => t.id === selectedTemplate)?.enabled)}
-                      className="min-w-[120px]"
-                    >
-                      {isSending ? (
+              {/* Preview Modal */}
+              {showPreview && (
+                <div
+                  className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+                  onClick={() => setShowPreview(false)}
+                >
+                  <Card className="w-full max-w-4xl max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+                    <CardHeader>
+                      <CardTitle>Preview Pesan Broadcast (Personalized)</CardTitle>
+                      <CardDescription>
+                        {previewData ? `Preview untuk ${previewData.preview_count || 0} pelanggan. Setiap pelanggan menerima pesan dengan data mereka sendiri.` : 'Loading...'}
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {previewData && previewData.recipients ? (
                         <>
-                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                          Sending...
-                        </>
-                      ) : scheduleMode && scheduledAt ? (
-                        <>
-                          <Clock className="w-4 h-4 mr-2" />
-                          Jadwalkan
+                          <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
+                            <div className="text-sm font-medium text-yellow-800 mb-2">
+                              💡 Info: Pesan Personal
+                            </div>
+                            <div className="text-sm text-yellow-700">
+                              Setiap pelanggan akan menerima pesan dengan data mereka sendiri (nama, invoice, paket, dll).
+                              Ini adalah preview untuk 10 pelanggan pertama.
+                            </div>
+                          </div>
+
+                          <div className="space-y-3 max-h-[60vh] overflow-auto">
+                            {previewData.recipients.slice(0, 10).map((recipient: any, idx: number) => (
+                              <div key={idx} className="bg-gray-50 p-4 rounded-lg border">
+                                <div className="flex items-center justify-between mb-2">
+                                  <div className="font-medium text-sm">
+                                    {recipient.nama || `Customer #${recipient.customer_id}`}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground">
+                                    {recipient.no_layanan || `ID: ${recipient.customer_id}`} • {recipient.phone || 'N/A'}
+                                  </div>
+                                </div>
+                                <div className="text-sm whitespace-pre-wrap bg-white p-3 rounded border">
+                                  {recipient.message_preview || recipient.message}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+
+                          {previewData.recipients.length > 10 && (
+                            <div className="text-sm text-muted-foreground text-center">
+                              ... dan {previewData.recipients.length - 10} pelanggan lainnya
+                            </div>
+                          )}
+
+                          <div className="text-sm text-muted-foreground">
+                            Total Penerima: {previewData.preview_count || 0} pelanggan
+                          </div>
                         </>
                       ) : (
-                        <>
-                          <Send className="w-4 h-4 mr-2" />
-                          Kirim Broadcast
-                        </>
+                        <div className="text-center py-8">
+                          <Loader2 className="w-6 h-6 mx-auto animate-spin text-gray-400 mb-4" />
+                          <p className="text-gray-500">Loading preview...</p>
+                        </div>
                       )}
-                    </Button>
+
+                      <div className="flex gap-3 pt-4 border-t">
+                        <Button onClick={() => setShowPreview(false)} variant="outline" className="flex-1">
+                          Close
+                        </Button>
+                        <Button
+                          onClick={() => handleSendBroadcast(false)}
+                          disabled={isSending || !previewData}
+                          className="flex-1"
+                        >
+                          {isSending ? (
+                            <>
+                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                              Sending...
+                            </>
+                          ) : (
+                            <>
+                              <Send className="w-4 h-4 mr-2" />
+                              Send Broadcast Now
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
+
+              {/* Sending Progress */}
+              {isSending && (
+                <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium">Sending Progress...</span>
+                    <span className="text-sm text-blue-600">{sendingProgress}%</span>
+                  </div>
+                  <div className="w-full bg-blue-200 rounded-full h-2">
+                    <div
+                      className="bg-blue-600 h-2 rounded-full transition-all"
+                      style={{ width: `${sendingProgress}%` }}
+                    />
+                  </div>
+                  <div className="flex gap-4 mt-2 text-xs text-gray-600">
+                    <span>Sent: {sentCount}</span>
+                    <span>Failed: {failedCount}</span>
                   </div>
                 </div>
-
-                {/* Progress Bar */}
-                {isSending && (
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span>Progress: {sendingProgress}%</span>
-                      <span>{sentCount} terkirim, {failedCount} gagal</span>
-                    </div>
-                    <Progress value={sendingProgress} className="w-full" />
-                  </div>
-                )}
-              </div>
+              )}
             </CardContent>
           </Card>
-
-          {/* Preview Modal */}
-          {showPreview && (
-            <Card className="border-2 border-blue-200">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Eye className="w-5 h-5 text-blue-500" />
-                  Preview Pesan
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="p-4 bg-green-50 rounded-lg border border-green-200">
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                      <span className="text-sm font-medium">Contoh Pesan WhatsApp</span>
-                    </div>
-                    <div className="bg-white p-3 rounded border">
-                      <p className="text-sm whitespace-pre-line">
-                        {getFinalMessage()}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-4 text-center">
-                    <div>
-                      <div className="text-2xl font-bold text-blue-600">{getRecipientCount().toLocaleString()}</div>
-                      <div className="text-sm text-gray-600">Total Penerima</div>
-                    </div>
-                    <div>
-                      <div className="text-2xl font-bold text-green-600">95%</div>
-                      <div className="text-sm text-gray-600">Estimasi Success Rate</div>
-                    </div>
-                    <div>
-                      <div className="text-2xl font-bold text-purple-600">{Math.ceil(getRecipientCount() / 10)}m</div>
-                      <div className="text-sm text-gray-600">Estimasi Waktu</div>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-2">
-                    <Button variant="outline" onClick={() => setShowPreview(false)}>
-                      Tutup Preview
-                    </Button>
-                    <Button
-                      onClick={handleSendBroadcast}
-                      disabled={Boolean(!status?.connected) || Boolean(isSending) || Boolean(selectedTemplate && !templates.find(t => t.id === selectedTemplate)?.enabled)}
-                    >
-                      <Send className="w-4 h-4 mr-2" />
-                      Ya, Kirim Sekarang
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
         </TabsContent>
 
-        {/* Queue Management Tab */}
-        <TabsContent value="queue" className="space-y-4">
-          <MessageQueueMonitor />
-
-          {/* Scheduled Messages Section */}
+        {/* Settings Tab - Gateway Configuration */}
+        <TabsContent value="settings" className="space-y-4">
           <Card>
             <CardHeader>
-              <div className="flex justify-between items-center">
-                <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <Clock className="w-5 h-5" />
-                    Scheduled Messages
-                  </CardTitle>
-                  <CardDescription>
-                    View and manage scheduled WhatsApp messages
-                  </CardDescription>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={fetchScheduledMessages}
-                  >
-                    <RefreshCw className="w-4 h-4 mr-2" />
-                    Refresh
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setShowScheduledMessages(!showScheduledMessages)}
-                  >
-                    {showScheduledMessages ? 'Hide' : 'Show'} Scheduled
-                  </Button>
-                </div>
-              </div>
-            </CardHeader>
-            {showScheduledMessages && (
-              <CardContent>
-                {scheduledMessages.length === 0 ? (
-                  <div className="text-center py-8">
-                    <Clock className="w-12 h-12 mx-auto text-gray-400 mb-4" />
-                    <h3 className="text-lg font-semibold mb-2">No Scheduled Messages</h3>
-                    <p className="text-gray-500">
-                      Schedule messages from the Send tab to see them here
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {scheduledMessages.map((message) => (
-                      <div key={message.id} className="flex items-center justify-between p-4 border rounded-lg">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
-                            <Badge variant={
-                              message.status === 'scheduled' ? 'default' :
-                                message.status === 'processing' ? 'secondary' :
-                                  message.status === 'completed' ? 'outline' : 'destructive'
-                            }>
-                              {message.status.charAt(0).toUpperCase() + message.status.slice(1)}
-                            </Badge>
-                            {message.recurring && (
-                              <Badge variant="outline" className="text-xs">
-                                {message.recurring}
-                              </Badge>
-                            )}
-                          </div>
-                          <p className="text-sm font-medium mb-1">{message.recipient}</p>
-                          <p className="text-sm text-gray-600 line-clamp-2">{message.message}</p>
-                          <p className="text-xs text-gray-500 mt-1">
-                            📅 {new Date(message.scheduledAt).toLocaleString('id-ID')}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {message.status === 'scheduled' && (
-                            <Button
-                              variant="destructive"
-                              size="sm"
-                              onClick={() => cancelScheduledMessage(message.id)}
-                            >
-                              Cancel
-                            </Button>
-                          )}
-                          {message.status === 'failed' && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                // Resend logic here
-                              }}
-                            >
-                              <RedoIcon className="w-4 h-4 mr-1" />
-                              Retry
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            )}
-          </Card>
-        </TabsContent>
-
-        {/* Analytics Tab */}
-        <TabsContent value="analytics" className="space-y-4">
-          <RealTimeAnalytics />
-        </TabsContent>
-
-        {/* Test Lab Tab */}
-        <TabsContent value="test" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <TestTube className="w-5 h-5" />
-                Test Laboratory
-              </CardTitle>
+              <CardTitle>Gateway Configuration</CardTitle>
               <CardDescription>
-                Test WhatsApp templates and connection
+                Pilih gateway default untuk notifikasi WhatsApp dan konfigurasi parameter
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Card>
-                    <CardContent className="pt-4">
-                      <div className="text-center">
-                        <Smartphone className="w-8 h-8 mx-auto text-green-500 mb-2" />
-                        <h4 className="font-medium">Connection Test</h4>
-                        <p className="text-sm text-gray-500 mb-3">Test WhatsApp connection</p>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={async () => {
-                            try {
-                              const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://192.168.1.235:3000'}/api/v1/whatsapp/status`)
-                              const result = await response.json()
-
-                              if (result.success && result.data.connectionStatus === 'open') {
-                                alert('✅ WhatsApp connection is active and ready!')
-                              } else {
-                                alert('⚠️ WhatsApp is not connected. Please scan QR code first.')
-                              }
-                            } catch (error) {
-                              console.error('Error testing connection:', error)
-                              alert('❌ Failed to test WhatsApp connection')
+              <div className="space-y-6">
+                {/* Gateway Selection */}
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold">WhatsApp Delivery Mode</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    {[
+                      { id: 'omnichat', name: 'Omnichat Only', desc: 'Hanya Cloud API', icon: '☁️' },
+                      { id: 'baileys', name: 'Baileys Only', desc: 'Hanya WhatsApp Web', icon: '📱' },
+                      { id: 'dual', name: 'Dual (Fallback)', desc: 'Omni lalu Baileys', icon: '⚖️' },
+                      { id: 'off', name: 'OFF', desc: 'Matikan Notifikasi', icon: '🚫' }
+                    ].map((mode) => (
+                      <div 
+                        key={mode.id}
+                        onClick={async () => {
+                          setSavingSettings(true);
+                          try {
+                            const res = await adminApi.post('/api/v1/settings', { key: 'whatsapp_provider', value: mode.id });
+                            if(res.data.success) {
+                              setOmnichatStatus(prev => ({ ...prev, gateway: mode.id }));
+                              alert(`Mode berhasil diubah ke ${mode.name}`);
+                              fetchOmnichatStatus();
                             }
-                          }}
-                        >
-                          Test Connection
-                        </Button>
+                          } catch(e) {
+                            alert('Gagal mengubah mode');
+                          } finally {
+                            setSavingSettings(false);
+                          }
+                        }}
+                        className={`p-4 border rounded-lg hover:bg-muted/50 cursor-pointer transition-all ${omnichatStatus.gateway === mode.id ? 'bg-green-50 border-green-500 ring-2 ring-green-200' : ''}`}
+                      >
+                        <div className="text-2xl mb-1">{mode.icon}</div>
+                        <div className="font-bold text-sm">{mode.name}</div>
+                        <div className="text-xs text-gray-500">{mode.desc}</div>
                       </div>
-                    </CardContent>
-                  </Card>
-                  <Card>
-                    <CardContent className="pt-4">
-                      <div className="text-center">
-                        <MessageSquare className="w-8 h-8 mx-auto text-blue-500 mb-2" />
-                        <h4 className="font-medium">Template Test</h4>
-                        <p className="text-sm text-gray-500 mb-3">Test message templates</p>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            if (templates.length === 0) {
-                              alert('No templates available. Please create a template first.')
-                              return
-                            }
+                    ))}
+                  </div>
+                </div>
 
-                            // Create a simple template selection
-                            const templateOptions = templates.map((t, index) => `${index + 1}. ${t.name}`).join('\n')
-                            const selection = prompt(`Select template:\n${templateOptions}\n\nEnter template number:`)
+                {/* Gateway Parameters */}
+                <div className="space-y-4 pt-4 border-t">
+                  <h3 className="text-lg font-semibold">Omnichat API Configuration</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">API URL</label>
+                      <input
+                        type="text"
+                        className="w-full px-3 py-2 border rounded-md bg-background"
+                        placeholder="https://whatsapp.kilusi.id/api"
+                        value={omnichatSettings.api_url}
+                        onChange={(e) => setOmnichatSettings(prev => ({ ...prev, api_url: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">API Key</label>
+                      <input
+                        type="password"
+                        className="w-full px-3 py-2 border rounded-md bg-background"
+                        placeholder="Enter API key"
+                        value={omnichatSettings.api_key}
+                        onChange={(e) => setOmnichatSettings(prev => ({ ...prev, api_key: e.target.value }))}
+                      />
+                      {omnichatStatus.api_key_valid && (
+                        <div className="text-xs text-green-600">✓ API Key is valid</div>
+                      )}
+                    </div>
+                  </div>
+                  
+                  {/* Anti-Ban (Baileys Delay) Settings */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Baileys Delay Min (Detik)</label>
+                      <input
+                        type="number"
+                        className="w-full px-3 py-2 border rounded-md bg-background"
+                        value={baileysDelaySettings.min}
+                        onChange={async (e) => {
+                          const val = e.target.value;
+                          setBaileysDelaySettings(prev => ({ ...prev, min: val }));
+                          await adminApi.post('/api/v1/settings', { key: 'baileys_delay_min', value: val });
+                        }}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Baileys Delay Max (Detik)</label>
+                      <input
+                        type="number"
+                        className="w-full px-3 py-2 border rounded-md bg-background"
+                        value={baileysDelaySettings.max}
+                        onChange={async (e) => {
+                          const val = e.target.value;
+                          setBaileysDelaySettings(prev => ({ ...prev, max: val }));
+                          await adminApi.post('/api/v1/settings', { key: 'baileys_delay_max', value: val });
+                        }}
+                      />
+                    </div>
+                  </div>
 
-                            if (selection && !isNaN(selection)) {
-                              const templateIndex = parseInt(selection) - 1
-                              if (templateIndex >= 0 && templateIndex < templates.length) {
-                                const selectedTemplate = templates[templateIndex]
-                                const phoneNumber = prompt('Enter phone number for test (6281234567890):')
-                                if (phoneNumber) {
-                                  testTemplate(selectedTemplate.id, phoneNumber)
-                                }
-                              } else {
-                                alert('Invalid template selection')
-                              }
-                            }
-                          }}
-                        >
-                          Test Template
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
+                  <div className="flex items-center gap-2 mt-4">
+                    <Button
+                      onClick={saveOmnichatSettings}
+                      disabled={savingSettings}
+                    >
+                      {savingSettings ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Saving...
+                        </>
+                      ) : (
+                        <>
+                          <CheckSquare className="w-4 h-4 mr-2" />
+                          Save API Configuration
+                        </>
+                      )}
+                    </Button>
+                    {settingsMessage && (
+                      <span className={`text-sm ${settingsMessage.includes('success') ? 'text-green-600' : 'text-red-600'}`}>
+                        {settingsMessage}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Info */}
+                <div className="p-4 bg-muted/30 rounded-lg">
+                  <p className="text-sm">
+                    <span className="font-medium">💾 Info:</span> Parameter gateway disimpan di database.
+                    API Key disimpan secara aman dan digunakan untuk koneksi ke Omnichat API.
+                  </p>
+                </div>
+
+                {/* Cleanup Logs */}
+                <div className="p-4 border border-destructive/30 rounded-lg bg-destructive/5 space-y-2">
+                    <p className="text-sm font-medium text-destructive">Cleanup Log WhatsApp</p>
+                  <p className="text-xs text-muted-foreground">
+                    Hapus log pesan WhatsApp yang sudah lama. Pilih jumlah hari retensi.
+                  </p>
+                  <div className="flex items-center gap-3">
+                    <select
+                      className="px-3 py-2 border rounded-md bg-background text-sm"
+                      defaultValue="30"
+                      id="cleanupDays"
+                    >
+                      <option value="7">7 hari</option>
+                      <option value="14">14 hari</option>
+                      <option value="30">30 hari</option>
+                      <option value="60">60 hari</option>
+                      <option value="90">90 hari</option>
+                    </select>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={async () => {
+                        const select = document.getElementById('cleanupDays') as HTMLSelectElement;
+                        const days = select?.value || '30';
+                        if (!confirm(`Hapus log pesan WhatsApp lebih dari ${days} hari?\n\nTindakan ini tidak dapat dibatalkan.`)) return;
+                        try {
+                          const response = await adminApi.delete(`/api/v1/omnichat-logs/logs?older_than_days=${days}`);
+                          alert(response.data?.message || `${response.data?.deleted || 0} log berhasil dihapus.`);
+                        } catch (error: any) {
+                          alert('Gagal: ' + (error.response?.data?.message || error.message));
+                        }
+                      }}
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Bersihkan Log
+                    </Button>
+                  </div>
                 </div>
               </div>
             </CardContent>
           </Card>
         </TabsContent>
 
-        {/* Gateway Tab */}
-        <TabsContent value="gateway" className="space-y-4">
-          <GatewaySettings />
-        </TabsContent>
       </Tabs>
 
       {/* QR Code Modal */}
@@ -2091,6 +2288,49 @@ export default function WhatsAppDashboard() {
                 </div>
               </div>
 
+              {/* Meta Template Name — separate from internal template_id, used when submitting to Meta */}
+              <div className={editingTemplateId ? '' : 'hidden'}>
+                <label className="text-sm font-medium mb-2 block">
+                  Meta Template Name (Nama di WhatsApp)
+                  <span className="text-xs text-muted-foreground ml-2">— ubah jika versi sebelumnya sudah approved</span>
+                </label>
+                <input
+                  type="text"
+                  className="w-full px-3 py-2 border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary"
+                  placeholder={newTemplate.id ? `${newTemplate.id}_v2` : 'e.g., invoice_created_v2'}
+                  value={newTemplate.meta_name}
+                  onChange={(e) => {
+                    try {
+                      setNewTemplate(prev => ({ ...prev, meta_name: e.target.value }))
+                    } catch (error) {
+                      console.error('Error in meta_name input:', error)
+                    }
+                  }}
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Kosongkan jika sama dengan Template ID. Meta mengharuskan nama berbeda untuk template yang sudah approved.
+                </p>
+              </div>
+
+              {/* Info banner when editing a previously submitted template */}
+              {editingTemplateId && (() => {
+                const tpl = templates.find(t => t.id === editingTemplateId)
+                if (tpl && (tpl.meta_status === 'approved' || tpl.meta_status === 'rejected' || tpl.meta_status === 'pending_approval')) {
+                  return (
+                    <Alert variant={tpl.meta_status === 'approved' ? 'default' : 'destructive'} className="text-sm">
+                      <AlertDescription>
+                        {tpl.meta_status === 'approved'
+                          ? 'Template ini sudah approved di Meta. Jika konten diubah, isi Meta Template Name dengan nama berbeda (contoh: tambah _v2) dan submit ulang.'
+                          : tpl.meta_status === 'rejected'
+                          ? 'Template ini ditolak Meta. Setelah edit, bisa submit ulang tanpa ganti nama Meta.'
+                          : 'Template ini masih pending di Meta. Edit akan membatalkan submission sebelumnya.'}
+                      </AlertDescription>
+                    </Alert>
+                  )
+                }
+                return null
+              })()}
+
               <div>
                 <label className="text-sm font-medium mb-2 block">Category *</label>
                 <Select value={newTemplate.category} onValueChange={(value) => {
@@ -2116,6 +2356,7 @@ export default function WhatsAppDashboard() {
               <div>
                 <label className="text-sm font-medium mb-2 block">Message Content *</label>
                 <Textarea
+                  ref={textareaRef}
                   className="w-full px-3 py-2 border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary"
                   placeholder="Enter your message template here. Use variables like {{customerName}}, {{amount}}, etc."
                   value={newTemplate.content}
@@ -2131,19 +2372,55 @@ export default function WhatsAppDashboard() {
                 <div className="mt-2">
                   <p className="text-xs text-muted-foreground mb-2">Available Variables:</p>
                   <div className="flex flex-wrap gap-1.5 text-xs">
-                    <span className="inline-block bg-blue-500/20 text-blue-400 border border-blue-500/30 px-2 py-1 rounded-md cursor-pointer hover:bg-blue-500/30 transition-colors">{'{{customerName}}'}</span>
-                    <span className="inline-block bg-green-500/20 text-green-400 border border-green-500/30 px-2 py-1 rounded-md cursor-pointer hover:bg-green-500/30 transition-colors">{'{{invoiceNumber}}'}</span>
-                    <span className="inline-block bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 px-2 py-1 rounded-md cursor-pointer hover:bg-yellow-500/30 transition-colors">{'{{amount}}'}</span>
-                    <span className="inline-block bg-purple-500/20 text-purple-400 border border-purple-500/30 px-2 py-1 rounded-md cursor-pointer hover:bg-purple-500/30 transition-colors">{'{{dueDate}}'}</span>
-                    <span className="inline-block bg-pink-500/20 text-pink-400 border border-pink-500/30 px-2 py-1 rounded-md cursor-pointer hover:bg-pink-500/30 transition-colors">{'{{packageName}}'}</span>
-                    <span className="inline-block bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 px-2 py-1 rounded-md cursor-pointer hover:bg-cyan-500/30 transition-colors">{'{{packageSpeed}}'}</span>
-                    <span className="inline-block bg-orange-500/20 text-orange-400 border border-orange-500/30 px-2 py-1 rounded-md cursor-pointer hover:bg-orange-500/30 transition-colors">{'{{paymentMethod}}'}</span>
-                    <span className="inline-block bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 px-2 py-1 rounded-md cursor-pointer hover:bg-indigo-500/30 transition-colors">{'{{paymentDate}}'}</span>
-                    <span className="inline-block bg-teal-500/20 text-teal-400 border border-teal-500/30 px-2 py-1 rounded-md cursor-pointer hover:bg-teal-500/30 transition-colors">{'{{username}}'}</span>
-                    <span className="inline-block bg-rose-500/20 text-rose-400 border border-rose-500/30 px-2 py-1 rounded-md cursor-pointer hover:bg-rose-500/30 transition-colors">{'{{wifiPassword}}'}</span>
-                    <span className="inline-block bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-1 rounded-md cursor-pointer hover:bg-emerald-500/30 transition-colors">{'{{paymentAccounts}}'}</span>
-                    <span className="inline-block bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-1 rounded-md cursor-pointer hover:bg-amber-500/30 transition-colors">{'{{companyName}}'}</span>
-                    <span className="inline-block bg-sky-500/20 text-sky-400 border border-sky-500/30 px-2 py-1 rounded-md cursor-pointer hover:bg-sky-500/30 transition-colors">{'{{supportNumber}}'}</span>
+                    {availableVariables.length > 0 ? (
+                      availableVariables.map((v, i) => {
+                        const COLORS = [
+                          'bg-blue-500/20 text-blue-400 border-blue-500/30 hover:bg-blue-500/30',
+                          'bg-green-500/20 text-green-400 border-green-500/30 hover:bg-green-500/30',
+                          'bg-yellow-500/20 text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/30',
+                          'bg-purple-500/20 text-purple-400 border-purple-500/30 hover:bg-purple-500/30',
+                          'bg-pink-500/20 text-pink-400 border-pink-500/30 hover:bg-pink-500/30',
+                          'bg-cyan-500/20 text-cyan-400 border-cyan-500/30 hover:bg-cyan-500/30',
+                          'bg-orange-500/20 text-orange-400 border-orange-500/30 hover:bg-orange-500/30',
+                          'bg-indigo-500/20 text-indigo-400 border-indigo-500/30 hover:bg-indigo-500/30',
+                          'bg-teal-500/20 text-teal-400 border-teal-500/30 hover:bg-teal-500/30',
+                          'bg-rose-500/20 text-rose-400 border-rose-500/30 hover:bg-rose-500/30',
+                          'bg-emerald-500/20 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/30',
+                          'bg-amber-500/20 text-amber-400 border-amber-500/30 hover:bg-amber-500/30',
+                          'bg-sky-500/20 text-sky-400 border-sky-500/30 hover:bg-sky-500/30',
+                        ]
+                        const colorClass = COLORS[i % COLORS.length]
+                        return (
+                          <span
+                            key={v}
+                            className={`inline-block px-2 py-1 rounded-md cursor-pointer border transition-colors ${colorClass}`}
+                            onClick={() => {
+                              const textarea = textareaRef.current
+                              if (textarea) {
+                                const varText = `{{${v}}}`
+                                const start = textarea.selectionStart
+                                const end = textarea.selectionEnd
+                                const before = newTemplate.content.substring(0, start)
+                                const after = newTemplate.content.substring(end)
+                                const newContent = before + varText + after
+                                setNewTemplate(prev => ({ ...prev, content: newContent }))
+                                // Restore cursor position after React re-render
+                                setTimeout(() => {
+                                  textarea.focus()
+                                  textarea.selectionStart = textarea.selectionEnd = start + varText.length
+                                }, 10)
+                              }
+                            }}
+                          >
+                            {`{{${v}}}`}
+                          </span>
+                        )
+                      })
+                    ) : (
+                      <span className="text-xs text-muted-foreground italic">
+                        No variables available yet. Type {'{{'}...{'}}'} in the template to auto-register variables.
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -2179,7 +2456,8 @@ export default function WhatsAppDashboard() {
                       name: '',
                       content: '',
                       category: 'billing',
-                      enabled: true
+                      enabled: true,
+                      meta_name: ''
                     })
                   } catch (error) {
                     console.error('Error in cancel button:', error)
@@ -2211,5 +2489,44 @@ export default function WhatsAppDashboard() {
         </div>
       )}
     </div>
+
+    {/* Meta Submit Dialog */}
+    {showMetaSubmitDialog && metaSubmitId && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowMetaSubmitDialog(false)}>
+        <div className="bg-card border rounded-xl shadow-xl w-full max-w-sm mx-4" onClick={e => e.stopPropagation()}>
+          <div className="p-6 space-y-4">
+            <h2 className="text-lg font-semibold">Submit Template ke Meta</h2>
+            <p className="text-sm text-muted-foreground">Template akan dikirim ke Meta untuk proses approval (24-48 jam).</p>
+            <div>
+              <label className="text-sm font-medium">Kategori</label>
+              <select value={metaCategory} onChange={(e) => setMetaCategory(e.target.value)} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm mt-1">
+                <option value="UTILITY">UTILITY — Layanan & Transaksi</option>
+                <option value="MARKETING">MARKETING — Promo & Pengumuman</option>
+                <option value="AUTHENTICATION">AUTHENTICATION — OTP & Verifikasi</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-sm font-medium">Bahasa</label>
+              <select value={metaLanguage} onChange={(e) => setMetaLanguage(e.target.value)} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm mt-1">
+                <option value="id">Indonesia</option>
+                <option value="en">English</option>
+              </select>
+            </div>
+            <div className="flex gap-3 justify-end">
+              <Button variant="outline" size="sm" onClick={() => setShowMetaSubmitDialog(false)}>Batal</Button>
+              <Button size="sm" onClick={() => { handleSubmitToMeta(metaSubmitId, metaCategory, metaLanguage); setShowMetaSubmitDialog(false) }}>Submit ke Meta</Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* Create Meta Template Modal */}
+    <CreateTemplateModal
+      open={showCreateMetaTemplateModal}
+      onClose={() => setShowCreateMetaTemplateModal(false)}
+      onSubmit={handleCreateMetaTemplate}
+    />
+  </>
   )
 }

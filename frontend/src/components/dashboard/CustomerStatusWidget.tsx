@@ -33,6 +33,7 @@ export function CustomerStatusWidget({
   const [error, setError] = useState<string | null>(null)
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
   const [autoRefresh, setAutoRefresh] = useState(true)
+  const [stats, setStats] = useState({ total_customers: 0, online_customers: 0, offline_customers: 0 })
 
   const fetchCustomers = async () => {
     try {
@@ -49,7 +50,7 @@ export function CustomerStatusWidget({
         console.log('🔑 CustomerStatusWidget: Token preview:', token ? token.substring(0, 20) + '...' : 'null')
       }
 
-      const response = await adminApi.get('/api/v1/realtime/online-customers')
+      const response = await adminApi.get('/api/v1/realtime/online-customers?mode=dashboard')
       console.log('📡 CustomerStatusWidget: API Response status:', response.status)
       console.log('📡 CustomerStatusWidget: API Response data:', response.data)
 
@@ -57,20 +58,27 @@ export function CustomerStatusWidget({
         console.log('✅ CustomerStatusWidget: API successful, mapping data...')
         console.log('📋 CustomerStatusWidget: Raw customers data:', response.data.data.customers)
         // Map backend data structure to frontend interface
-        const customersData = response.data.data.customers.slice(0, limit).map(customer => ({
-          id: customer.id,
-          name: customer.name,
-          status: customer.online_status === 'online' ? 'online' :
-                 customer.online_status === 'idle' ? 'warning' :
-                 customer.online_status === 'offline' ? 'offline' : 'unknown',
-          lastSeen: customer.last_seen,
-          signalStrength: customer.signal_strength || customer.rx_power,
-          ipAddress: null, // Not provided by current API
-          planName: customer.package_name
-        }))
+        const customersData = response.data.data.customers
+          .slice(0, limit)
+          .map(customer => ({
+            id: customer.id,
+            name: customer.name,
+            status: customer.online_status === 'online' ? 'online' :
+                   customer.online_status === 'idle' ? 'warning' :
+                   customer.online_status === 'offline' ? 'offline' : 'unknown',
+            lastSeen: customer.last_seen,
+            signalStrength: customer.signal_strength || customer.rx_power,
+            ipAddress: null, // Not provided by current API
+            planName: customer.package_name
+          }))
+          // Remove duplicates based on customer ID
+          .filter((customer, index, self) =>
+            index === self.findIndex(c => c.id === customer.id)
+          )
 
-        console.log('Mapped customer data:', customersData) // Debug log
+        console.log('Mapped customer data (after deduplication):', customersData) // Debug log
         setCustomers(customersData)
+        setStats(response.data.data.stats || { total_customers: 0, online_customers: 0, offline_customers: 0 })
         setLastRefresh(new Date())
         setError(null)
       } else {
@@ -105,10 +113,10 @@ export function CustomerStatusWidget({
     }
   }, [autoRefresh, refreshInterval, limit])
 
-  const onlineCount = customers.filter(c => c.status === 'online').length
-  const offlineCount = customers.filter(c => c.status === 'offline').length
+  const onlineCount = stats.online_customers
+  const offlineCount = stats.offline_customers
   const warningCount = customers.filter(c => c.status === 'warning').length
-  const totalCustomers = customers.length
+  const totalCustomers = stats.total_customers
 
   if (compact) {
     return (

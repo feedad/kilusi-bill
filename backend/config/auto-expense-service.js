@@ -28,7 +28,8 @@ class AutoExpenseService {
 
   async processRecurringExpenses() {
     try {
-      const today = new Date().toISOString().split('T')[0]
+      const d = new Date();
+      const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
       // Get all active recurring expenses that are due today or overdue
       const result = await query(`
@@ -107,7 +108,7 @@ class AutoExpenseService {
       UPDATE recurring_expenses
       SET next_date = $1, updated_at = CURRENT_TIMESTAMP
       WHERE id = $2
-    `, [nextDate.toISOString().split('T')[0], expense.id])
+    `, [`${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}-${String(nextDate.getDate()).padStart(2, '0')}`, expense.id])
   }
 
   async triggerTechnicianFee(customerId, technicianId) {

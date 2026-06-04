@@ -6,17 +6,66 @@ import { PlusIcon, TrashIcon, PhotoIcon } from '@heroicons/react/24/outline';
 
 import { api, endpoints } from '@/lib/api';
 
-function classNames(...classes) {
+interface Banner {
+    image: string;
+    alt: string;
+    caption: string;
+}
+
+interface Feature {
+    icon: string;
+    title: string;
+    description: string;
+}
+
+interface Testimonial {
+    name: string;
+    role: string;
+    text: string;
+    rating: number;
+}
+
+interface Footer {
+    about: string;
+    copyright: string;
+    social: {
+        fb: string;
+        ig: string;
+        wa: string;
+    };
+}
+
+interface Hero {
+    headline: string;
+    subheadline: string;
+    ctaText: string;
+}
+
+interface Pricing {
+    packageIds: number[];
+    packages?: any;
+}
+
+interface Content {
+    hero: Hero;
+    features: Feature[];
+    testimonials: Testimonial[];
+    banners: Banner[];
+    pricing: Pricing;
+    footer: Footer;
+}
+
+function classNames(...classes: (string | boolean | undefined)[]) {
     return classes.filter(Boolean).join(' ')
 }
 
 export default function LandingContentAdmin() {
-    const [content, setContent] = useState({
+    const [content, setContent] = useState<Content>({
         hero: { headline: '', subheadline: '', ctaText: '' },
         features: [],
         testimonials: [],
         banners: [],
-        pricing: { packageIds: [] }, // Init pricing
+        pricing: { packageIds: [] },
         footer: { about: '', copyright: '', social: { fb: '', ig: '', wa: '' } }
     });
     const [loading, setLoading] = useState(true);
@@ -41,7 +90,7 @@ export default function LandingContentAdmin() {
             .finally(() => setLoading(false));
     }, []);
 
-    const saveSection = async (sectionKey, sectionData) => {
+    const saveSection = async (sectionKey: string, sectionData: any) => {
         try {
             const res = await api.put('/api/v1/landing/content', {
                 section: sectionKey, content: sectionData
@@ -467,13 +516,31 @@ export default function LandingContentAdmin() {
 // Icon mapping for selection
 const ICONS = ['Gauge', 'Headset', 'Infinity', 'ShieldCheck', 'Trophy', 'Sparkles', 'Zap', 'Star', 'Check', 'Wifi', 'LockClosed', 'Globe', 'DevicePhoneMobile', 'Cloud', 'Clock', 'Banknotes'];
 
-function PricingManager({ initialSelected, initialConfig, onSave }) {
-    const [packages, setPackages] = useState([]);
-    const [selectedIds, setSelectedIds] = useState(initialSelected || []);
+interface Package {
+    id: number;
+    name: string;
+    price: number;
+    speed: string;
+}
+
+interface PackageConfig {
+    badge?: string;
+    badgeColor?: string;
+    highlight?: boolean;
+    features?: Array<{ text: string; icon: string }>;
+}
+
+interface PricingConfig {
+    [packageId: number]: PackageConfig;
+}
+
+function PricingManager({ initialSelected, initialConfig, onSave }: { initialSelected: number[], initialConfig: any, onSave: (data: { packageIds: number[], packages: PricingConfig }) => void }) {
+    const [packages, setPackages] = useState<Package[]>([]);
+    const [selectedIds, setSelectedIds] = useState<number[]>(initialSelected || []);
     // Config: { [packageId]: { badge: '', badgeColor: '', highlight: boolean, features: [{ text: '', icon: '' }] } }
-    const [config, setConfig] = useState(initialConfig?.packages || {});
+    const [config, setConfig] = useState<PricingConfig>(initialConfig?.packages || {});
     const [loading, setLoading] = useState(true);
-    const [editingId, setEditingId] = useState(null);
+    const [editingId, setEditingId] = useState<number | null>(null);
 
     useEffect(() => {
         const fetchPackages = async () => {
@@ -492,14 +559,14 @@ function PricingManager({ initialSelected, initialConfig, onSave }) {
         fetchPackages();
     }, []);
 
-    const togglePackage = (id) => {
+    const togglePackage = (id: number) => {
         setSelectedIds(prev => {
             if (prev.includes(id)) return prev.filter(p => p !== id);
             return [...prev, id];
         });
     };
 
-    const updateConfig = (pkgId, field, value) => {
+    const updateConfig = (pkgId: number, field: string, value: any) => {
         setConfig(prev => ({
             ...prev,
             [pkgId]: {
@@ -509,18 +576,18 @@ function PricingManager({ initialSelected, initialConfig, onSave }) {
         }));
     };
 
-    const addFeature = (pkgId) => {
+    const addFeature = (pkgId: number) => {
         const currentFeatures = config[pkgId]?.features || [];
         updateConfig(pkgId, 'features', [...currentFeatures, { text: '', icon: 'Check' }]);
     };
 
-    const updateFeature = (pkgId, idx, field, value) => {
+    const updateFeature = (pkgId: number, idx: number, field: string, value: any) => {
         const currentFeatures = [...(config[pkgId]?.features || [])];
         currentFeatures[idx] = { ...currentFeatures[idx], [field]: value };
         updateConfig(pkgId, 'features', currentFeatures);
     };
 
-    const removeFeature = (pkgId, idx) => {
+    const removeFeature = (pkgId: number, idx: number) => {
         const currentFeatures = [...(config[pkgId]?.features || [])];
         currentFeatures.splice(idx, 1);
         updateConfig(pkgId, 'features', currentFeatures);
@@ -642,7 +709,7 @@ function PricingManager({ initialSelected, initialConfig, onSave }) {
                                                         value={feat.icon}
                                                         onChange={(e) => updateFeature(pkg.id, idx, 'icon', e.target.value)}
                                                     >
-                                                        {ICONS.map(i => <option key={i} value={i}>{i}</option>)}
+                                                        {ICONS.map((i: string) => <option key={i} value={i}>{i}</option>)}
                                                     </select>
                                                     <input
                                                         type="text"
@@ -679,7 +746,7 @@ function PricingManager({ initialSelected, initialConfig, onSave }) {
 }
 
 // CheckIcon component for internal usage if not imported
-function CheckIcon(props) {
+function CheckIcon(props: React.SVGProps<SVGSVGElement>) {
     return (
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" {...props}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />

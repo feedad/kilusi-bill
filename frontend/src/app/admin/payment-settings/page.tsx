@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -65,22 +65,12 @@ interface PaymentGateway {
     }
 }
 
-// E-Wallet providers
+// E-Wallet providers (suggestions only, user can type custom)
 const EWALLET_PROVIDERS = [
-    { value: 'gopay', label: 'GoPay' },
-    { value: 'ovo', label: 'OVO' },
-    { value: 'dana', label: 'DANA' },
-    { value: 'shopeepay', label: 'ShopeePay' },
-    { value: 'linkaja', label: 'LinkAja' },
-    { value: 'qris', label: 'QRIS' },
+    'DANA', 'GoPay', 'OVO', 'ShopeePay', 'LinkAja', 'QRIS'
 ]
 
-// Bank list
-const BANK_LIST = [
-    'BCA', 'BNI', 'BRI', 'Mandiri', 'BSI', 'CIMB Niaga', 'BTN',
-    'Permata', 'Danamon', 'Maybank', 'OCBC NISP', 'Panin', 'Bank Jago',
-    'Jenius', 'SeaBank', 'Blu by BCA', 'Lainnya'
-]
+
 
 export default function PaymentSettingsPage() {
     const [loading, setLoading] = useState(true)
@@ -119,6 +109,21 @@ export default function PaymentSettingsPage() {
         xendit: { enabled: false, production: false, apiKey: '', callbackToken: '' }
     })
 
+    // State for cleanup settings
+    const [retentionDays, setRetentionDays] = useState(35)
+    const [savingCleanup, setSavingCleanup] = useState(false)
+
+    // State for autopay settings
+    const [autopay, setAutopay] = useState({
+        enabled: false,
+        apiKey: '',
+        baseUrl: '',
+        secret: '',
+        uniqueCodeEnabled: false,
+        uniqueCodeLength: 3,
+    })
+    const [savingAutopay, setSavingAutopay] = useState(false)
+
     // Fetch settings
     const fetchSettings = async () => {
         setLoading(true)
@@ -143,6 +148,16 @@ export default function PaymentSettingsPage() {
                         xendit: { ...gateway.xendit, ...gw.xendit }
                     })
                 }
+            }
+
+            // Fetch cleanup retention days
+            try {
+                const cleanupResponse = await adminApi.get('/api/v1/settings/payment-cleanup-retention')
+                if (cleanupResponse.data.success) {
+                    setRetentionDays(cleanupResponse.data.data.retentionDays)
+                }
+            } catch (error) {
+                console.error('Error fetching cleanup retention:', error)
             }
         } catch (error) {
             console.error('Error fetching settings:', error)
@@ -263,6 +278,69 @@ export default function PaymentSettingsPage() {
         setShowWalletForm(true)
     }
 
+    // Save cleanup retention days
+    const saveCleanupSettings = async () => {
+        setSavingCleanup(true)
+        try {
+            const response = await adminApi.put('/api/v1/settings/payment-cleanup-retention', {
+                retentionDays
+            })
+
+            if (response.data.success) {
+                toast.success('Pengaturan auto-delete berhasil disimpan')
+            } else {
+                toast.error(response.data.message || 'Gagal menyimpan pengaturan')
+            }
+        } catch (error) {
+            console.error('Error saving cleanup settings:', error)
+            toast.error('Terjadi kesalahan saat menyimpan pengaturan')
+        } finally {
+            setSavingCleanup(false)
+        }
+    }
+
+    // Fetch autopay config
+    const fetchAutopayConfig = async () => {
+        try {
+            const res = await adminApi.get('/api/v1/autopay/config')
+            if (res.data?.success && res.data?.data) {
+                const ac = res.data.data
+                setAutopay({
+                    enabled: ac.enabled === true || ac.enabled === 'true',
+                    apiKey: ac.api_key || '',
+                    baseUrl: ac.base_url || '',
+                    secret: ac.secret || '',
+                    uniqueCodeEnabled: ac.unique_code_enabled === true || ac.unique_code_enabled === 'true',
+                    uniqueCodeLength: parseInt(ac.unique_code_length) || 3,
+                })
+            }
+        } catch (e) { /* optional */ }
+    }
+
+    // Save autopay config
+    const saveAutopaySettings = async () => {
+        setSavingAutopay(true)
+        try {
+            const res = await adminApi.put('/api/v1/autopay/config', {
+                enabled: autopay.enabled,
+                api_key: autopay.apiKey,
+                base_url: autopay.baseUrl,
+                secret: autopay.secret,
+                unique_code_enabled: autopay.uniqueCodeEnabled,
+                unique_code_length: autopay.uniqueCodeLength,
+            })
+            if (res.data?.success) {
+                toast.success('Pengaturan Autopay berhasil disimpan')
+            } else {
+                toast.error('Gagal menyimpan pengaturan Autopay')
+            }
+        } catch (error: any) {
+            toast.error('Gagal: ' + (error.response?.data?.message || error.message))
+        } finally {
+            setSavingAutopay(false)
+        }
+    }
+
     // Copy to clipboard
     const copyToClipboard = (text: string, id: string) => {
         navigator.clipboard.writeText(text)
@@ -272,6 +350,7 @@ export default function PaymentSettingsPage() {
 
     useEffect(() => {
         fetchSettings()
+        fetchAutopayConfig()
     }, [])
 
     if (loading) {
@@ -305,7 +384,7 @@ export default function PaymentSettingsPage() {
 
             {/* Tabs */}
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="grid w-full grid-cols-3">
+                <TabsList className="grid w-full grid-cols-5">
                     <TabsTrigger value="accounts" className="flex items-center gap-2">
                         <Building2 className="h-4 w-4" />
                         Akun Bank
@@ -317,6 +396,14 @@ export default function PaymentSettingsPage() {
                     <TabsTrigger value="gateway" className="flex items-center gap-2">
                         <Wallet className="h-4 w-4" />
                         Payment Gateway
+                    </TabsTrigger>
+                    <TabsTrigger value="autopay" className="flex items-center gap-2">
+                        <CreditCard className="h-4 w-4" />
+                        Autopay
+                    </TabsTrigger>
+                    <TabsTrigger value="cleanup" className="flex items-center gap-2">
+                        <Trash2 className="h-4 w-4" />
+                        Auto-Delete
                     </TabsTrigger>
                 </TabsList>
 
@@ -342,17 +429,30 @@ export default function PaymentSettingsPage() {
                                     <h4 className="font-medium">{editingBank ? 'Edit' : 'Tambah'} Akun Bank</h4>
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                         <div>
-                                            <label className="text-sm font-medium">Nama Bank</label>
-                                            <select
+                                            <label className="text-sm font-medium">Nama Bank / E-Wallet</label>
+                                            <Input
                                                 value={bankForm.bankName}
                                                 onChange={(e) => setBankForm({ ...bankForm, bankName: e.target.value })}
-                                                className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
-                                            >
-                                                <option value="">Pilih Bank</option>
-                                                {BANK_LIST.map(bank => (
-                                                    <option key={bank} value={bank}>{bank}</option>
-                                                ))}
-                                            </select>
+                                                placeholder="BRI, BCA, OCBC, dll."
+                                                list="bank-suggestions"
+                                            />
+                                            <datalist id="bank-suggestions">
+                                                <option value="BCA" />
+                                                <option value="BNI" />
+                                                <option value="BRI" />
+                                                <option value="Mandiri" />
+                                                <option value="BSI" />
+                                                <option value="CIMB Niaga" />
+                                                <option value="BTN" />
+                                                <option value="Permata" />
+                                                <option value="Danamon" />
+                                                <option value="Maybank" />
+                                                <option value="OCBC" />
+                                                <option value="Panin" />
+                                                <option value="Bank Jago" />
+                                                <option value="SeaBank" />
+                                                <option value="E-Wallet (DANA, GOPAY, OVO)" />
+                                            </datalist>
                                         </div>
                                         <div>
                                             <label className="text-sm font-medium">Nomor Rekening</label>
@@ -458,17 +558,18 @@ export default function PaymentSettingsPage() {
                                     <h4 className="font-medium">{editingWallet ? 'Edit' : 'Tambah'} E-Wallet</h4>
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                         <div>
-                                            <label className="text-sm font-medium">Provider</label>
-                                            <select
+                                            <label className="text-sm font-medium">Nama Provider</label>
+                                            <Input
                                                 value={walletForm.provider}
                                                 onChange={(e) => setWalletForm({ ...walletForm, provider: e.target.value })}
-                                                className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
-                                            >
-                                                <option value="">Pilih Provider</option>
+                                                placeholder="DANA, GoPay, OVO, dll."
+                                                list="ewallet-suggestions"
+                                            />
+                                            <datalist id="ewallet-suggestions">
                                                 {EWALLET_PROVIDERS.map(p => (
-                                                    <option key={p.value} value={p.value}>{p.label}</option>
+                                                    <option key={p} value={p} />
                                                 ))}
-                                            </select>
+                                            </datalist>
                                         </div>
                                         <div>
                                             <label className="text-sm font-medium">Nomor HP/ID</label>
@@ -738,6 +839,234 @@ export default function PaymentSettingsPage() {
                                     </div>
                                 </div>
                             )}
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+
+                {/* Autopay Tab */}
+                <TabsContent value="autopay" className="space-y-4">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2">
+                                <CreditCard className="h-5 w-5" />
+                                Integrasi Autopay
+                            </CardTitle>
+                            <CardDescription>
+                                Autopay memantau mutasi bank secara real-time dan otomatis mencocokkan pembayaran
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <p className="font-medium">Aktifkan Autopay</p>
+                                    <p className="text-sm text-muted-foreground">Kirim tagihan baru ke Autopay untuk pemantauan otomatis</p>
+                                </div>
+                                <input
+                                    type="checkbox"
+                                    checked={autopay.enabled}
+                                    onChange={(e) => setAutopay({...autopay, enabled: e.target.checked})}
+                                    className="h-5 w-5"
+                                />
+                            </div>
+
+                            {autopay.enabled && (
+                                <div className="space-y-4 pt-2 border-t">
+                                    <div>
+                                        <label className="text-sm font-medium">API Key</label>
+                                        <p className="text-xs text-muted-foreground mb-1">Diperoleh dari dashboard Autopay</p>
+                                        <Input
+                                            value={autopay.apiKey}
+                                            onChange={(e) => setAutopay({...autopay, apiKey: e.target.value})}
+                                            placeholder="Masukan API Key Autopay"
+                                            type="password"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-sm font-medium">Base URL</label>
+                                        <p className="text-xs text-muted-foreground mb-1">URL API Autopay (contoh: https://api.autopay.id)</p>
+                                        <Input
+                                            value={autopay.baseUrl}
+                                            onChange={(e) => setAutopay({...autopay, baseUrl: e.target.value})}
+                                            placeholder="https://api.autopay.id"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-sm font-medium">HMAC Secret</label>
+                                        <p className="text-xs text-muted-foreground mb-1">Kunci rahasia untuk verifikasi signature webhook (sama dengan di dashboard Autopay)</p>
+                                        <Input
+                                            value={autopay.secret}
+                                            onChange={(e) => setAutopay({...autopay, secret: e.target.value})}
+                                            placeholder="Masukan HMAC secret key"
+                                            type="password"
+                                        />
+                                    </div>
+                                    <div className="bg-muted/30 rounded-lg p-3 text-xs text-muted-foreground space-y-1">
+                                        <p className="font-medium text-foreground">Informasi:</p>
+                                        <p>• Invoice baru akan otomatis dikirim ke Autopay</p>
+                                        <p>• Autopay akan mencocokkan mutasi bank dengan invoice</p>
+                                        <p>• Status dicek setiap 30 menit secara otomatis</p>
+                                        <p>• Callback URL: <code className="bg-muted px-1 rounded">{typeof window !== 'undefined' ? window.location.origin : ''}/api/v1/autopay/callback</code></p>
+                                    </div>
+
+                                    <div className="pt-4 border-t space-y-4">
+                                        <div className="flex items-center justify-between">
+                                            <div>
+                                                <p className="font-medium">Kode Unik Pembayaran</p>
+                                                <p className="text-sm text-muted-foreground">Tambahkan kode unik ke nominal transfer untuk identifikasi otomatis</p>
+                                            </div>
+                                            <input
+                                                type="checkbox"
+                                                checked={autopay.uniqueCodeEnabled}
+                                                onChange={(e) => setAutopay({...autopay, uniqueCodeEnabled: e.target.checked})}
+                                                className="h-5 w-5"
+                                            />
+                                        </div>
+
+                                        {autopay.uniqueCodeEnabled && (
+                                            <div className="space-y-3 pl-2 border-l-2 border-muted">
+                                                <div>
+                                                    <label className="text-sm font-medium">Jumlah Digit Kode</label>
+                                                    <p className="text-xs text-muted-foreground mb-1">
+                                                        Range: 1-{Math.pow(10, autopay.uniqueCodeLength) - 1}.
+                                                        {autopay.uniqueCodeLength >= 4 && (
+                                                            <span className="text-orange-500"> Perhatian: kode bisa mencapai Rp {Math.pow(10, autopay.uniqueCodeLength) - 1}</span>
+                                                        )}
+                                                    </p>
+                                                    <select
+                                                        value={autopay.uniqueCodeLength}
+                                                        onChange={(e) => setAutopay({...autopay, uniqueCodeLength: Number(e.target.value)})}
+                                                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                                    >
+                                                        {[3, 4, 5, 6].map(n => (
+                                                            <option key={n} value={n}>{n} digit (max Rp {Math.pow(10, n) - 1})</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 text-xs space-y-1">
+                                                    <p className="font-medium text-blue-700">Contoh dengan {autopay.uniqueCodeLength} digit:</p>
+                                                    <p>• Tagihan Rp 150.000 + kode 0{autopay.uniqueCodeLength >= 4 ? '0'.repeat(autopay.uniqueCodeLength - 1) : ''}1 = Transfer <strong>Rp 150.0{autopay.uniqueCodeLength >= 4 ? '0'.repeat(autopay.uniqueCodeLength - 1) : ''}1</strong></p>
+                                                    <p>• Maks kode: <strong>Rp {Math.pow(10, autopay.uniqueCodeLength) - 1}</strong></p>
+                                                    <p>• Maks invoice concurrent: <strong>{Math.pow(10, autopay.uniqueCodeLength) - 1}</strong></p>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="flex items-center gap-2 pt-2">
+                                        <Button
+                                            onClick={saveAutopaySettings}
+                                            disabled={savingAutopay}
+                                        >
+                                            {savingAutopay ? (
+                                                <>
+                                                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                                    Menyimpan...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Save className="h-4 w-4 mr-2" />
+                                                    Simpan Autopay
+                                                </>
+                                            )}
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+
+                {/* Auto-Delete Tab */}
+                <TabsContent value="cleanup" className="space-y-4">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2">
+                                <Trash2 className="h-5 w-5" />
+                                Auto-Delete Bukti Pembayaran
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-6">
+                            <div className="p-4 bg-blue-50 dark:bg-blue-950 rounded-lg border border-blue-200 dark:border-blue-800">
+                                <p className="text-sm font-medium text-blue-700 dark:text-blue-300 mb-2">
+                                    ℹ️ Pengaturan Auto-Delete
+                                </p>
+                                <p className="text-sm text-blue-600 dark:text-blue-400">
+                                    Bukti pembayaran yang sudah diverifikasi akan otomatis dihapus setelah jumlah hari yang ditentukan dari tanggal jatuh tempo invoice.
+                                </p>
+                            </div>
+
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="text-sm font-medium mb-2 block">
+                                        Periode Retensi (Hari)
+                                    </label>
+                                    <Input
+                                        type="number"
+                                        min="7"
+                                        max="365"
+                                        value={retentionDays}
+                                        onChange={(e) => setRetentionDays(parseInt(e.target.value) || 35)}
+                                        className="w-full max-w-xs"
+                                    />
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                        Min: 7 hari, Max: 365 hari (Default: 35 hari)
+                                    </p>
+                                </div>
+
+                                <div className="p-4 bg-muted/30 rounded-lg space-y-2">
+                                    <div className="flex justify-between items-center text-sm">
+                                        <span className="text-muted-foreground">Current setting:</span>
+                                        <span className="font-semibold">{retentionDays} hari</span>
+                                    </div>
+                                    <div className="flex justify-between items-center text-sm">
+                                        <span className="text-muted-foreground">Cleanup schedule:</span>
+                                        <span className="font-semibold">Setiap hari jam 05:00</span>
+                                    </div>
+                                    <div className="flex justify-between items-center text-sm">
+                                        <span className="text-muted-foreground">Akan menghapus:</span>
+                                        <span className="font-semibold">Bukti yang sudah verified/paid/rejected</span>
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                    <Button
+                                        onClick={saveCleanupSettings}
+                                        disabled={savingCleanup}
+                                        className="bg-blue-600 hover:bg-blue-700"
+                                    >
+                                        {savingCleanup ? (
+                                            <>
+                                                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                                Menyimpan...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Save className="h-4 w-4 mr-2" />
+                                                Simpan Pengaturan
+                                            </>
+                                        )}
+                                    </Button>
+                                    <Button
+                                        variant="outline"
+                                        onClick={() => setRetentionDays(35)}
+                                        disabled={savingCleanup}
+                                    >
+                                        Reset ke Default
+                                    </Button>
+                                </div>
+
+                                <div className="border-t pt-4">
+                                    <p className="text-xs text-muted-foreground">
+                                        <strong>Catatan:</strong>
+                                        <ul className="list-disc list-inside mt-2 space-y-1">
+                                            <li>Bukti pembayaran akan tetap disimpan selama periode retensi untuk audit</li>
+                                            <li>Setelah periode retensi berakhir, file akan dihapus secara permanen</li>
+                                            <li>Proses cleanup berjalan otomatis setiap pagi hari</li>
+                                            <li>Disarankan minimal 30 hari untuk menyelesaikan 1 billing cycle</li>
+                                        </ul>
+                                    </p>
+                                </div>
+                            </div>
                         </CardContent>
                     </Card>
                 </TabsContent>

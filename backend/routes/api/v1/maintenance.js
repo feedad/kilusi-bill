@@ -16,6 +16,8 @@ router.get('/', async (req, res) => {
         scheduled_end_time as "endTime",
         target_areas as "affectedAreas",
         send_push_notification as "notifyCustomers",
+        send_whatsapp_notification,
+        whatsapp_template_id,
         created_at as "createdAt",
         is_active,
         is_scheduled
@@ -62,6 +64,8 @@ router.get('/', async (req, res) => {
         affectedAreas: affectedAreas,
         status: status,
         notifyCustomers: row.notifyCustomers,
+        sendWhatsAppNotification: row.send_whatsapp_notification || false,
+        whatsappTemplateId: row.whatsapp_template_id || null,
         notificationSent: false, // TODO: Track this in DB
         createdAt: row.createdAt
       };
@@ -90,7 +94,9 @@ router.post('/', async (req, res) => {
       endTime,
       affectedAreas,
       status, // ignored for creation, defaults to scheduled logic
-      notifyCustomers
+      notifyCustomers,
+      sendWhatsAppNotification,
+      whatsappTemplateId
     } = req.body;
 
     const maintenanceData = {
@@ -101,6 +107,8 @@ router.post('/', async (req, res) => {
       target_areas: affectedAreas,
       target_all: !affectedAreas || affectedAreas.length === 0,
       send_push_notification: notifyCustomers,
+      send_whatsapp_notification: sendWhatsAppNotification || false,
+      whatsapp_template_id: whatsappTemplateId || null,
       maintenance_type: 'general',
       created_by: req.user.id || 1, // Fallback to admin ID 1
       auto_activate: true,
@@ -133,7 +141,9 @@ router.put('/:id', async (req, res) => {
       startTime,
       endTime,
       affectedAreas,
-      notifyCustomers
+      notifyCustomers,
+      sendWhatsAppNotification,
+      whatsappTemplateId
     } = req.body;
 
     const updateQuery = `
@@ -146,8 +156,10 @@ router.put('/:id', async (req, res) => {
         target_areas = $5,
         target_all = $6,
         send_push_notification = $7,
+        send_whatsapp_notification = $8,
+        whatsapp_template_id = $9,
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $8 AND type = 'maintenance'
+      WHERE id = $10 AND type = 'maintenance'
       RETURNING *
     `;
 
@@ -162,6 +174,8 @@ router.put('/:id', async (req, res) => {
       targetAreasJson,
       targetAll,
       notifyCustomers,
+      sendWhatsAppNotification !== undefined ? sendWhatsAppNotification : false,
+      whatsappTemplateId || null,
       id
     ]);
 
@@ -275,9 +289,6 @@ router.post('/:id/notify', async (req, res) => {
   try {
     const { id } = req.params;
 
-    // TODO: Implement actual notification sending via WhatsApp service
-    // For now, just mark it as possibly handled or log it
-    
     // Check if exists
     const checkQuery = `SELECT * FROM broadcast_messages WHERE id = $1 AND type = 'maintenance'`;
     const checkResult = await query(checkQuery, [id]);
@@ -292,10 +303,36 @@ router.post('/:id/notify', async (req, res) => {
     const maintenance = checkResult.rows[0];
     logger.info(`🔔 Sending manual notification for maintenance: ${maintenance.title}`);
 
-    res.json({
-      success: true,
-      message: 'Notifikasi sedang dikirim'
-    });
+    // Send WhatsApp notification if enabled
+    if (maintenance.send_whatsapp_notification) {
+      const { sendBroadcastNotification } = require('../../../services/broadcast-whatsapp-service');
+
+      const result = await sendBroadcastNotification({
+        title: maintenance.title,
+        message: maintenance.message,
+        type: maintenance.type,
+        target_all: maintenance.target_all,
+        target_areas: maintenance.target_areas,
+        whatsapp_template_id: maintenance.whatsapp_template_id
+      });
+
+      logger.info(`📱 Manual WhatsApp notification sent: ${result.sent} sent, ${result.failed} failed`);
+
+      res.json({
+        success: true,
+        message: 'Notifikasi berhasil dikirim',
+        data: {
+          sent: result.sent,
+          failed: result.failed,
+          total: result.total
+        }
+      });
+    } else {
+      res.json({
+        success: true,
+        message: 'Notifikasi WhatsApp tidak diaktifkan untuk jadwal ini'
+      });
+    }
   } catch (error) {
     logger.error('Error sending notification:', error);
     res.status(500).json({

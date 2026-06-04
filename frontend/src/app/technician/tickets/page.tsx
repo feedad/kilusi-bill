@@ -44,25 +44,25 @@ export default function TechnicianTicketsPage() {
     const { data: tickets, isLoading } = useQuery({
         queryKey: ['technician-tickets'],
         queryFn: async () => {
-            const res = await api.get('/technician/tickets')
-            return res.data.data
+            const res = await api.get('/api/v1/technician/tickets')
+            return res.data.data || []
         }
     })
 
     const updateMutation = useMutation({
         mutationFn: async (data: any) => {
-            return api.put(`/technician/tickets/${data.id}`, {
+            return api.put(`/api/v1/technician/tickets/${data.id}`, {
                 status: data.status,
-                resolution: data.resolution
+                resolution_time: data.resolution
             })
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['technician-tickets'] })
             setIsUpdateOpen(false)
-            toast.success('Ticket updated successfully')
+            toast.success('✅ Tiket berhasil diperbarui')
         },
         onError: (err) => {
-            toast.error('Failed to update ticket')
+            toast.error('Gagal memperbarui tiket')
             console.error(err)
         }
     })
@@ -133,9 +133,10 @@ export default function TechnicianTicketsPage() {
                         <Table>
                             <TableHeader>
                                 <TableRow>
-                                    <TableHead>Ticket ID</TableHead>
+                                    <TableHead>Ticket #</TableHead>
                                     <TableHead>Subject</TableHead>
                                     <TableHead>Customer</TableHead>
+                                    <TableHead>Category</TableHead>
                                     <TableHead>Status</TableHead>
                                     <TableHead>Created At</TableHead>
                                     <TableHead className="text-right">Action</TableHead>
@@ -153,33 +154,44 @@ export default function TechnicianTicketsPage() {
                                 ) : (
                                     tickets?.map((ticket: any) => (
                                         <TableRow key={ticket.id}>
-                                            <TableCell className="font-medium">#{ticket.id}</TableCell>
+                                            <TableCell className="font-medium">#{ticket.ticket_number}</TableCell>
                                             <TableCell>
-                                                <div className="font-semibold">{ticket.title}</div>
+                                                <div className="font-semibold">{ticket.subject}</div>
                                                 <div className="text-xs text-muted-foreground truncate max-w-[200px]">{ticket.description}</div>
                                             </TableCell>
                                             <TableCell>
                                                 <div>{ticket.customer_name}</div>
-                                                <div className="text-xs text-muted-foreground">{ticket.customer_address}</div>
+                                                <div className="text-xs text-muted-foreground">{ticket.customer_address || '-'}</div>
                                                 {ticket.customer_phone && (
                                                     <div className="text-xs text-muted-foreground">{ticket.customer_phone}</div>
                                                 )}
                                             </TableCell>
+                                            <TableCell>
+                                                <Badge variant="outline" className="text-xs capitalize">
+                                                    {ticket.category}
+                                                </Badge>
+                                            </TableCell>
                                             <TableCell>{getStatusBadge(ticket.status)}</TableCell>
-                                            <TableCell>{new Date(ticket.created_at).toLocaleDateString()}</TableCell>
+                                            <TableCell>{new Date(ticket.created_at).toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' })}</TableCell>
                                             <TableCell className="text-right">
                                                 <div className="flex justify-end gap-2">
-                                                    <Button variant="outline" size="sm" onClick={() => handleCheckStatus(ticket)} title="Check Signal">
-                                                        <Activity className="h-4 w-4" />
-                                                    </Button>
+                                                    {ticket.category === 'technical' && ticket.customer_id && (
+                                                        <Button variant="outline" size="sm" onClick={() => handleCheckStatus(ticket)} title="Check Signal">
+                                                            <Activity className="h-4 w-4" />
+                                                        </Button>
+                                                    )}
                                                     <Button variant="outline" size="sm" onClick={() => openUpdateDialog(ticket)}>
                                                         Update
                                                     </Button>
-                                                    <Link href={`/technician/customers/${ticket.customer_id}/activate`}>
-                                                        <Button variant="secondary" size="sm">
-                                                            Activate
+                                                    <a
+                                                        href={`https://wa.me/${ticket.customer_phone?.replace(/^0/, '62') || ''}`}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                    >
+                                                        <Button variant="outline" size="sm" title="WhatsApp">
+                                                            <MapPin className="h-4 w-4" />
                                                         </Button>
-                                                    </Link>
+                                                    </a>
                                                 </div>
                                             </TableCell>
                                         </TableRow>
@@ -195,7 +207,7 @@ export default function TechnicianTicketsPage() {
             <Dialog open={isUpdateOpen} onOpenChange={setIsUpdateOpen}>
                 <DialogContent>
                     <DialogHeader>
-                        <DialogTitle>Update Ticket #{selectedTicket?.id}</DialogTitle>
+                        <DialogTitle>Update Tiket #{selectedTicket?.ticket_number}</DialogTitle>
                     </DialogHeader>
                     <div className="space-y-4 py-2">
                         <div className="space-y-2">

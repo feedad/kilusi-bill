@@ -184,8 +184,16 @@ class PaymentGatewayManager {
                 status: result.status || body.status || 'pending',
                 amount: result.amount || body.amount || body.gross_amount,
                 payment_type: result.payment_type || body.payment_type || body.payment_method,
+                payment_method: result.payment_method || body.payment_method || result.payment_type,
                 fraud_status: result.fraud_status || body.fraud_status || 'accept',
-                reference: result.reference || result.invoice_id || null
+                reference: result.reference || result.invoice_id || null,
+                fee_amount: result.fee_amount || null,
+                fee_customer: result.fee_customer || null,
+                fee_merchant: result.fee_merchant || null,
+                net_amount: result.net_amount || null,
+                amount_received: result.amount_received || null,
+                fee_bearer: result.fee_bearer || null,
+                paid_at: result.paid_at || null
             };
             return normalized;
         } catch (error) {
@@ -358,6 +366,9 @@ class TripayGateway {
         const defaultBase = `http://${host}${port ? `:${port}` : ''}`;
         const baseUrl = (this.config.base_url || defaultBase).replace(/\/+$/, '');
 
+        // Use PORTAL_URL from environment if available, otherwise use baseUrl
+        const portalUrl = process.env.PORTAL_URL || baseUrl;
+
         let selectedMethod = method || 'BRIVA';
 
         // Handle QRIS code normalization (Frontend sends generic 'QRIS', we map to 'QRISC' or whatever is active)
@@ -369,19 +380,29 @@ class TripayGateway {
         let phone = (invoice.customer_phone || '').replace(/\D/g, '');
         if (phone.startsWith('0')) phone = '0' + phone.substring(1); // Basic normalization
 
+        // Format customer email for Tripay (use name@kilusi.id format)
+        const formattedName = customerName
+          .toLowerCase()
+          .replace(/[^a-z0-9\s]/g, '') // Remove special characters
+          .replace(/\s+/g, '.') // Replace spaces with dots
+          .replace(/\.+/g, '.') // Replace multiple dots with single dot
+          .trim();
+        const tripayEmail = formattedName ? `${formattedName}@kilusi.id` : 'customer@kilusi.id';
+
         const data = {
             method: selectedMethod,
             merchant_ref: invoice.order_id || `INV-${invoice.invoice_number}`,
             amount: parseInt(invoice.amount),
             customer_name: customerName,
-            customer_email: invoice.customer_email || 'cust@example.com',
+            customer_email: tripayEmail,
             customer_phone: phone,
             order_items: [{ name: invoice.package_name || 'Internet', price: parseInt(invoice.amount), quantity: 1 }],
-            callback_url: `${baseUrl}/api/v1/payments/webhook/tripay`,
-            return_url: `${baseUrl}/payment/finish`
+            callback_url: invoice.callback_url || `https://api.kilusi.id/api/v1/payments/webhook/tripay`,
+            return_url: invoice.return_url || `${portalUrl}/customer/payments/success`
         };
 
         console.log('[TRIPAY] Requesting transaction:', data.merchant_ref);
+        console.log('[TRIPAY] Return URL:', data.return_url);
 
         const rawSign = `${this.config.merchant_code}${data.merchant_ref}${data.amount}`;
         const signature = crypto.createHmac('sha256', this.config.private_key).update(rawSign).digest('hex');
@@ -396,7 +417,26 @@ class TripayGateway {
         const result = await res.json();
         if (!res.ok || !result.success) throw new Error(result.message || 'Tripay Error');
 
-        return { payment_url: result.data.checkout_url, token: result.data.reference, order_id: data.merchant_ref };
+        // Extract fee data from Tripay response
+        const feeCustomer = parseFloat(result.data?.fee_customer) || 0;
+        const feeMerchant = parseFloat(result.data?.fee_merchant) || 0;
+        const amountReceived = parseFloat(result.data?.amount_received) || 0;
+        const totalFee = feeCustomer + feeMerchant;
+        
+        // Determine fee bearer from response:
+        // If fee_customer > 0: customer pays more, merchant receives full amount
+        // If fee_merchant > 0: customer pays base price, merchant receives less
+        const feeBearer = feeCustomer > 0 ? 'customer' : (feeMerchant > 0 ? 'merchant' : 'customer');
+        
+        return {
+            payment_url: result.data.checkout_url,
+            token: result.data.reference,
+            order_id: data.merchant_ref,
+            fee: { amount: totalFee, customer_fee: feeCustomer, merchant_fee: feeMerchant },
+            net_amount: amountReceived || (parseInt(invoice.amount) - feeMerchant),
+            amount_received: amountReceived,
+            fee_bearer: feeBearer
+        };
     }
 
     async getAvailablePaymentMethods(amount) {
@@ -504,12 +544,30 @@ class TripayGateway {
         const expected = crypto.createHmac('sha256', this.config.private_key).update(JSON.stringify(payload)).digest('hex');
         if (sig !== expected) throw new Error('Invalid signature');
 
+        // Extract fee data from Tripay callback
+        // Tripay sends: fee_customer, fee_merchant, total_fee, amount_received
+        const feeCustomer = parseFloat(payload.fee_customer || payload.total_fee_customer) || 0;
+        const feeMerchant = parseFloat(payload.fee_merchant || payload.total_fee_merchant) || 0;
+        const amountReceived = parseFloat(payload.amount_received) || 0;
+        const totalFee = feeCustomer + feeMerchant;
+        
+        // Determine fee bearer from callback data
+        const feeBearer = feeCustomer > 0 ? 'customer' : (feeMerchant > 0 ? 'merchant' : 'customer');
+
         return {
             order_id: payload.merchant_ref,
             status: payload.status === 'PAID' ? 'success' : (payload.status === 'UNPAID' ? 'pending' : 'failed'),
             amount: payload.amount,
+            payment_method: payload.payment_method,
             payment_type: payload.payment_method,
-            reference: payload.reference
+            reference: payload.reference,
+            fee_amount: totalFee,
+            fee_customer: feeCustomer,
+            fee_merchant: feeMerchant,
+            net_amount: amountReceived || (parseFloat(payload.amount) - feeMerchant),
+            amount_received: amountReceived,
+            fee_bearer: feeBearer,
+            paid_at: payload.paid_at
         };
     }
 }

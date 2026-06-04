@@ -24,26 +24,24 @@ export const CONFIG = {
 
 /**
  * Smart API Base URL resolution
- * Priority: Environment variable -> Development fallback -> Production fallback
+ * Uses direct environment variable access for client-side compatibility
  */
 function getApiBaseUrl(): string {
-  // 1. Check explicit environment variable FIRST (highest priority)
-  // Check against undefined to allow empty string (for relative path proxying)
-  if (typeof process.env.NEXT_PUBLIC_API_URL !== 'undefined') {
-    const url = process.env.NEXT_PUBLIC_API_URL
-    console.log('🔧 Using NEXT_PUBLIC_API_URL:', url === '' ? '(relative)' : url)
-    return url
+  // Try to get API URL from environment variable first
+  const apiURL = process.env.NEXT_PUBLIC_API_URL
+
+  // Fallback to production URL through Cloudflare
+  const fallbackURL = 'https://api.kilusi.id'
+
+  const finalURL = apiURL && apiURL.trim() !== '' ? apiURL : fallbackURL
+
+  // Only log in browser to avoid SSR issues
+  if (typeof window !== 'undefined') {
+    console.log('🔧 Using API Base URL:', finalURL)
+    console.log('🔧 NEXT_PUBLIC_API_URL from env:', apiURL || 'not set')
   }
 
-  // 2. Server-side development fallback
-  if (process.env.NODE_ENV === 'development') {
-    console.log('🔧 Using development fallback: localhost:3001')
-    return 'http://localhost:3001'
-  }
-
-  // 3. Production fallback - Default to relative path to use Proxy
-  console.log('🔧 Using production fallback: relative path')
-  return ''
+  return finalURL
 }
 
 /**

@@ -29,7 +29,9 @@ export const useAuthStore = create<AuthState>()(
           console.log('🔐 AuthStore: Starting login for username:', username)
           console.log('🔐 AuthStore: API endpoint:', endpoints.admin.auth.login)
           console.log('🔐 AuthStore: Full API URL:', `${adminApi.defaults.baseURL}${endpoints.admin.auth.login}`)
-          console.log('🔐 AuthStore: Browser at:', window.location.origin)
+          if (typeof window !== 'undefined') {
+            console.log('🔐 AuthStore: Browser at:', window.location.origin)
+          }
 
           // Use JWT API for login
           const response = await adminApi.post(endpoints.admin.auth.login, {
@@ -38,24 +40,28 @@ export const useAuthStore = create<AuthState>()(
           })
 
           console.log('🔐 AuthStore: Login response status:', response.status)
-          console.log('🔐 AuthStore: Login response data:', response.data)
+          console.log('🔐 AuthStore: Full login response:', response.data)
+          console.log('🔐 AuthStore: Response data.data:', response.data.data)
 
           if (response.data.success) {
             const { user, token } = response.data.data
 
             console.log('🔐 AuthStore: Login successful, user:', user)
+            console.log('🔐 AuthStore: User role:', user?.role)
             console.log('🔐 AuthStore: Token received:', token ? 'Yes' : 'No')
 
             // Store the token in API defaults and local state
             adminApi.defaults.headers.common['Authorization'] = `Bearer ${token}`
 
-            set({
+            const newState = {
               user,
               token,
               isAuthenticated: true,
               isLoading: false,
-            })
-            console.log('🔐 AuthStore: State updated successfully')
+            }
+            set(newState)
+            console.log('🔐 AuthStore: State updated successfully:', newState)
+            console.log('🔐 AuthStore: Current state after login:', get())
           } else {
             console.error('🔐 AuthStore: Login failed - success:false, message:', response.data.message)
             throw new Error(response.data.message || 'Login failed')
@@ -71,29 +77,27 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      logout: async () => {
-        try {
-          await adminApi.post(endpoints.admin.auth.logout)
-        } catch (error) {
-          // Ignore logout API errors
-          console.log('Logout API error:', error)
-        } finally {
-          // Clear authorization header
-          delete adminApi.defaults.headers.common['Authorization']
+      logout: () => {
+        // Clear authorization header
+        delete adminApi.defaults.headers.common['Authorization']
 
-          // Clear all auth state
-          set({
-            user: null,
-            token: null,
-            isAuthenticated: false,
-            isLoading: false,
-          })
+        // Clear all auth state
+        set({
+          user: null,
+          token: null,
+          isAuthenticated: false,
+          isLoading: false,
+        })
 
-          // Force reload to clear any cached state
-          if (typeof window !== 'undefined') {
-            window.location.href = '/admin/login'
-          }
+        // Redirect immediately (instant logout)
+        if (typeof window !== 'undefined') {
+          window.location.href = '/admin/login'
         }
+
+        // Fire-and-forget: call logout API in background
+        adminApi.post(endpoints.admin.auth.logout).catch(error => {
+          console.log('Logout API error:', error)
+        })
       },
 
       refreshToken: async () => {
@@ -130,12 +134,38 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'auth-storage',
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() => {
+        // Prevent SSR access to localStorage
+        if (typeof window === 'undefined') {
+          return {
+            getItem: () => null,
+            setItem: () => {},
+            removeItem: () => {},
+          }
+        }
+        return localStorage
+      }),
       partialize: (state) => ({
         user: state.user,
         token: state.token,
         isAuthenticated: state.isAuthenticated,
       }),
+      onRehydrateStorage: () => (state) => {
+        console.log('🔐 AuthStore: Hydration complete')
+        console.log('🔐 AuthStore: Hydrated state:', state)
+        console.log('🔐 AuthStore: User after hydration:', state?.user)
+        console.log('🔐 AuthStore: User role after hydration:', state?.user?.role)
+
+        // Check if user is null (old format or logged out)
+        if (!state?.user && state?.token) {
+          console.warn('⚠️ AuthStore: User is null but token exists - possible old auth format')
+          console.log('🔐 AuthStore: Clearing invalid auth data')
+          // Clear the invalid auth data
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('auth-storage')
+          }
+        }
+      },
     }
   )
 )

@@ -7,8 +7,20 @@ import { PlusIcon, PencilIcon, TrashIcon, EyeIcon } from '@heroicons/react/24/ou
 import { toast } from 'react-hot-toast';
 import { useRouter } from 'next/navigation';
 
+interface BlogPost {
+    id: string;
+    title: string;
+    slug: string;
+    excerpt: string;
+    content: string;
+    cover_image: string;
+    is_published: boolean;
+    views: number;
+    created_at: string;
+}
+
 export default function BlogAdminPage() {
-    const [posts, setPosts] = useState([]);
+    const [posts, setPosts] = useState<BlogPost[]>([]);
     const [loading, setLoading] = useState(true);
     const router = useRouter();
 
@@ -29,7 +41,7 @@ export default function BlogAdminPage() {
         fetchPosts();
     }, []);
 
-    const deletePost = async (id) => {
+    const deletePost = async (id: string) => {
         if (!confirm('Are you sure you want to delete this post?')) return;
         try {
             await api.delete(`/api/v1/blog/admin/posts/${id}`);
@@ -100,7 +112,7 @@ export default function BlogAdminPage() {
                         ))}
                         {posts.length === 0 && (
                             <tr>
-                                <td colSpan="4" className="px-6 py-8 text-center text-slate-500">
+                                <td colSpan={4} className="px-6 py-8 text-center text-slate-500">
                                     No posts found. Create your first one!
                                 </td>
                             </tr>

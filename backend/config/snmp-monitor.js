@@ -682,6 +682,179 @@ async function getSystemInfo(options = {}) {
   }
 }
 
+/**
+ * Get all PPPoE users with their traffic data
+ * Returns array of { username, ifIndex, inOctets, outOctets, inBps, outBps }
+ */
+async function getPPPoEUserTraffic({ host, community = 'public', version = '2c', port = 161 }) {
+  const session = createSession({ host, community, version, port });
+  const results = [];
+
+  try {
+    // Walk all interfaces to find PPPoE ones
+    logger.debug(`Scanning for PPPoE interfaces on ${host}...`);
+
+    // Get interface descriptions first
+    const ifDescrRows = await snmpWalk(session, OIDS.ifDescr);
+
+    for (const row of ifDescrRows) {
+      const ifaceName = String(row.value || '');
+      const ifIndex = parseInt(row.oid.split('.').pop());
+
+      // Check if this is a PPPoE interface
+      // Format: <pppoe-username> or <pppoe-username@realm>
+      if (!ifaceName.includes('<pppoe-')) {
+        continue;
+      }
+
+      // Extract username from <pppoe-username>
+      const usernameMatch = ifaceName.match(/<pppoe-(.+?)>/);
+      if (!usernameMatch) continue;
+
+      const username = usernameMatch[1];
+
+      // Get traffic data for this interface
+      const trafficOids = [
+        `${OIDS.ifHCInOctets}.${ifIndex}`,
+        `${OIDS.ifHCOutOctets}.${ifIndex}`
+      ];
+
+      try {
+        const trafficData = await snmpGet(session, trafficOids);
+
+        const inOctets = Number(trafficData[`${OIDS.ifHCInOctets}.${ifIndex}`]) || 0;
+        const outOctets = Number(trafficData[`${OIDS.ifHCOutOctets}.${ifIndex}`]) || 0;
+
+        // Calculate rate using cache
+        const cacheKey = `${host}|${community}|${ifIndex}`;
+        const prev = rateCache.get(cacheKey);
+        let inBps = 0;
+        let outBps = 0;
+
+        if (prev && prev.in && prev.out) {
+          inBps = computeRate(prev.in, inOctets).rate || 0;
+          outBps = computeRate(prev.out, outOctets).rate || 0;
+        }
+
+        // Update cache
+        rateCache.set(cacheKey, {
+          in: { ts: Date.now(), cnt: inOctets },
+          out: { ts: Date.now(), cnt: outOctets }
+        });
+
+        results.push({
+          username,
+          ifIndex,
+          inOctets,
+          outOctets,
+          inBps,
+          outBps,
+          interfaceName: ifaceName
+        });
+
+        logger.debug(`PPPoE user ${username}: ${inBps} bps down, ${outBps} bps up`);
+
+      } catch (err) {
+        logger.warn(`Failed to get traffic for interface ${ifIndex} (${username}): ${err.message}`);
+      }
+    }
+
+    logger.info(`Found ${results.length} active PPPoE users on ${host}`);
+    return results;
+
+  } catch (error) {
+    logger.error(`Error getting PPPoE user traffic: ${error.message}`);
+    return [];
+  } finally {
+    session.close();
+  }
+}
+
+/**
+ * Get traffic data for specific online users by username
+ * Matches with radacct data to provide real-time traffic
+ * @param {Array} onlineUsers - Array of { username, ... } from radacct
+ * @param {Object} snmpConfig - { host, community, version, port }
+ */
+async function getOnlineUsersTraffic(onlineUsers, snmpConfig) {
+  const session = createSession(snmpConfig);
+  const trafficMap = new Map(); // username -> traffic data
+
+  try {
+    // Get all PPPoE interfaces
+    const ifDescrRows = await snmpWalk(session, OIDS.ifDescr);
+
+    // Build lookup map for faster matching
+    const pppoeInterfaces = new Map();
+    for (const row of ifDescrRows) {
+      const ifaceName = String(row.value || '');
+      const ifIndex = parseInt(row.oid.split('.').pop());
+
+      if (ifaceName.includes('<pppoe-')) {
+        const usernameMatch = ifaceName.match(/<pppoe-(.+?)>/);
+        if (usernameMatch) {
+          const username = usernameMatch[1];
+          pppoeInterfaces.set(username, { ifIndex, interfaceName: ifaceName });
+        }
+      }
+    }
+
+    // Get traffic for each online user
+    for (const user of onlineUsers) {
+      const username = user.username;
+      if (!username || !pppoeInterfaces.has(username)) {
+        continue;
+      }
+
+      const { ifIndex } = pppoeInterfaces.get(username);
+
+      const trafficOids = [
+        `${OIDS.ifHCInOctets}.${ifIndex}`,
+        `${OIDS.ifHCOutOctets}.${ifIndex}`
+      ];
+
+      try {
+        const trafficData = await snmpGet(session, trafficOids);
+
+        const inOctets = Number(trafficData[`${OIDS.ifHCInOctets}.${ifIndex}`]) || 0;
+        const outOctets = Number(trafficData[`${OIDS.ifHCOutOctets}.${ifIndex}`]) || 0;
+
+        // Calculate rate
+        const cacheKey = `${snmpConfig.host}|${snmpConfig.community}|${ifIndex}`;
+        const prev = rateCache.get(cacheKey);
+        let inBps = 0;
+        let outBps = 0;
+
+        if (prev && prev.in && prev.out) {
+          inBps = computeRate(prev.in, inOctets).rate || 0;
+          outBps = computeRate(prev.out, outOctets).rate || 0;
+        }
+
+        // Update cache
+        rateCache.set(cacheKey, {
+          in: { ts: Date.now(), cnt: inOctets },
+          out: { ts: Date.now(), cnt: outOctets }
+        });
+
+        trafficMap.set(username, {
+          inOctets,
+          outOctets,
+          inBps,
+          outBps,
+          totalBytes: inOctets + outOctets
+        });
+
+      } catch (err) {
+        logger.debug(`Failed to get traffic for ${username}: ${err.message}`);
+      }
+    }
+
+    return trafficMap;
+
+  } finally {
+    session.close();
+  }
+}
 
 module.exports = {
   OIDS,
@@ -689,6 +862,8 @@ module.exports = {
   getDeviceInfo,
   getSystemInfo,
   getCpuLoad,
+  getPPPoEUserTraffic,
+  getOnlineUsersTraffic,
 
   // Helper to classify interface types
   // Returns: 'physical', 'pppoe', 'hotspot', 'other'

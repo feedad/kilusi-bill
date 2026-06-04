@@ -1,4 +1,4 @@
-const { query, transaction } = require('../config/database');
+const { query, transaction, getOne } = require('../config/database');
 const { logger } = require('../config/logger');
 
 class BillingService {
@@ -138,6 +138,95 @@ class BillingService {
         const month = String(date.getMonth() + 1).padStart(2, '0');
         const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
         return `INV-${year}${month}-${random}`;
+    }
+
+    // ==================
+    // CUSTOMER INVOICE (Installation / First Invoice)
+    // ==================
+    async createCustomerInvoice(customerId, packageId, billingType) {
+        try {
+            const pkg = await getOne('SELECT * FROM packages WHERE id = $1', [packageId]);
+            if (!pkg) {
+                logger.warn(`Package ${packageId} not found for customer ${customerId}`);
+                return null;
+            }
+
+            const service = await getOne(`
+                SELECT * FROM services WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1
+            `, [customerId]);
+
+            // Get installation fee (package-specific first, then billing-type default)
+            let installationFee = 0;
+            if (packageId) {
+                const pkgFee = await getOne(`
+                    SELECT fee_amount FROM installation_fee_settings
+                    WHERE billing_type = $1 AND package_id = $2 AND is_active = true
+                    LIMIT 1
+                `, [billingType, packageId]);
+                if (pkgFee) installationFee = parseFloat(pkgFee.fee_amount);
+            }
+            if (installationFee === 0) {
+                const defaultFee = await getOne(`
+                    SELECT fee_amount FROM installation_fee_settings
+                    WHERE billing_type = $1 AND package_id IS NULL AND is_active = true
+                    LIMIT 1
+                `, [billingType]);
+                if (defaultFee) installationFee = parseFloat(defaultFee.fee_amount);
+            }
+
+            let amount, dueDate, notes;
+
+            if (billingType === 'postpaid') {
+                if (installationFee <= 0) return null;
+                amount = installationFee;
+                dueDate = new Date();
+                notes = 'Biaya instalasi';
+            } else {
+                amount = parseFloat(pkg.price) + installationFee;
+                dueDate = new Date();
+                notes = 'Tagihan bulan pertama';
+            }
+
+            const invoiceNumber = this.generateInvoiceNumber();
+            const sql = `
+                INSERT INTO invoices (
+                    customer_id, package_id, invoice_number, amount, total_amount,
+                    due_date, status, notes, service_number
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, 'unpaid', $7, $8)
+                RETURNING *
+            `;
+            const result = await query(sql, [
+                customerId, packageId, invoiceNumber, amount, amount,
+                dueDate, notes, service?.service_number || null
+            ]);
+
+            logger.info(`Created installation invoice ${invoiceNumber} for customer ${customerId} (${billingType}, amount=${amount})`);
+
+            // Generate unique code for autopay if enabled
+            const invoice = result.rows[0];
+            try {
+                const uniqueCodeGenerator = require('../config/unique-code');
+                if (uniqueCodeGenerator.isEnabled()) {
+                    const code = await uniqueCodeGenerator.generateCode();
+                    const amountWithCode = uniqueCodeGenerator.calculateAmountWithCode(amount, code);
+                    await query(
+                        `UPDATE invoices SET unique_code = $1, amount_with_code = $2 WHERE id = $3`,
+                        [code, amountWithCode, invoice.id]
+                    );
+                    invoice.unique_code = code;
+                    invoice.amount_with_code = amountWithCode;
+                    logger.info(`Unique code ${code} generated for invoice ${invoiceNumber}`);
+                }
+            } catch (ucError) {
+                logger.error(`Unique code generation failed for ${invoiceNumber}:`, ucError.message);
+            }
+
+            return invoice;
+        } catch (error) {
+            logger.error('Error creating customer invoice:', error);
+            return null;
+        }
     }
 
     // ==================

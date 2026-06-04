@@ -21,23 +21,15 @@ export function formatCurrency(amount: number | string | null | undefined): stri
 }
 
 export function formatDate(date: string | Date): string {
+  if (!date) return '-'
   const d = new Date(date)
-  return d.toLocaleDateString('id-ID', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  })
+  return d.toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
 export function formatDateTime(date: string | Date): string {
+  if (!date) return '-'
   const d = new Date(date)
-  return d.toLocaleString('id-ID', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  return d.toLocaleString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
 export function formatBytes(bytes: number, decimals: number = 2): string {

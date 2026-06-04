@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { query } = require('../../../config/database');
 const maintenanceScheduler = require('../../../services/maintenanceScheduler');
+const { sendBroadcastNotification, broadcastWebSocket } = require('../../../services/broadcast-whatsapp-service');
 const { logger } = require('../../../config/logger');
 
 // GET / - Get all broadcast messages
@@ -30,7 +31,8 @@ router.get('/', async (req, res) => {
       priority: row.priority || 99,
       createdAt: row.created_at,
       target_all: row.target_all,
-      target_areas: row.target_areas
+      target_areas: row.target_areas,
+      target_mitra: row.target_mitra
     }));
 
     res.json({
@@ -90,6 +92,8 @@ router.post('/', async (req, res) => {
       target_all,
       is_active,
       send_push_notification,
+      send_whatsapp_notification,
+      whatsapp_template_id, // Use template instead of custom message
       expires_at,
       content // Destructure content from request body
     } = req.body;
@@ -105,14 +109,15 @@ router.post('/', async (req, res) => {
       });
     }
 
-    const createdBy = parseInt(req.user.id) || 1; // Default to admin user ID 1 if conversion fails
+    const createdBy = parseInt(req.user.id) || 1;
     const expiresAt = expires_at ? new Date(expires_at) : null;
 
     const insertQuery = `
       INSERT INTO broadcast_messages (
-        title, message, type, priority, target_areas, target_all,
-        is_active, send_push_notification, expires_at, created_by
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        title, message, type, priority, target_areas, target_mitra, target_all,
+        is_active, send_push_notification, send_whatsapp_notification,
+        whatsapp_template_id, expires_at, created_by
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
       RETURNING *
     `;
 
@@ -122,9 +127,12 @@ router.post('/', async (req, res) => {
       type || 'info',
       priority || 'medium',
       target_all ? null : JSON.stringify(target_areas || []),
-      target_all !== undefined ? target_all : true, // Default to true (broadcast to all)
-      is_active !== undefined ? is_active : true,   // Default to active
-      send_push_notification || false,              // Default to false
+      target_all ? null : JSON.stringify(target_mitra || []),
+      target_all !== undefined ? target_all : true,
+      is_active !== undefined ? is_active : true,
+      send_push_notification || false,
+      send_whatsapp_notification || false,
+      whatsapp_template_id || null,
       expiresAt,
       createdBy
     ];
@@ -132,36 +140,28 @@ router.post('/', async (req, res) => {
     const result = await query(insertQuery, values);
     const newMessage = result.rows[0];
 
-    // WebSocket Broadcasting
-    try {
-      const io = global.io;
-      if (io) {
-        const broadcastEvent = {
-          type: 'new',
-          message: newMessage,
-          timestamp: new Date().toISOString()
-        };
+    // Send WhatsApp Notifications if enabled
+    if (send_whatsapp_notification && is_active) {
+      try {
+        const result = await sendBroadcastNotification({
+          title,
+          message: messageContent,
+          type,
+          target_all,
+          target_areas,
+          target_mitra,
+          whatsapp_template_id
+        });
 
-        // Broadcast to all customer rooms
-        io.emit('broadcast:new', broadcastEvent);
-
-        // Broadcast to specific regions if targeted
-        if (target_areas && !target_all) {
-          target_areas.forEach(region => {
-            io.to(`region-${region}`).emit('broadcast:new', broadcastEvent);
-          });
-        }
-
-        // Broadcast to all customers if target_all is true
-        if (target_all) {
-          io.emit('broadcast:new', broadcastEvent);
-        }
-
-        logger.info(`📡 Broadcast message sent to ${target_all ? 'all customers' : target_areas?.length + ' regions'}: ${title}`);
+        logger.info(`📱 WhatsApp broadcast completed: ${result.sent} sent, ${result.failed} failed`);
+      } catch (waError) {
+        logger.error('WhatsApp broadcast error:', waError);
+        // Don't fail the request if WhatsApp fails
       }
-    } catch (wsError) {
-      logger.error('WebSocket broadcast error:', wsError);
     }
+
+    // WebSocket Broadcasting
+    broadcastWebSocket(newMessage, 'new');
 
     // Send Push Notifications if enabled
     if (send_push_notification) {
@@ -248,6 +248,10 @@ router.put('/:id', async (req, res) => {
       updateFields.push(`target_areas = $${paramIndex++}`);
       values.push(target_all ? null : JSON.stringify(target_areas));
     }
+    if (target_mitra !== undefined) {
+      updateFields.push(`target_mitra = $${paramIndex++}`);
+      values.push(target_all ? null : JSON.stringify(target_mitra));
+    }
     if (target_all !== undefined) {
       updateFields.push(`target_all = $${paramIndex++}`);
       values.push(target_all);
@@ -286,34 +290,7 @@ router.put('/:id', async (req, res) => {
     const updatedMessage = result.rows[0];
 
     // WebSocket Broadcasting for updates
-    try {
-      const io = global.io;
-      if (io) {
-        const broadcastEvent = {
-          type: 'update',
-          message: updatedMessage,
-          timestamp: new Date().toISOString()
-        };
-
-        // Broadcast to all customers
-        io.emit('broadcast:update', broadcastEvent);
-
-        // Broadcast to specific regions if targeted
-        if (updatedMessage.target_areas && !updatedMessage.target_all) {
-          const targetAreas = Array.isArray(updatedMessage.target_areas)
-            ? updatedMessage.target_areas
-            : JSON.parse(updatedMessage.target_areas || '[]');
-
-          targetAreas.forEach(region => {
-            io.to(`region-${region}`).emit('broadcast:update', broadcastEvent);
-          });
-        }
-
-        logger.info(`📡 Broadcast message updated: ID=${updatedMessage.id}, Active=${updatedMessage.is_active}`);
-      }
-    } catch (wsError) {
-      logger.error('WebSocket update broadcast error:', wsError);
-    }
+    broadcastWebSocket(updatedMessage, 'update');
 
     res.json({
       success: true,
@@ -352,23 +329,7 @@ router.delete('/:id', async (req, res) => {
     await query(deleteQuery, [messageId]);
 
     // WebSocket Broadcasting for deletion
-    try {
-      const io = global.io;
-      if (io) {
-        const broadcastEvent = {
-          type: 'delete',
-          message: { id: messageId }, // Send minimal data since message is deleted
-          timestamp: new Date().toISOString()
-        };
-
-        // Broadcast to all customers
-        io.emit('broadcast:delete', broadcastEvent);
-
-        logger.info(`📡 Broadcast message deleted: ID=${messageId}`);
-      }
-    } catch (wsError) {
-      logger.error('WebSocket delete broadcast error:', wsError);
-    }
+    broadcastWebSocket({ id: messageId }, 'delete');
 
     res.json({
       success: true,
@@ -563,12 +524,12 @@ router.post('/schedule', async (req, res) => {
 
     const insertQuery = `
       INSERT INTO broadcast_messages (
-        title, message, type, priority, target_areas, target_all,
+        title, message, type, priority, target_areas, target_mitra, target_all,
         is_scheduled, scheduled_start_time, scheduled_end_time,
         auto_activate, auto_deactivate, send_push_notification,
         expires_at, maintenance_type, estimated_duration, affected_services,
         contact_person, backup_plan, created_by
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
       RETURNING *
     `;
 
@@ -578,6 +539,7 @@ router.post('/schedule', async (req, res) => {
       type || 'info',
       priority || 'medium',
       target_all ? null : JSON.stringify(target_areas || []),
+      target_all ? null : JSON.stringify(target_mitra || []),
       target_all,
       true,
       scheduled_start_time,
@@ -609,6 +571,122 @@ router.post('/schedule', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Terjadi kesalahan saat menjadwalkan pesan broadcast'
+    });
+  }
+});
+
+/**
+ * GET /api/v1/broadcast/payment-settings
+ * Get payment settings including bank accounts (for WhatsApp templates)
+ */
+router.get('/payment-settings', async (req, res) => {
+  try {
+    const settingsManager = require('../../../config/settingsManager');
+
+    // Get payment settings from app_config
+    let paymentSettings = settingsManager.getSetting('payment_settings') || settingsManager.getSetting('paymentSettings');
+
+    if (typeof paymentSettings === 'string') {
+      try {
+        paymentSettings = JSON.parse(paymentSettings);
+      } catch (e) {
+        paymentSettings = {};
+      }
+    }
+
+    // If no bank_accounts in settings, try to get from payment_gateway_settings table
+    if (!paymentSettings || !paymentSettings.bank_accounts || paymentSettings.bank_accounts.length === 0) {
+      const result = await query(
+        "SELECT config FROM payment_gateway_settings WHERE gateway = 'manual' LIMIT 1"
+      );
+
+      if (result.rows.length > 0) {
+        let conf = result.rows[0].config;
+        if (typeof conf === 'string') {
+          try { conf = JSON.parse(conf); } catch (e) { conf = {}; }
+        }
+        if (conf.bank_accounts) {
+          paymentSettings = {
+            ...paymentSettings,
+            bank_accounts: conf.bank_accounts
+          };
+        }
+      }
+    }
+
+    // Format bank accounts for WhatsApp template
+    let formattedBankAccounts = '';
+    if (paymentSettings && paymentSettings.bank_accounts && paymentSettings.bank_accounts.length > 0) {
+      formattedBankAccounts = paymentSettings.bank_accounts.map((account, index) => {
+        const emoji = ['💳', '🏦', '🏛️'][index % 3];
+        return `${emoji} ${account.bank_name}: ${account.account_number}\n   a.n ${account.account_name}`;
+      }).join('\n\n');
+    }
+
+    res.json({
+      success: true,
+      data: {
+        bank_accounts: paymentSettings?.bank_accounts || [],
+        formatted_bank_accounts: formattedBankAccounts,
+        payment_methods: paymentSettings?.payment_methods || []
+      }
+    });
+  } catch (error) {
+    logger.error('Error fetching payment settings:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch payment settings',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/v1/broadcast/customers-preview
+ * Get preview of customers data for broadcast (with sample data)
+ */
+router.get('/customers-preview', async (req, res) => {
+  try {
+    const { limit = 5 } = req.query;
+
+    // Get sample customers for preview
+    const result = await query(`
+      SELECT
+        c.id,
+        c.nama_customer,
+        c.no_layanan,
+        c.phone,
+        c.alamat,
+        c.status,
+        p.name as package_name,
+        p.price as package_price,
+        p.profile
+      FROM customers c
+      LEFT JOIN packages p ON c.package_id = p.id
+      WHERE c.status = 'active'
+      ORDER BY c.created_at DESC
+      LIMIT $1
+    `, [limit]);
+
+    const customers = result.rows.map(c => ({
+      ...c,
+      nama_pelanggan: c.nama_customer,
+      profile: c.profile || c.package_name,
+      harga: c.package_price ? `Rp ${Math.round(c.package_price).toLocaleString('id-ID')}` : 'Rp 0',
+      phone: c.phone || '62xxxxxxxx',
+      jenis_tagihan: c.billing_cycle || 'Bulanan'
+    }));
+
+    res.json({
+      success: true,
+      data: customers
+    });
+  } catch (error) {
+    logger.error('Error fetching customers preview:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch customers preview',
+      error: error.message
     });
   }
 });

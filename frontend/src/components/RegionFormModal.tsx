@@ -12,6 +12,12 @@ interface RegionFormData {
   district: string
   regency: string
   province: string
+  mitra_id: string
+}
+
+interface MitraOption {
+  id: string
+  name: string
 }
 
 interface RegionFormModalProps {
@@ -24,7 +30,9 @@ interface RegionFormModalProps {
     district: string
     regency: string
     province: string
+    mitra_id?: string
   }
+  mitraList?: MitraOption[]
   isLoading?: boolean
 }
 
@@ -33,13 +41,15 @@ const RegionFormModal = ({
   onClose,
   onSubmit,
   editingRegion,
+  mitraList = [],
   isLoading = false
 }: RegionFormModalProps) => {
   const [formData, setFormData] = useState<RegionFormData>({
     name: '',
     district: '',
     regency: '',
-    province: ''
+    province: '',
+    mitra_id: ''
   })
   const [submitting, setSubmitting] = useState(false)
 
@@ -50,14 +60,16 @@ const RegionFormModal = ({
         name: editingRegion.name || '',
         district: editingRegion.district || '',
         regency: editingRegion.regency || '',
-        province: editingRegion.province || ''
+        province: editingRegion.province || '',
+        mitra_id: editingRegion.mitra_id || ''
       })
     } else {
       setFormData({
         name: '',
         district: '',
         regency: '',
-        province: ''
+        province: '',
+        mitra_id: ''
       })
     }
   }, [editingRegion, isOpen])
@@ -80,7 +92,8 @@ const RegionFormModal = ({
           name: '',
           district: '',
           regency: '',
-          province: ''
+          province: '',
+          mitra_id: ''
         })
       }
     } catch (error) {
@@ -149,6 +162,22 @@ const RegionFormModal = ({
               placeholder="Contoh: DKI Jakarta"
               disabled={submitting}
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="region-mitra">Mitra</Label>
+            <select
+              id="region-mitra"
+              value={formData.mitra_id}
+              onChange={(e) => setFormData({ ...formData, mitra_id: e.target.value })}
+              disabled={submitting}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            >
+              <option value="">-- Tanpa Mitra --</option>
+              {mitraList.map(m => (
+                <option key={m.id} value={m.id}>{m.name}</option>
+              ))}
+            </select>
           </div>
 
           <DialogFooter className="flex gap-2 pt-4">

@@ -23,7 +23,7 @@ console.log(`📍 Connecting to: ${config.database}@${config.host}:${config.port
 
 async function initializeDatabase() {
     const client = await pool.connect();
-    
+
     try {
         // Start transaction
         await client.query('BEGIN');
@@ -46,7 +46,7 @@ async function initializeDatabase() {
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
-        
+
         // Create index on active packages
         await client.query(`
             CREATE INDEX IF NOT EXISTS idx_packages_active 
@@ -280,10 +280,86 @@ async function initializeDatabase() {
         console.log('✅ system_logs table created\n');
 
         // ============================================
+        // 10. BILLING SETTINGS & SCHEMA UPDATES
+        // ============================================
+        console.log('📊 Creating billing_settings and updating schema...');
+
+        // Billing Settings Table
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS billing_settings (
+                id SERIAL PRIMARY KEY,
+                billing_cycle_type VARCHAR(20) NOT NULL DEFAULT 'profile',
+                invoice_advance_days INTEGER DEFAULT 5,
+                profile_default_period INTEGER DEFAULT 30,
+                fixed_day INTEGER DEFAULT 1,
+                monthly_due_date INTEGER DEFAULT 20,
+                reconnection_method VARCHAR(50) DEFAULT 'payment_date',
+                suspension_time VARCHAR(10) DEFAULT '10:00',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT chk_billing_cycle_type CHECK (billing_cycle_type IN ('profile', 'fixed', 'monthly')),
+                CONSTRAINT chk_invoice_advance_days CHECK (invoice_advance_days > 0),
+                CONSTRAINT chk_profile_default_period CHECK (profile_default_period > 0),
+                CONSTRAINT chk_fixed_day CHECK (fixed_day >= 1 AND fixed_day <= 28)
+            )
+        `);
+
+        await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_settings_single ON billing_settings ((1))`);
+
+        // Insert default settings if empty
+        await client.query(`
+            INSERT INTO billing_settings (billing_cycle_type, invoice_advance_days, profile_default_period, fixed_day, monthly_due_date, reconnection_method, suspension_time)
+            SELECT 'profile', 5, 30, 1, 20, 'payment_date', '10:00'
+            WHERE NOT EXISTS (SELECT 1 FROM billing_settings)
+        `);
+
+        // Update Customers Table (Add siklus)
+        await client.query(`
+            DO $$ 
+            BEGIN 
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='customers' AND column_name='siklus') THEN 
+                    ALTER TABLE customers ADD COLUMN siklus VARCHAR(20) DEFAULT 'profile';
+                    ALTER TABLE customers ADD CONSTRAINT chk_siklus_type CHECK (siklus IN ('profile', 'fixed', 'monthly'));
+                END IF;
+            END $$;
+        `);
+
+        // Update Packages Table (Add billing_cycle_compatible)
+        await client.query(`
+            DO $$ 
+            BEGIN 
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='packages' AND column_name='billing_cycle_compatible') THEN 
+                    ALTER TABLE packages ADD COLUMN billing_cycle_compatible BOOLEAN DEFAULT true;
+                END IF;
+            END $$;
+        `);
+
+        // Helper Functions
+        await client.query(`
+            CREATE OR REPLACE FUNCTION get_billing_settings()
+            RETURNS TABLE (
+                billing_cycle_type VARCHAR(20),
+                invoice_advance_days INTEGER,
+                profile_default_period INTEGER,
+                fixed_day INTEGER,
+                suspension_time VARCHAR(10)
+            ) AS $$
+            BEGIN
+                RETURN QUERY
+                SELECT billing_cycle_type, invoice_advance_days, profile_default_period, fixed_day, suspension_time
+                FROM billing_settings
+                LIMIT 1;
+            END;
+            $$ LANGUAGE plpgsql;
+        `);
+
+        console.log('✅ Billing settings and schema updates applied\n');
+
+        // ============================================
         // CREATE TRIGGERS FOR updated_at
         // ============================================
         console.log('📊 Creating update triggers...');
-        
+
         // Create trigger function
         await client.query(`
             CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -297,8 +373,8 @@ async function initializeDatabase() {
 
         // Apply triggers to tables
         const tablesWithUpdatedAt = [
-            'packages', 'customers', 'invoices', 'nas_servers', 
-            'mikrotik_servers', 'trouble_reports', 'installations'
+            'packages', 'customers', 'invoices', 'nas_servers',
+            'mikrotik_servers', 'trouble_reports', 'installations', 'billing_settings'
         ];
 
         for (const table of tablesWithUpdatedAt) {

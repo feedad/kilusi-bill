@@ -26,10 +26,11 @@ import {
   Tag,
   HeadsetIcon,
   RefreshCw,
-  Eye
+  Eye,
+  Save
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
-import { api } from '@/lib/api'
+import { adminApi } from '@/lib/api-clients'
 
 interface Ticket {
   id: number
@@ -46,11 +47,19 @@ interface Ticket {
   priority: 'low' | 'medium' | 'high' | 'urgent'
   status: 'open' | 'in_progress' | 'pending' | 'resolved' | 'closed'
   assigned_agent?: string
+  assigned_to_user?: number
+  technician_name?: string
   resolution_time?: number
   customer_rating?: number
   created_at: string
   updated_at: string
   package_id?: string
+}
+
+interface Technician {
+  id: number
+  name: string
+  phone?: string
 }
 
 interface TicketMessage {
@@ -74,21 +83,44 @@ export default function TicketDetailPage() {
 
   const [ticket, setTicket] = useState<Ticket | null>(null)
   const [messages, setMessages] = useState<TicketMessage[]>([])
+  const [technicians, setTechnicians] = useState<Technician[]>([])
   const [loading, setLoading] = useState(true)
   const [newMessage, setNewMessage] = useState('')
   const [sendingMessage, setSendingMessage] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
 
+  // Form state for ticket management (separate from ticket data)
+  const [ticketStatus, setTicketStatus] = useState<string>('')
+  const [selectedTechnician, setSelectedTechnician] = useState<string>('')
+  const [savingChanges, setSavingChanges] = useState(false)
+
   useEffect(() => {
     fetchTicketDetails()
+    fetchTechnicians()
   }, [ticketId, refreshKey])
+
+  const fetchTechnicians = async () => {
+    try {
+      const response = await adminApi.get('/api/v1/installations/technician/list')
+      if (response.data.success) {
+        setTechnicians(response.data.data || [])
+      }
+    } catch (error) {
+      console.error('Error fetching technicians:', error)
+    }
+  }
 
   const fetchTicketDetails = async () => {
     try {
       setLoading(true)
-      const response = await api.get(`/support/tickets/${ticketId}`)
-      setTicket(response.data.data.ticket)
+      const response = await adminApi.get(`/api/v1/support/tickets/${ticketId}`)
+      const ticketData = response.data.data.ticket
+      setTicket(ticketData)
       setMessages(response.data.data.messages || [])
+
+      // Initialize form state
+      setTicketStatus(ticketData.status)
+      setSelectedTechnician(ticketData.assigned_to_user?.toString() || '')
     } catch (error: any) {
       console.error('Error fetching ticket details:', error)
       toast.error('❌ Gagal memuat detail tiket')
@@ -149,7 +181,7 @@ export default function TicketDetailPage() {
     const date = new Date(dateString)
     return date.toLocaleDateString('id-ID', {
       year: 'numeric',
-      month: 'long',
+      month: '2-digit',
       day: 'numeric',
       hour: '2-digit',
       minute: '2-digit'
@@ -165,7 +197,7 @@ export default function TicketDetailPage() {
   const updateTicketStatus = async (newStatus: string) => {
     console.log('🔄 updateTicketStatus called with:', newStatus)
     try {
-      const response = await api.put(`/support/tickets/${ticketId}`, { status: newStatus })
+      const response = await adminApi.put(`/api/v1/support/tickets/${ticketId}`, { status: newStatus })
       console.log('✅ Status update successful:', response.data)
       toast.success('✅ Status tiket berhasil diperbarui')
       setRefreshKey(prev => prev + 1)
@@ -177,10 +209,55 @@ export default function TicketDetailPage() {
     }
   }
 
+  // Save all ticket management changes at once
+  const saveTicketChanges = async () => {
+    if (!ticket) return
+
+    setSavingChanges(true)
+    try {
+      const updates: any = {}
+
+      // Only include fields that have changed
+      if (ticketStatus !== ticket.status) {
+        updates.status = ticketStatus
+      }
+
+      // Handle technician assignment
+      const currentTechnicianId = ticket.assigned_to_user?.toString() || ''
+      if (selectedTechnician !== currentTechnicianId) {
+        if (selectedTechnician) {
+          updates.assigned_to_user = parseInt(selectedTechnician)
+          // Auto-set status to in_progress when assigning technician
+          if (ticket.status === 'open' && !ticket.assigned_to_user) {
+            updates.status = 'in_progress'
+          }
+        } else {
+          // Clearing technician assignment
+          updates.assigned_to_user = null
+        }
+      }
+
+      if (Object.keys(updates).length === 0) {
+        toast.info('ℹ️ Tidak ada perubahan untuk disimpan')
+        return
+      }
+
+      await adminApi.put(`/api/v1/support/tickets/${ticketId}`, updates)
+      toast.success('✅ Perubahan berhasil disimpan')
+      setRefreshKey(prev => prev + 1)
+    } catch (error: any) {
+      console.error('Error saving ticket changes:', error)
+      toast.error('❌ Gagal menyimpan perubahan')
+    } finally {
+      setSavingChanges(false)
+    }
+  }
+
   const assignAgent = async (agentName: string) => {
+    // Deprecated - use assignTechnician instead
     console.log('👤 assignAgent called with:', agentName)
     try {
-      await api.put(`/support/tickets/${ticketId}`, { assigned_agent: agentName })
+      await adminApi.put(`/api/v1/support/tickets/${ticketId}`, { assigned_agent: agentName })
       console.log('✅ Agent assignment successful')
       toast.success('✅ Tiket berhasil ditugaskan')
       setRefreshKey(prev => prev + 1)
@@ -200,7 +277,7 @@ export default function TicketDetailPage() {
 
     try {
       setSendingMessage(true)
-      await api.post(`/support/tickets/${ticketId}/messages`, {
+      await adminApi.post(`/api/v1/support/tickets/${ticketId}/messages`, {
         message: newMessage,
         sender_type: 'agent',
         sender_name: 'Admin Support'
@@ -429,8 +506,8 @@ export default function TicketDetailPage() {
               <div className="relative">
                 <label className="text-sm font-medium">Status</label>
                 <Select
-                  value={ticket.status}
-                  onValueChange={updateTicketStatus}
+                  value={ticketStatus}
+                  onValueChange={setTicketStatus}
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue />
@@ -445,35 +522,62 @@ export default function TicketDetailPage() {
                 </Select>
               </div>
 
-              {/* Agent Assignment */}
+              {/* Technician Assignment */}
               <div className="relative">
-                <label className="text-sm font-medium">Penugasan</label>
+                <label className="text-sm font-medium">Penugasan Teknisi</label>
                 <Select
-                  value={ticket.assigned_agent || ''}
-                  onValueChange={assignAgent}
+                  value={selectedTechnician}
+                  onValueChange={(value) => setSelectedTechnician(value === 'none' ? '' : value)}
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Pilih agen" />
+                    <SelectValue placeholder="Pilih teknisi" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Admin">Admin</SelectItem>
-                    <SelectItem value="Support Agent 1">Support Agent 1</SelectItem>
-                    <SelectItem value="Support Agent 2">Support Agent 2</SelectItem>
-                    <SelectItem value="Technical Team">Technical Team</SelectItem>
-                    <SelectItem value="Billing Team">Billing Team</SelectItem>
+                    <SelectItem value="none">-- Tidak Ada --</SelectItem>
+                    {technicians.length === 0 ? (
+                      <SelectItem value="none" disabled>Tidak ada teknisi tersedia</SelectItem>
+                    ) : (
+                      technicians.map((tech) => (
+                        <SelectItem key={tech.id} value={tech.id.toString()}>
+                          {tech.name} {tech.phone ? `(${tech.phone})` : ''}
+                        </SelectItem>
+                      ))
+                    )}
                   </SelectContent>
                 </Select>
+                {ticket.assigned_to_user && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Saat ini: {ticket.technician_name || `Teknisi #${ticket.assigned_to_user}`}
+                  </p>
+                )}
               </div>
 
-              {ticket.assigned_agent && (
-                <div className="text-sm">
-                  <span className="font-medium">Ditugaskan ke: </span>
-                  <span className="text-blue-600">{ticket.assigned_agent}</span>
-                </div>
-              )}
+              {/* Save Button */}
+              <div className="pt-2 border-t">
+                <Button
+                  onClick={saveTicketChanges}
+                  disabled={savingChanges || (
+                    ticketStatus === ticket.status &&
+                    selectedTechnician === (ticket.assigned_to_user?.toString() || '')
+                  )}
+                  className="w-full"
+                >
+                  {savingChanges ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      Menyimpan...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="h-4 w-4 mr-2" />
+                      Update
+                    </>
+                  )}
+                </Button>
+              </div>
 
               {ticket.resolution_time && (
-                <div className="text-sm">
+                <div className="text-sm pt-2 border-t">
                   <span className="font-medium">Waktu Resolusi: </span>
                   <span className="text-green-600">{formatDuration(ticket.resolution_time)}</span>
                 </div>

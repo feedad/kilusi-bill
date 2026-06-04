@@ -384,16 +384,22 @@ class CustomerPortalAPI {
   }
 
   async updateSSID(ssid: string): Promise<CustomerPortalResponse<any>> {
-    return this.request('/api/v1/customer-auth-nextjs/update-ssid', {
-      method: 'POST',
-      body: { ssid },
+    return this.request('/api/v1/customer-radius/ssid', {
+      method: 'PUT',
+      body: { newSSID: ssid },
     })
   }
 
   async updatePassword(password: string): Promise<CustomerPortalResponse<any>> {
-    return this.request('/api/v1/customer-auth-nextjs/update-password', {
-      method: 'POST',
-      body: { password },
+    return this.request('/api/v1/customer-radius/wifi-password', {
+      method: 'PUT',
+      body: { newPassword: password },
+    })
+  }
+
+  async rebootDevice(): Promise<CustomerPortalResponse<any>> {
+    return this.request('/api/v1/customer-radius/reboot', {
+      method: 'POST'
     })
   }
 

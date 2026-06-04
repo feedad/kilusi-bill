@@ -3,6 +3,23 @@ const router = express.Router();
 const CustomerService = require('../../../services/customer-service');
 const ReferralService = require('../../../services/referral-service');
 const { logger } = require('../../../config/logger');
+const { query, getOne } = require('../../../config/database');
+
+// Helper function to get package data
+async function getPackageData(packageId) {
+    if (!packageId) return null;
+    try {
+        const result = await getOne(`
+            SELECT id, name, price, speed
+            FROM packages
+            WHERE id = $1
+        `, [packageId]);
+        return result;
+    } catch (error) {
+        logger.error(`Error fetching package data: ${error.message}`);
+        return null;
+    }
+}
 
 // POST /api/v1/public/register
 router.post('/register', async (req, res) => {
@@ -21,7 +38,7 @@ router.post('/register', async (req, res) => {
         // We set basic defaults for self-registration
         const customerData = {
             ...data,
-            status: 'pending', // Pending activation/survey
+            status: 'waiting', // Waiting for admin review before installation
             billing_type: 'postpaid'
         };
 
@@ -67,6 +84,42 @@ router.post('/register', async (req, res) => {
             await TelegramService.sendNewRegistrationNotification(newCustomer);
         } catch (notifError) {
             logger.error(`Failed to send new registration notification: ${notifError.message}`);
+            // Non-blocking error
+        }
+
+        // 4. Send WhatsApp notification to customer
+        try {
+            const whatsappNotifications = require('../../../config/whatsapp-notifications');
+            const packageData = data.package_id ? await getPackageData(data.package_id) : null;
+
+            // Send registration submitted notification
+            await whatsappNotifications.sendRegistrationSubmittedNotification(
+                newCustomer.phone,
+                {
+                    customer_name: newCustomer.name,
+                    package_name: packageData?.name || 'Paket dipilih',
+                    registration_date: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })
+                }
+            );
+        } catch (notifError) {
+            logger.error(`Failed to send WhatsApp registration notification: ${notifError.message}`);
+            // Non-blocking error
+        }
+
+        // 5. Send notification to admins about new registration
+        try {
+            const whatsappNotifications = require('../../../config/whatsapp-notifications');
+            await whatsappNotifications.notifyAdminsNewRegistration({
+                customerName: newCustomer.name,
+                customerPhone: newCustomer.phone,
+                customerEmail: newCustomer.email,
+                address: newCustomer.address || newCustomer.installation_address,
+                packageName: packageData?.name || null,
+                registrationDate: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })
+            });
+            logger.info(`📱 Admins notified about new registration from ${newCustomer.name}`);
+        } catch (notifError) {
+            logger.error(`Failed to send admin notification for registration:`, notifError.message);
             // Non-blocking error
         }
 

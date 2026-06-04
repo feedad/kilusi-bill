@@ -70,6 +70,10 @@ router.put('/settings', async (req, res) => {
             fixed_day
         });
 
+        // Reschedule dynamic cron jobs with new settings
+        const scheduler = require('../../../config/scheduler');
+        scheduler.rescheduleDynamicJobs().catch(err => logger.error('Failed to reschedule cron jobs:', err));
+
         res.json({
             success: true,
             data: {
@@ -279,7 +283,7 @@ router.get('/simulation', async (req, res) => {
         };
 
         // Monthly Cycle
-        const monthlyIsolir = billingCycleService.calculateMonthlyIsolirDate(baseDate);
+        const monthlyIsolir = await billingCycleService.calculateMonthlyIsolirDate(baseDate);
         const monthlyInvoice = await billingCycleService.calculateInvoiceDate(monthlyIsolir, 'monthly');
 
         simulations.monthly = {

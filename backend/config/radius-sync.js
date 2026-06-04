@@ -25,20 +25,26 @@ async function syncCustomersToRadius() {
           continue;
         }
         
-        // Skip jika customer di-isolir (tidak aktif)
-        if (customer.isolir_status === 'isolated') {
-          logger.info(`⏭️  Skipping isolated customer: ${customer.username}`);
-          // Hapus dari RADIUS jika ada
-          await radiusDb.deleteRadiusUser(customer.username);
-          continue;
+        // Tentukan group berdasarkan status
+        let groupName;
+        if (customer.status === 'suspended') {
+          // Suspended customer masuk group ISOLIR
+          groupName = 'ISOLIR';
+        } else if (!customer.status || customer.status === 'pending' || customer.status === 'waiting') {
+          // No status, pending, waiting → should NOT have active RADIUS
+          groupName = 'ISOLIR';
+        } else {
+          // Active customer gunakan package group
+          groupName = customer.package_group || 'default';
         }
-        
-        // Upsert user ke RADIUS
+
+        // Upsert user ke RADIUS dengan group yang sesuai
         const success = await radiusDb.upsertRadiusUser(
           uname,
-          pwd
+          pwd,
+          groupName
         );
-        
+
         if (success) {
           syncCount++;
           
@@ -157,16 +163,28 @@ async function syncCustomerToRadius(customerData) {
       logger.warn('Cannot sync customer: missing PPPoE/portal username or password');
       return false;
     }
-    
+
     // Skip jika customer di-isolir
     if (customerData.isolir_status === 'isolated') {
       logger.info(`Removing isolated customer from RADIUS: ${uname}`);
       await radiusDb.deleteRadiusUser(uname);
       return true;
     }
-    
-    // Upsert user ke RADIUS
-    const success = await radiusDb.upsertRadiusUser(uname, pwd);
+
+    // Tentukan group berdasarkan status dan package
+    let groupName;
+    if (customerData.status === 'suspended') {
+      groupName = 'ISOLIR';
+    } else if (!customerData.status || customerData.status === 'pending' || customerData.status === 'waiting') {
+      // No status, pending or waiting → should NOT have active RADIUS access
+      groupName = 'ISOLIR';
+    } else {
+      // Gunakan package_group atau default ke UPTO-10M
+      groupName = customerData.package_group || 'UPTO-10M';
+    }
+
+    // Upsert user ke RADIUS dengan group yang sesuai
+    const success = await radiusDb.upsertRadiusUser(uname, pwd, groupName);
     
     if (success) {
       // Set reply attributes
@@ -475,6 +493,148 @@ async function removePackageFromRadius(packageId) {
   }
 }
 
+/**
+ * Voucher Support Functions
+ * These functions handle RADIUS entries for hotspot vouchers
+ */
+
+/**
+ * Add entry to radcheck for voucher authentication
+ */
+async function addVoucherRadCheck({ username, attribute, op, value }) {
+  try {
+    await radiusDb.query(`
+      INSERT INTO radcheck (username, attribute, op, value)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (username, attribute, op, value) DO UPDATE SET value = EXCLUDED.value
+    `, [username, attribute, op, value]);
+    logger.debug(`✅ RADIUS radcheck added for voucher: ${username}`);
+    return true;
+  } catch (error) {
+    logger.error(`Error adding radcheck for voucher ${username}: ${error.message}`);
+    return false;
+  }
+}
+
+/**
+ * Add entry to radreply for voucher attributes (rate limit, session timeout)
+ */
+async function addVoucherRadReply({ username, attribute, op, value }) {
+  try {
+    // Delete existing entry if any, then insert (upsert without unique constraint)
+    await radiusDb.query(
+      'DELETE FROM radreply WHERE username = $1 AND attribute = $2',
+      [username, attribute]
+    );
+    await radiusDb.query(
+      'INSERT INTO radreply (username, attribute, op, value) VALUES ($1, $2, $3, $4)',
+      [username, attribute, op, value]
+    );
+    logger.debug(`✅ RADIUS radreply added for voucher: ${username} - ${attribute}: ${value}`);
+    return true;
+  } catch (error) {
+    logger.error(`Error adding radreply for voucher ${username}: ${error.message}`);
+    return false;
+  }
+}
+
+/**
+ * Add voucher user to RADIUS group
+ */
+async function addVoucherToGroup({ username, groupname }) {
+  try {
+    await radiusDb.query(`
+      INSERT INTO radusergroup (username, groupname, priority)
+      VALUES ($1, $2, 1)
+      ON CONFLICT (username, groupname) DO NOTHING
+    `, [username, groupname]);
+    logger.debug(`✅ Voucher ${username} added to group: ${groupname}`);
+    return true;
+  } catch (error) {
+    logger.error(`Error adding voucher to group: ${error.message}`);
+    return false;
+  }
+}
+
+/**
+ * Delete voucher user from RADIUS (cleanup)
+ */
+async function deleteVoucherUser(username) {
+  try {
+    await radiusDb.query('DELETE FROM radcheck WHERE username = $1', [username]);
+    await radiusDb.query('DELETE FROM radreply WHERE username = $1', [username]);
+    await radiusDb.query('DELETE FROM radusergroup WHERE username = $1', [username]);
+    logger.info(`✅ Voucher user deleted from RADIUS: ${username}`);
+    return true;
+  } catch (error) {
+    logger.error(`Error deleting voucher user from RADIUS: ${error.message}`);
+    return false;
+  }
+}
+
+/**
+ * Create complete RADIUS entries for hotspot voucher
+ * This creates all necessary entries for voucher authentication
+ */
+async function createVoucherRadiusEntries(voucher) {
+  try {
+    const { username, password, speed_limit, duration_hours, mikrotik_profile = 'HOTSPOT_DEFAULT' } = voucher;
+
+    // 1. Add authentication (username/password)
+    await addVoucherRadCheck({
+      username,
+      attribute: 'Cleartext-Password',
+      op: ':=',
+      value: password
+    });
+
+    // 2. Set Auth-Type to Accept
+    await addVoucherRadCheck({
+      username,
+      attribute: 'Auth-Type',
+      op: ':=',
+      value: 'Accept'
+    });
+
+    // 3. Set rate limit if specified
+    if (speed_limit) {
+      // Parse speed_limit like "10M/10M" or "10M/5M"
+      await addVoucherRadReply({
+        username,
+        attribute: 'Mikrotik-Rate-Limit',
+        op: ':=',
+        value: speed_limit
+      });
+    }
+
+    // 4. Set session timeout (use provided session_timeout or calculate from duration_hours)
+    const sessionTimeout = voucher.session_timeout || (duration_hours * 3600);
+    await addVoucherRadReply({
+      username,
+      attribute: 'Session-Timeout',
+      op: ':=',
+      value: sessionTimeout.toString()
+    });
+
+    // 5. Add to hotspot group
+    await addVoucherToGroup({
+      username,
+      groupname: mikrotik_profile
+    });
+
+    // Convert session timeout to readable format
+    const hours = Math.floor(sessionTimeout / 3600);
+    const days = Math.floor(hours / 24);
+    let durationText = hours > 24 ? `${days} hari` : `${hours} jam`;
+
+    logger.info(`✅ Voucher RADIUS entries created: ${username} (${durationText}, ${speed_limit})`);
+    return true;
+  } catch (error) {
+    logger.error(`Error creating voucher RADIUS entries: ${error.message}`);
+    return false;
+  }
+}
+
 module.exports = {
   syncCustomersToRadius,
   syncCustomerToRadius,
@@ -484,5 +644,11 @@ module.exports = {
   autoSync,
   syncPackagesToRadius,
   syncPackageToRadius,
-  removePackageFromRadius
+  removePackageFromRadius,
+  // Voucher support
+  addVoucherRadCheck,
+  addVoucherRadReply,
+  addVoucherToGroup,
+  deleteVoucherUser,
+  createVoucherRadiusEntries
 };

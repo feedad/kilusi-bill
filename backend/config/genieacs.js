@@ -12,8 +12,8 @@ const CACHE_TTL = 30 * 60 * 1000; // 30 menit
 // Helper untuk membuat axios instance dinamis
 function getAxiosInstance() {
     const GENIEACS_URL = getSetting('genieacs_url', 'http://localhost:7557');
-    const GENIEACS_USERNAME = getSetting('genieacs_username', 'admin');
-    const GENIEACS_PASSWORD = getSetting('genieacs_password', 'admin');
+    const GENIEACS_USERNAME = getSetting('genieacs_username', 'acs');
+    const GENIEACS_PASSWORD = getSetting('genieacs_password', 'kilusiacs');
     return axios.create({
         baseURL: GENIEACS_URL,
         auth: {
@@ -604,8 +604,8 @@ const genieacsApi = {
         try {
             console.log(`Getting device info for device ID: ${deviceId}`);
             const GENIEACS_URL = getSetting('genieacs_url', 'http://localhost:7557');
-            const GENIEACS_USERNAME = getSetting('genieacs_username', 'admin');
-            const GENIEACS_PASSWORD = getSetting('genieacs_password', 'admin');
+            const GENIEACS_USERNAME = getSetting('genieacs_username', 'acs');
+            const GENIEACS_PASSWORD = getSetting('genieacs_password', 'kilusiacs');
             // Mendapatkan device detail
             const deviceResponse = await axios.get(`${GENIEACS_URL}/devices/${encodeURIComponent(deviceId)}`, {
                 auth: {
@@ -621,16 +621,160 @@ const genieacsApi = {
     },
 
     async getVirtualParameters(deviceId) {
-        try {
-            const axiosInstance = getAxiosInstance();
-            const response = await axiosInstance.get(`/devices/${encodeURIComponent(deviceId)}`);
-            return response.data.VirtualParameters || {};
-        } catch (error) {
-            console.error(`Error getting virtual parameters for device ${deviceId}:`, error.response?.data || error.message);
-            throw error;
-        }
-    },
+    try {
+      const axiosInstance = getAxiosInstance();
+      const response = await axiosInstance.get(`/devices/${encodeURIComponent(deviceId)}`);
+      return response.data.VirtualParameters || {};
+    } catch (error) {
+      console.error(`Error getting virtual parameters for device ${deviceId}:`, error.response?.data || error.message);
+      throw error;
+    }
+  },
+
+  // Helper untuk mendapatkan SSID real-time berdasarkan tipe ONU
+  async getWifiSSID(deviceId) {
+    try {
+      const device = await this.getDevice(deviceId);
+      const onuType = detectONUType(device);
+      const paths = getParameterPathsForONU(onuType).ssid_2_4g;
+
+      for (const path of paths) {
+        const val = getNestedValue(device, path);
+        if (val) return val;
+      }
+      return device.VirtualParameters?.SSID?._value || null;
+    } catch (e) {
+      return null;
+    }
+  },
+
+  async getDevicesByUsername(username) {
+    try {
+        const axiosInstance = getAxiosInstance();
+        // Search in various common TR-069 paths for PPPoE username
+        const query = {
+            $or: [
+                { "InternetGatewayDevice.WANDevice.[1].WANConnectionDevice.[1].WANPPPConnection.[1].Username": username },
+                { "InternetGatewayDevice.WANDevice.[1].WANConnectionDevice.[2].WANPPPConnection.[1].Username": username },
+                { "InternetGatewayDevice.WANDevice.[0].WANConnectionDevice.[0].WANPPPConnection.[0].Username": username },
+                { "Device.PPP.Interface.[1].Username": username },
+                { "VirtualParameters.pppoeUsername": username },
+                { "VirtualParameters.pppUsername": username }
+            ]
+        };
+        
+        const response = await axiosInstance.get('/devices', {
+            params: {
+                query: JSON.stringify(query)
+            }
+        });
+        
+        return response.data || [];
+    } catch (error) {
+        console.error(`Error getting devices by username ${username}:`, error.response?.data || error.message);
+        throw error;
+    }
+  }
 };
+
+// Parse WiFi connected devices (LAN hosts / AssociatedDevice) from GenieACS device object
+function parseConnectedDevices(device) {
+  const devices = [];
+  if (!device) return devices;
+
+  try {
+    // Strategy 1: InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.AssociatedDevice
+    const assocObj = device?.InternetGatewayDevice?.LANDevice?.['1']?.WLANConfiguration?.['1']?.AssociatedDevice;
+    if (assocObj && typeof assocObj === 'object') {
+      for (const key in assocObj) {
+        if (!isNaN(key)) {
+          const entry = assocObj[key];
+          const mac = entry?.MACAddress?._value || entry?.MACAddress || '-';
+          const hostname = entry?.HostName?._value || entry?.HostName || 'Unknown Device';
+          const ip = entry?.IPAddress?._value || entry?.IPAddress || '-';
+          const signal = entry?.SignalStrength?._value || entry?.SignalStrength || entry?.X_ZTE_COM_RSSI?._value || null;
+          devices.push({ mac, ip, name: hostname, signalStrength: signal ? parseInt(signal) : -50, source: 'AssociatedDevice' });
+        }
+      }
+    }
+
+    // Strategy 2: Device.WiFi.AccessPoint.1.AssociatedDevice (TR-181)
+    if (devices.length === 0) {
+      const apObj = device?.Device?.WiFi?.AccessPoint?.['1']?.AssociatedDevice;
+      if (apObj && typeof apObj === 'object') {
+        for (const key in apObj) {
+          if (!isNaN(key)) {
+            const entry = apObj[key];
+            const mac = entry?.MACAddress?._value || entry?.MACAddress || '-';
+            const hostname = entry?.HostName?._value || entry?.HostName || 'Unknown Device';
+            const signal = entry?.SignalStrength?._value || entry?.SignalStrength || null;
+            devices.push({ mac, ip: '-', name: hostname, signalStrength: signal ? parseInt(signal) : -50, source: 'AP_AssociatedDevice' });
+          }
+        }
+      }
+    }
+
+    // Strategy 3: InternetGatewayDevice.LANDevice.1.Hosts.Host (all LAN hosts)
+    if (devices.length === 0) {
+      const hostsObj = device?.InternetGatewayDevice?.LANDevice?.['1']?.Hosts?.Host;
+      if (hostsObj && typeof hostsObj === 'object') {
+        for (const key in hostsObj) {
+          if (!isNaN(key)) {
+            const entry = hostsObj[key];
+            const isActive = entry?.Active?._value !== false && entry?.Active?._value !== 'false';
+            const interfaceType = entry?.InterfaceType?._value || entry?.InterfaceType || '';
+            // Accept active hosts regardless of interface type (WiFi, Ethernet, etc)
+            if (isActive) {
+              const mac = entry?.MACAddress?._value || entry?.MACAddress || '-';
+              const hostname = entry?.HostName?._value || (typeof entry?.HostName === 'string' ? entry.HostName : '') || 'Unknown Device';
+              const ip = entry?.IPAddress?._value || entry?.IPAddress || '-';
+              devices.push({ mac, ip, name: hostname, signalStrength: -50, source: 'Hosts', interfaceType });
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Error parsing connected devices from GenieACS:', e.message);
+  }
+
+  return devices;
+}
+
+// Extract SSID from GenieACS device object (sync to DB later)
+function parseSSID(device) {
+  if (!device) return null;
+  try {
+    const paths = [
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID._value',
+      'Device.WiFi.SSID.1.SSID._value',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
+      'Device.WiFi.SSID.1.SSID'
+    ];
+    for (const path of paths) {
+      const val = getNestedValue(device, path);
+      if (val) return val;
+    }
+    return device.VirtualParameters?.SSID?._value || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Helper untuk mengambil nilai nested dari object device
+function getNestedValue(obj, path) {
+  try {
+    const parts = path.split('.');
+    let current = obj;
+    for (const part of parts) {
+      if (current[part] === undefined) return null;
+      current = current[part];
+    }
+    return current?._value || null;
+  } catch (e) {
+    return null;
+  }
+}
 
 // Fungsi untuk memeriksa nilai RXPower dari semua perangkat
 async function monitorRXPower(threshold = -27) {
@@ -1030,6 +1174,7 @@ async function updatePassword(phone, newPassword) {
 }
 
 module.exports = {
+    getAxiosInstance,
     getDevices: genieacsApi.getDevices,
     getDevice: genieacsApi.getDevice,
     getDeviceInfo: genieacsApi.getDeviceInfo,
@@ -1039,8 +1184,12 @@ module.exports = {
     reboot: genieacsApi.reboot,
     factoryReset: genieacsApi.factoryReset,
     getVirtualParameters: genieacsApi.getVirtualParameters,
+    getDevicesByUsername: genieacsApi.getDevicesByUsername,
+    getWifiSSID: genieacsApi.getWifiSSID,
     monitorRXPower,
     monitorOfflineDevices,
     updateSSID,
-    updatePassword
+    updatePassword,
+    parseConnectedDevices,
+    parseSSID
 };

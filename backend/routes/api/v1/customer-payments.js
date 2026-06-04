@@ -5,6 +5,12 @@ const { query } = require('../../../config/database');
 const { customerJwtAuth } = require('../../../middleware/customerJwtAuth');
 const { asyncHandler } = require('../../../middleware/response');
 const PaymentGatewayManager = require('../../../config/paymentGateway');
+const { getAllSettings } = require('../../../config/settingsManager');
+
+// Get portal URL from environment variable or use request-based fallback
+const getPortalUrl = (req) => {
+  return process.env.PORTAL_URL || `${req.protocol}://${req.get('host')}`;
+};
 
 // Initialize payment gateway manager
 const paymentGateway = new PaymentGatewayManager();
@@ -21,40 +27,144 @@ router.get('/methods', customerJwtAuth, asyncHandler(async (req, res) => {
     const customerId = getCustomerIdFromToken(req);
 
     let methods = [];
+    let manualMethods = [];
+
+    // Get payment settings from database
+    const settings = getAllSettings();
+    const paymentSettings = settings.payment_settings || {};
+
+    // Build manual payment methods from payment_settings
+    // Bank accounts
+    if (paymentSettings.bank_accounts && Array.isArray(paymentSettings.bank_accounts)) {
+      paymentSettings.bank_accounts
+        .filter(acc => acc.isActive !== false)
+        .forEach(acc => {
+          manualMethods.push({
+            id: `bank_${acc.id}`,
+            code: acc.bankName?.toLowerCase() || 'bank',
+            method: acc.bankName?.toUpperCase() || 'BANK',
+            type: 'manual_bank',
+            name: `${acc.bankName} - ${acc.accountNumber}`,
+            displayName: `${acc.bankName} - ${acc.accountNumber}`,
+            bankName: acc.bankName,
+            accountNumber: acc.accountNumber,
+            accountName: acc.accountName,
+            icon: 'building',
+            active: true,
+            requires_proof: true // Manual transfer requires proof upload
+          });
+        });
+    }
+
+    // E-wallets (manual, not via Tripay)
+    if (paymentSettings.ewallets && Array.isArray(paymentSettings.ewallets)) {
+      const providerLabels = {
+        'gopay': 'GoPay', 'GoPay': 'GoPay',
+        'ovo': 'OVO', 'OVO': 'OVO',
+        'dana': 'DANA', 'DANA': 'DANA',
+        'shopeepay': 'ShopeePay', 'ShopeePay': 'ShopeePay',
+        'linkaja': 'LinkAja', 'LinkAja': 'LinkAja',
+        'QRIS': 'QRIS', 'qris': 'QRIS'
+      };
+
+      paymentSettings.ewallets
+        .filter(wallet => wallet.isActive !== false)
+        .forEach(wallet => {
+          const label = providerLabels[wallet.provider] || wallet.provider || 'E-Wallet';
+          manualMethods.push({
+            id: `ewallet_${wallet.id}`,
+            code: wallet.provider || 'ewallet',
+            method: label,
+            type: 'manual_ewallet',
+            name: `${label} - ${wallet.phoneNumber}`,
+            displayName: `${label} - ${wallet.phoneNumber}`,
+            provider: wallet.provider,
+            phoneNumber: wallet.phoneNumber,
+            accountName: wallet.accountName,
+            icon: 'smartphone',
+            active: true,
+            requires_proof: true
+          });
+        });
+    }
+
+    // Cash payment method
+    manualMethods.push({
+      id: 'cash',
+      code: 'cash',
+      method: 'TUNAI',
+      type: 'manual_cash',
+      name: 'Tunai',
+      displayName: 'Bayar Tunai',
+      icon: 'banknote',
+      active: true,
+      requires_proof: true
+    });
 
     // Ensure gateway is initialized before use
     await paymentGateway.ensureInitialized();
 
-    // Get all available methods from active gateway
-    methods = await paymentGateway.getAvailablePaymentMethods(amount);
+    // Get all available methods from active gateway (Tripay, etc)
+    let gatewayMethods = [];
+    try {
+      gatewayMethods = await paymentGateway.getAvailablePaymentMethods(amount);
+      console.log(`[API] Tripay returned ${gatewayMethods?.length || 0} methods`);
 
-    // Filter methods based on amount if provided
+      // Filter out manual transfer methods from Tripay (we use our own manual methods from payment_settings)
+      // Tripay sometimes returns MANUAL_BCA, MANUAL_MANDIRI, etc. which we don't want since we have our own
+      gatewayMethods = gatewayMethods.filter(m => m.type !== 'manual_transfer' && m.type !== 'manual');
+      console.log(`[API] After filtering manual: ${gatewayMethods.length} methods`);
+    } catch (error) {
+      console.error('[API] Error getting Tripay methods:', error);
+      gatewayMethods = [];
+    }
+
+    // Combine manual methods with gateway methods
+    methods = [...manualMethods, ...gatewayMethods];
+
+    // Log Tripay methods for debugging
+    if (gatewayMethods && gatewayMethods.length > 0) {
+      console.log('[API] Tripay methods:', gatewayMethods.map(m => `${m.method} (${m.type})`).join(', '));
+    } else {
+      console.log('[API] No Tripay methods available - check Tripay configuration');
+    }
+
+    // Filter methods based on amount if provided (only for gateway methods)
     if (amount) {
       const amountNum = parseFloat(amount);
-      methods = methods.filter(method => {
+      // Manual methods are always available, gateway methods may have limits
+      const filteredGatewayMethods = gatewayMethods.filter(method => {
         return method.active &&
           (!method.minimum_amount || amountNum >= method.minimum_amount) &&
           (!method.maximum_amount || amountNum <= method.maximum_amount);
       });
 
-      // Sort by fee amount (lowest first)
-      methods.sort((a, b) => {
+      // Sort gateway methods by fee amount (lowest first)
+      filteredGatewayMethods.sort((a, b) => {
         const feeA = parseFloat(a.fee_customer?.replace(/[^\d]/g, '') || 0);
         const feeB = parseFloat(b.fee_customer?.replace(/[^\d]/g, '') || 0);
         return feeA - feeB;
       });
+
+      methods = [...manualMethods, ...filteredGatewayMethods];
     }
 
     // Group methods by type for better UI
     const groupedMethods = {
-      popular: methods.filter(m => ['QRIS', 'DANA', 'GOPAY', 'OVO'].includes(m.method)),
-      qris: methods.filter(m => m.method === 'QRIS'),
-      ewallet: methods.filter(m => ['DANA', 'GOPAY', 'OVO', 'SHOPEEPAY'].includes(m.method)),
-      bank_transfer: methods.filter(m => m.type === 'bank' || m.type === 'va'),
-      other: methods.filter(m => !['QRIS', 'DANA', 'GOPAY', 'OVO', 'SHOPEEPAY'].includes(m.method) && m.type !== 'bank' && m.type !== 'va')
+      manual: manualMethods, // Manual transfers (bank, ewallet, cash) from settings
+      popular: gatewayMethods.filter(m => ['QRIS', 'DANA', 'GOPAY', 'OVO'].includes(m.method)),
+      qris: gatewayMethods.filter(m => m.method === 'QRIS'),
+      ewallet: gatewayMethods.filter(m => ['DANA', 'GOPAY', 'OVO', 'SHOPEEPAY'].includes(m.method)),
+      bank_transfer: gatewayMethods.filter(m => m.type === 'bank' || m.type === 'va'),
+      other: gatewayMethods.filter(m =>
+        !['QRIS', 'DANA', 'GOPAY', 'OVO', 'SHOPEEPAY'].includes(m.method) &&
+        m.type !== 'bank' &&
+        m.type !== 'va'
+      )
     };
 
-    console.log(`[API] /methods returning ${methods.length} methods to frontend`);
+    console.log(`[API] /methods returning ${methods.length} methods (${manualMethods.length} manual, ${gatewayMethods.length} gateway) to frontend`);
+    console.log(`[API] Grouped: ${Object.keys(groupedMethods).filter(k => groupedMethods[k]?.length > 0).join(', ')}`);
 
     res.json({
       success: true,
@@ -90,13 +200,13 @@ router.get('/invoices', customerJwtAuth, asyncHandler(async (req, res) => {
           ELSE i.status
         END as display_status,
         CASE
-          WHEN i.status IN ('unpaid', 'overdue') THEN true
+          WHEN i.status IN ('unpaid', 'overdue', 'suspended') THEN true
           ELSE false
         END as can_pay
       FROM invoices i
       LEFT JOIN packages p ON i.package_id = p.id
       WHERE i.customer_id = $1
-        AND (i.status = $2 OR ($2 = 'unpaid' AND i.status = 'overdue'))
+        AND (i.status = $2 OR ($2 = 'unpaid' AND i.status IN ('overdue', 'suspended')))
       ORDER BY i.due_date ASC
       LIMIT $3 OFFSET $4
     `, [customerId, status, parseInt(limit), parseInt(offset)]);
@@ -106,7 +216,7 @@ router.get('/invoices', customerJwtAuth, asyncHandler(async (req, res) => {
       SELECT COUNT(*) as total
       FROM invoices i
       WHERE i.customer_id = $1
-        AND (i.status = $2 OR ($2 = 'unpaid' AND i.status = 'overdue'))
+        AND (i.status = $2 OR ($2 = 'unpaid' AND i.status IN ('overdue', 'suspended')))
     `, [customerId, status]);
 
     res.json({
@@ -169,7 +279,7 @@ router.get('/invoices/:id', customerJwtAuth, asyncHandler(async (req, res) => {
       data: {
         invoice: invoice,
         payment_history: paymentHistoryResult.rows,
-        can_pay: ['unpaid', 'overdue'].includes(invoice.status)
+        can_pay: ['unpaid', 'overdue', 'suspended'].includes(invoice.status)
       }
     });
 
@@ -199,17 +309,18 @@ router.post('/invoices/:id/pay', customerJwtAuth, asyncHandler(async (req, res) 
       }
 
       // 1. Get customer's current package from SERVICES table
-      const customerRes = await query(`SELECT package_id FROM services WHERE customer_id = $1 LIMIT 1`, [customerId]);
+      const customerRes = await query(`SELECT package_id, service_number FROM services WHERE customer_id = $1 LIMIT 1`, [customerId]);
       const packageId = customerRes.rows[0]?.package_id;
+      const serviceNumber = customerRes.rows[0]?.service_number;
 
       // 2. Create real invoice
       const newInvoiceReq = await query(`
          INSERT INTO invoices (
            customer_id, invoice_number, amount, total_amount, 
-           status, due_date, created_at, description, notes, package_id
-         ) VALUES ($1, $2, $3, $3, 'unpaid', NOW(), NOW(), $4, 'Bulk Payment', $5)
+           status, due_date, created_at, description, notes, package_id, service_number
+         ) VALUES ($1, $2, $3, $3, 'unpaid', NOW(), NOW(), $4, 'Bulk Payment', $5, $6)
          RETURNING *
-       `, [customerId, invoice_number, amount, description || 'Bulk Payment', packageId]);
+       `, [customerId, invoice_number, amount, description || 'Bulk Payment', packageId, serviceNumber]);
 
       const newInvoice = newInvoiceReq.rows[0];
       invoiceId = newInvoice.id; // Use the new integer API
@@ -236,7 +347,7 @@ router.post('/invoices/:id/pay', customerJwtAuth, asyncHandler(async (req, res) 
           FROM invoices i
           JOIN customers c ON i.customer_id = c.id
           LEFT JOIN packages p ON i.package_id = p.id
-          WHERE i.id = $1 AND i.customer_id = $2 AND i.status IN ('unpaid', 'overdue')
+          WHERE i.id = $1 AND i.customer_id = $2 AND i.status IN ('unpaid', 'overdue', 'suspended')
         `, [id, customerId]);
 
       if (invoiceResult.rows.length === 0) {
@@ -248,7 +359,71 @@ router.post('/invoices/:id/pay', customerJwtAuth, asyncHandler(async (req, res) 
       invoice = invoiceResult.rows[0];
     }
 
-    // Check if there's already a pending payment
+    // Check if payment method is manual (from payment_settings)
+    const isManualPayment = payment_method?.startsWith('bank_') ||
+                            payment_method?.startsWith('ewallet_') ||
+                            payment_method === 'cash';
+
+    // Get payment method details if manual
+    let manualPaymentDetails = null;
+    if (isManualPayment) {
+      try {
+        const settings = getAllSettings();
+        const paymentSettings = settings.payment_settings || {};
+
+        console.log(`[MANUAL PAYMENT] Processing payment_method: ${payment_method}`);
+        console.log(`[MANUAL PAYMENT] Payment settings:`, JSON.stringify(paymentSettings, null, 2));
+
+        if (payment_method.startsWith('bank_')) {
+          const bankId = payment_method.replace('bank_', '');
+          console.log(`[MANUAL PAYMENT] Looking for bank ID: ${bankId} (type: ${typeof bankId})`);
+          const bank = paymentSettings.bank_accounts?.find(b => b.id === bankId || b.id == bankId);
+          if (bank) {
+            manualPaymentDetails = {
+              type: 'bank',
+              bankName: bank.bankName,
+              accountNumber: bank.accountNumber,
+              accountName: bank.accountName
+            };
+            console.log(`[MANUAL PAYMENT] Found bank:`, manualPaymentDetails);
+          } else {
+            console.error(`[MANUAL PAYMENT] Bank ID ${bankId} not found in settings`);
+          }
+        } else if (payment_method.startsWith('ewallet_')) {
+          const ewalletId = payment_method.replace('ewallet_', '');
+          console.log(`[MANUAL PAYMENT] Looking for ewallet ID: ${ewalletId} (type: ${typeof ewalletId})`);
+          const ewallet = paymentSettings.ewallets?.find(e => e.id === ewalletId || e.id == ewalletId);
+          if (ewallet) {
+            const providerLabels = {
+              'gopay': 'GoPay', 'GoPay': 'GoPay',
+              'ovo': 'OVO', 'OVO': 'OVO',
+              'dana': 'DANA', 'DANA': 'DANA',
+              'shopeepay': 'ShopeePay', 'ShopeePay': 'ShopeePay',
+              'linkaja': 'LinkAja', 'LinkAja': 'LinkAja',
+              'QRIS': 'QRIS', 'qris': 'QRIS'
+            };
+            manualPaymentDetails = {
+              type: 'ewallet',
+              provider: providerLabels[ewallet.provider] || ewallet.provider || 'E-Wallet',
+              phoneNumber: ewallet.phoneNumber,
+              accountName: ewallet.accountName
+            };
+            console.log(`[MANUAL PAYMENT] Found ewallet:`, manualPaymentDetails);
+          } else {
+            console.error(`[MANUAL PAYMENT] E-wallet ID ${ewalletId} not found in settings`);
+          }
+        } else if (payment_method === 'cash') {
+          manualPaymentDetails = {
+            type: 'cash',
+            instructions: 'Silakan bayar tunai ke admin kami'
+          };
+          console.log(`[MANUAL PAYMENT] Cash payment`);
+        }
+      } catch (settingsError) {
+        console.error('[MANUAL PAYMENT] Error getting payment settings:', settingsError);
+      }
+    }
+
     // Check if there's already a pending payment FOR THIS METHOD
     const existingPaymentResult = await query(`
       SELECT * FROM payment_transactions
@@ -275,6 +450,7 @@ router.post('/invoices/:id/pay', customerJwtAuth, asyncHandler(async (req, res) 
           qr_code: existingPayment.gateway_response?.qr_code,
           expiry_time: existingPayment.expires_at,
           status: existingPayment.status,
+          manual_payment_details: existingPayment.manual_payment_details,
           message: 'Existing pending payment found'
         }
       });
@@ -284,24 +460,56 @@ router.post('/invoices/:id/pay', customerJwtAuth, asyncHandler(async (req, res) 
     // Generate unique order_id (merchant_ref) to allow multiple payment methods for same invoice
     const uniqueOrderId = `INV-${invoice.invoice_number}-${Math.floor(Date.now() / 1000)}`;
 
+    const portalUrl = getPortalUrl(req);
+
+    // Format customer email for Tripay (use name@kilusi.id format)
+    const customerName = customer_details.name || invoice.customer_name || '';
+    // Format name to be email-safe: lowercase, replace spaces with dots, remove special chars
+    const formattedName = customerName
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, '') // Remove special characters
+      .replace(/\s+/g, '.') // Replace spaces with dots
+      .replace(/\.+/g, '.') // Replace multiple dots with single dot
+      .trim();
+    const tripayEmail = formattedName ? `${formattedName}@kilusi.id` : 'customer@kilusi.id';
+
     const paymentData = {
       invoice_number: invoice.invoice_number,
       order_id: uniqueOrderId, // Custom unique ref for Gateway
       customer_name: customer_details.name || invoice.customer_name,
-      customer_email: customer_details.email || invoice.customer_email,
+      customer_email: tripayEmail,
       customer_phone: customer_details.phone || invoice.customer_phone,
       amount: invoice.total_amount,
       package_name: invoice.package_name,
-      return_url: `${req.protocol}://${req.get('host')}/customer/payments/success`,
-      callback_url: `${req.protocol}://${req.get('host')}/api/v1/payments/webhook/${gateway}`
+      return_url: `${portalUrl}/customer/payments/success`,
+      callback_url: `${portalUrl}/api/v1/payments/webhook/${gateway}`
     };
 
-    // Create payment transaction
-    const paymentResult = await paymentGateway.createPaymentWithMethod(
-      paymentData,
-      gateway,
-      payment_method
-    );
+    let paymentResult;
+
+    // Handle manual payments differently - do NOT call Tripay
+    if (isManualPayment) {
+      console.log(`[MANUAL PAYMENT] Creating manual payment transaction for ${payment_method}`);
+
+      paymentResult = {
+        token: uniqueOrderId,
+        order_id: uniqueOrderId,
+        status: 'pending',
+        manual_payment_details: manualPaymentDetails,
+        instructions: manualPaymentDetails,
+        // Return payment_url as null so frontend knows to show manual details
+        payment_url: null,
+        qr_code: null
+      };
+    } else {
+      // Create payment transaction via gateway (Tripay, etc)
+      console.log(`[TRIPAY PAYMENT] Creating Tripay payment for ${payment_method}`);
+      paymentResult = await paymentGateway.createPaymentWithMethod(
+        paymentData,
+        gateway,
+        payment_method
+      );
+    }
 
     // Generate transaction ID
     const transactionId = 'TRX' + Date.now() + Math.random().toString(36).substr(2, 9).toUpperCase();
@@ -312,19 +520,22 @@ router.post('/invoices/:id/pay', customerJwtAuth, asyncHandler(async (req, res) 
         invoice_id, gateway, gateway_transaction_id, gateway_reference,
         payment_method, payment_type, amount, fee_amount, net_amount,
         status, callback_url, return_url, customer_data,
-        gateway_request, gateway_response, created_at, expires_at
+        gateway_request, gateway_response, created_at, expires_at, manual_payment_details
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), $16
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), $16, $17
       ) RETURNING *
     `;
 
-    // Extract fee information if available
-    const feeAmount = paymentResult.fee?.amount || 0;
-    const netAmount = invoice.total_amount - feeAmount;
+    // Extract fee information if available (no fees for manual payments)
+    const feeAmount = isManualPayment ? 0 : (paymentResult.fee?.amount || 0);
+    const feeBearer = isManualPayment ? 'customer' : (paymentResult.fee_bearer || 'customer');
+    const amountReceived = isManualPayment ? invoice.total_amount : (paymentResult.amount_received || invoice.total_amount);
+    // net_amount = what we actually receive after gateway takes their cut
+    const netAmount = feeBearer === 'merchant' ? amountReceived : invoice.total_amount;
 
     const transactionValues = [
       invoiceId,
-      gateway,
+      isManualPayment ? 'manual' : gateway,
       paymentResult.token || paymentResult.gateway_transaction_id,
       paymentResult.order_id,
       payment_method,
@@ -333,35 +544,38 @@ router.post('/invoices/:id/pay', customerJwtAuth, asyncHandler(async (req, res) 
       feeAmount,
       netAmount,
       'pending',
-      paymentData.callback_url,
-      paymentData.return_url,
+      isManualPayment ? null : paymentData.callback_url,
+      isManualPayment ? null : paymentData.return_url,
       JSON.stringify(customer_details),
       JSON.stringify(paymentData),
       JSON.stringify(paymentResult),
-      new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours expiry
+      new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours expiry
+      isManualPayment ? JSON.stringify(manualPaymentDetails) : null
     ];
 
     const transactionResult = await query(transactionQuery, transactionValues);
     const transaction = transactionResult.rows[0];
 
-    // Update invoice with payment info
+    // Update invoice with payment info and fee_bearer
     await query(`
       UPDATE invoices
       SET payment_gateway = $1, payment_gateway_token = $2,
           payment_gateway_method = $3, payment_gateway_status = $4,
-          payment_gateway_reference = $5, expiry_date = $6
-      WHERE id = $7
+          payment_gateway_reference = $5, expiry_date = $6,
+          fee_bearer = $7
+      WHERE id = $8
     `, [
-      gateway,
+      isManualPayment ? 'manual' : gateway,
       paymentResult.token,
       payment_method,
       'pending',
       paymentResult.order_id,
       new Date(Date.now() + 24 * 60 * 60 * 1000),
+      feeBearer,
       invoiceId
     ]);
 
-    logger.info(`✅ Customer payment created: ${transactionId} for invoice ${invoice.invoice_number}`);
+    logger.info(`✅ Customer payment created: ${transactionId} for invoice ${invoice.invoice_number} (${isManualPayment ? 'manual' : gateway})`);
 
     res.json({
       success: true,
@@ -373,12 +587,15 @@ router.post('/invoices/:id/pay', customerJwtAuth, asyncHandler(async (req, res) 
         fee_amount: feeAmount,
         net_amount: netAmount,
         payment_method: payment_method,
-        gateway: gateway,
+        gateway: isManualPayment ? 'manual' : gateway,
         payment_url: paymentResult.payment_url,
         token: paymentResult.token,
         qr_code: paymentResult.qr_code,
         expiry_time: transaction.expires_at,
         instructions: paymentResult.instructions || null,
+        manual_payment_details: manualPaymentDetails,
+        requires_proof: isManualPayment,
+        is_manual_payment: isManualPayment,
         customer_data: {
           name: invoice.customer_name,
           email: invoice.customer_email,

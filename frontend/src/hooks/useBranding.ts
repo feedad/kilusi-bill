@@ -88,14 +88,33 @@ export function useBranding() {
   // Update favicon dynamically (only once when branding changes)
   useEffect(() => {
     if (!loading && branding.faviconUrl && typeof document !== 'undefined') {
-      const link = document.querySelector("link[rel*='icon']") as HTMLLinkElement
-      if (link) {
-        const faviconUrl = branding.faviconUrl.startsWith('/')
-          ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${branding.faviconUrl}`
-          : branding.faviconUrl
-        if (link.href !== faviconUrl) {
-          link.href = faviconUrl
+      try {
+        // Use current origin for relative paths, or use URL as-is for absolute URLs
+        const faviconUrl = branding.faviconUrl.startsWith('http')
+          ? branding.faviconUrl
+          : branding.faviconUrl.startsWith('/')
+            ? `${typeof window !== 'undefined' ? window.location.origin : ''}${branding.faviconUrl}`
+            : branding.faviconUrl
+
+        // Find and update existing favicon link instead of removing
+        let faviconLink = document.querySelector('link[rel="icon"]') as HTMLLinkElement
+        if (!faviconLink) {
+          faviconLink = document.createElement('link')
+          faviconLink.rel = 'icon'
+          document.head.appendChild(faviconLink)
         }
+        faviconLink.href = faviconUrl
+
+        // Find and update existing apple-touch-icon
+        let appleTouchLink = document.querySelector('link[rel="apple-touch-icon"]') as HTMLLinkElement
+        if (!appleTouchLink) {
+          appleTouchLink = document.createElement('link')
+          appleTouchLink.rel = 'apple-touch-icon'
+          document.head.appendChild(appleTouchLink)
+        }
+        appleTouchLink.href = faviconUrl
+      } catch (error) {
+        console.warn('Failed to update favicon:', error)
       }
     }
   }, [loading, branding.faviconUrl])
@@ -111,9 +130,12 @@ export function useBranding() {
 
   const getLogoUrl = () => {
     if (!branding.logoUrl) return null
-    return branding.logoUrl.startsWith('/')
-      ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${branding.logoUrl}`
-      : branding.logoUrl
+    // Use current origin for relative paths, or use URL as-is for absolute URLs
+    return branding.logoUrl.startsWith('http')
+      ? branding.logoUrl
+      : branding.logoUrl.startsWith('/')
+        ? `${typeof window !== 'undefined' ? window.location.origin : ''}${branding.logoUrl}`
+        : branding.logoUrl
   }
 
   return {

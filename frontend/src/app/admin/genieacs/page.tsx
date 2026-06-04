@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useAuthStore } from '@/store/authStore'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui'
 import { Button } from '@/components/ui'
 import { Input } from '@/components/ui'
+import { SearchBar } from '@/components/SearchBar'
 import {
   Server,
   Wifi,
@@ -58,7 +59,8 @@ export default function GenieACSPage() {
   })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [searchQuery, setSearchQuery] = useState('')
+  const searchQueryRef = useRef('')
+  const [isSearching, setIsSearching] = useState(false)
   const [filterStatus, setFilterStatus] = useState<'all' | 'online' | 'offline' | 'warning'>('all')
   const [refreshing, setRefreshing] = useState(false)
   const [autoRefresh, setAutoRefresh] = useState(true)
@@ -100,15 +102,17 @@ export default function GenieACSPage() {
   const saveSettings = async () => {
     setSettingsLoading(true)
     try {
-      const response = await adminApi.post('/api/v1/settings', {
+      const response = await adminApi.put('/api/v1/settings', {
         settings: genieacsSettings
       })
       if (response.data.success) {
         setShowSettings(false)
         fetchDevices() // Refresh with new settings
+        toast.success('Pengaturan GenieACS berhasil disimpan')
       }
     } catch (err) {
       console.error('Error saving settings:', err)
+      toast.error('Gagal menyimpan pengaturan')
     } finally {
       setSettingsLoading(false)
     }
@@ -116,11 +120,15 @@ export default function GenieACSPage() {
 
   const fetchDevices = async () => {
     try {
-      setLoading(true)
+      // Only show full page loading state for initial load, not for search
+      const isSearchOperation = searchQueryRef.current.length > 0
+      if (!isSearchOperation) {
+        setLoading(true)
+      }
       setError(null)
       const params = new URLSearchParams({
         limit: '100',
-        search: searchQuery,
+        search: searchQueryRef.current,
         status: filterStatus === 'all' ? '' : filterStatus,
       })
       const response = await adminApi.get(`/api/v1/genieacs/devices?${params}`)
@@ -142,7 +150,7 @@ export default function GenieACSPage() {
 
   useEffect(() => {
     fetchDevices()
-  }, [searchQuery, filterStatus])
+  }, [filterStatus]) // Removed searchQuery - using ref instead
 
   // Auto-refresh every 60 seconds for GenieACS
   useEffect(() => {
@@ -150,12 +158,20 @@ export default function GenieACSPage() {
 
     const interval = setInterval(fetchDevices, 60000)
     return () => clearInterval(interval)
-  }, [autoRefresh, searchQuery, filterStatus])
+  }, [autoRefresh, filterStatus]) // Removed searchQuery - using ref instead
 
   const handleRefresh = () => {
     setRefreshing(true)
     fetchDevices()
   }
+
+  // Handler untuk search dipanggil oleh SearchBar
+  const handleSearch = useCallback((query: string) => {
+    searchQueryRef.current = query
+    setIsSearching(!!query)
+    // Directly call fetchDevices, bypassing the useEffect
+    fetchDevices()
+  }, [])
 
   const handleDeviceAction = async (deviceId: string, action: string) => {
     try {
@@ -262,15 +278,15 @@ export default function GenieACSPage() {
 
   const filteredDevices = devices.filter(device => {
     const status = getConnectionStatus(device)
-    const matchesSearch = !searchQuery ||
-      device.serial.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      device.productClass.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      device.manufacturer.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      device.customer?.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      device.customer?.pppoe_username?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      device.pppoeUsername?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      device.ssid?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      device.tag?.toLowerCase().includes(searchQuery.toLowerCase())
+    const matchesSearch = !searchQueryRef.current ||
+      device.serial.toLowerCase().includes(searchQueryRef.current.toLowerCase()) ||
+      device.productClass.toLowerCase().includes(searchQueryRef.current.toLowerCase()) ||
+      device.manufacturer.toLowerCase().includes(searchQueryRef.current.toLowerCase()) ||
+      device.customer?.name.toLowerCase().includes(searchQueryRef.current.toLowerCase()) ||
+      device.customer?.pppoe_username?.toLowerCase().includes(searchQueryRef.current.toLowerCase()) ||
+      device.pppoeUsername?.toLowerCase().includes(searchQueryRef.current.toLowerCase()) ||
+      device.ssid?.toLowerCase().includes(searchQueryRef.current.toLowerCase()) ||
+      device.tag?.toLowerCase().includes(searchQueryRef.current.toLowerCase())
 
     const matchesStatus = filterStatus === 'all' || status === filterStatus
 
@@ -328,15 +344,11 @@ export default function GenieACSPage() {
         <CardContent className="pt-6">
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="flex-1">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Cari device (Serial, Model, Customer)..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
+              <SearchBar
+                onSearch={handleSearch}
+                onSearchChange={setIsSearching}
+                placeholder="Cari device (Serial, Model, Customer)..."
+              />
             </div>
             <div className="flex items-center space-x-2">
               <select
@@ -398,15 +410,17 @@ export default function GenieACSPage() {
               <Server className="h-16 w-16 text-muted-foreground mb-4" />
               <h3 className="text-xl font-semibold mb-2">Tidak Ada Perangkat</h3>
               <p className="text-muted-foreground mb-6 max-w-md">
-                {searchQuery || filterStatus !== 'all'
+                {searchQueryRef.current || filterStatus !== 'all'
                   ? 'Tidak ada perangkat yang cocok dengan kriteria pencarian atau filter. Coba ubah kriteria Anda.'
                   : 'Belum ada perangkat yang terdaftar di sistem GenieACS.'
                 }
               </p>
-              {(searchQuery || filterStatus !== 'all') && (
+              {(searchQueryRef.current || filterStatus !== 'all') && (
                 <Button variant="outline" onClick={() => {
-                  setSearchQuery('')
+                  searchQueryRef.current = ''
+                  setIsSearching(false)
                   setFilterStatus('all')
+                  fetchDevices()
                 }}>
                   <Filter className="h-4 w-4 mr-2" />
                   Reset Filter
@@ -688,8 +702,8 @@ export default function GenieACSPage() {
 
       {/* GenieACS Settings Modal */}
       {showSettings && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-background rounded-lg shadow-lg w-full max-w-md mx-4 p-6">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowSettings(false)}>
+          <div className="bg-background rounded-lg shadow-lg w-full max-w-md mx-4 p-6" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold">Pengaturan GenieACS API</h3>
               <button onClick={() => setShowSettings(false)} className="text-muted-foreground hover:text-foreground">

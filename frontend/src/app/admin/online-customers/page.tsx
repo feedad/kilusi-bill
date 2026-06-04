@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -16,9 +16,13 @@ import {
   MapPin,
   Clock,
   Signal,
-  Filter
+  Filter,
+  ChevronLeft,
+  ChevronRight,
+  Loader2
 } from 'lucide-react'
 import { adminApi } from '@/lib/api-clients'
+import { SearchBar } from '@/components/SearchBar'
 
 interface OnlineCustomer {
   id: string
@@ -27,19 +31,26 @@ interface OnlineCustomer {
   address: string
   pppoe_username: string
   pppoe_password: string
+  mac_address: string
   status: string
   package_name: string
   package_speed: string
   online_status: 'online' | 'offline' | 'idle'
+  ip_address?: string
   last_seen?: string
   signal_strength?: number
   rx_power?: number
+  tx_power?: number
+  olt_distance?: number
+  olt_name?: string
+  onu_index?: string
   location?: {
     lat: number
     lng: number
     address: string
   }
-  uptime?: string
+  uptime?: number
+  uptime_formatted?: string
   data_used?: {
     upload: number
     download: number
@@ -57,6 +68,13 @@ interface Stats {
   }
 }
 
+interface PaginationMeta {
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
+}
+
 export default function OnlineCustomersPage() {
   const [customers, setCustomers] = useState<OnlineCustomer[]>([])
   const [stats, setStats] = useState<Stats>({
@@ -66,20 +84,33 @@ export default function OnlineCustomersPage() {
     idle_customers: 0,
     total_traffic: { upload: 0, download: 0 }
   })
+  const [pagination, setPagination] = useState<PaginationMeta>({
+    total: 0,
+    page: 1,
+    pageSize: 20,
+    totalPages: 0
+  })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [filterStatus, setFilterStatus] = useState<'all' | 'online' | 'offline' | 'idle'>('all')
+  const searchQueryRef = useRef('')
+  const [isSearching, setIsSearching] = useState(false)
+  const [filterStatus, setFilterStatus] = useState<'all' | 'online' | 'offline' | 'idle'>('online')
   const [refreshing, setRefreshing] = useState(false)
   const [autoRefresh, setAutoRefresh] = useState(true)
+  const [syncingMac, setSyncingMac] = useState(false)
 
-  const fetchCustomers = async () => {
+  const fetchCustomers = async (page = pagination.page) => {
     try {
-      setLoading(true)
+      // Only show full page loading state for initial load, not for search
+      const isSearchOperation = searchQueryRef.current.length > 0
+      if (!isSearchOperation) {
+        setLoading(true)
+      }
       setError(null)
       const params = new URLSearchParams({
-        limit: '100',
-        search: searchQuery,
+        limit: String(pagination.pageSize),
+        offset: String((page - 1) * pagination.pageSize),
+        search: searchQueryRef.current,
         status: filterStatus === 'all' ? '' : filterStatus,
       })
       const response = await adminApi.get(`/api/v1/realtime/online-customers?${params}`)
@@ -87,6 +118,12 @@ export default function OnlineCustomersPage() {
       if (response.data.success) {
         setCustomers(response.data.data.customers || [])
         setStats(response.data.data.stats || stats)
+        const newPagination = response.data.data.pagination || pagination
+        setPagination(newPagination)
+        // Update page state if page parameter was provided
+        if (page !== pagination.page) {
+          setPagination(prev => ({ ...prev, page }))
+        }
       } else {
         setError(response.data.message || 'Failed to load online customers')
       }
@@ -99,21 +136,129 @@ export default function OnlineCustomersPage() {
     }
   }
 
-  useEffect(() => {
-    fetchCustomers()
-  }, [searchQuery, filterStatus])
+  // Lightweight function for auto-refresh - only updates realtime data
+  const fetchOnlineStatusOnly = async () => {
+    try {
+      if (customers.length === 0) return
 
-  // Auto-refresh every 30 seconds
+      const customerIds = customers.map(c => c.id).join(',')
+      const response = await adminApi.get(`/api/v1/realtime/online-status?customer_ids=${customerIds}`)
+
+      if (response.data.success) {
+        const statusData = response.data.data.status
+
+        // Update customers with new realtime data
+        setCustomers(prevCustomers =>
+          prevCustomers.map(customer => {
+            const status = statusData[customer.id]
+            if (status) {
+              return {
+                ...customer,
+                online_status: status.online_status,
+                uptime_seconds: status.uptime_seconds,
+                uptime_formatted: formatUptime(status.uptime_seconds),
+                data_used: status.data_used,
+                rx_power: status.rx_power,
+                tx_power: status.tx_power,
+                olt_distance: status.olt_distance,
+                olt_name: status.olt_name,
+                onu_index: status.onu_index
+              }
+            }
+            return customer
+          })
+        )
+      }
+    } catch (err: any) {
+      console.error('Error fetching online status:', err)
+    }
+  }
+
+  useEffect(() => {
+    fetchCustomers(1)
+  }, [filterStatus, pagination.pageSize]) // Removed searchQuery - using ref instead
+
+  // Auto-refresh every 30 seconds - lightweight refresh (only realtime data)
   useEffect(() => {
     if (!autoRefresh) return
 
-    const interval = setInterval(fetchCustomers, 30000)
+    const interval = setInterval(() => fetchOnlineStatusOnly(), 10000)
     return () => clearInterval(interval)
-  }, [autoRefresh, searchQuery, filterStatus])
+  }, [autoRefresh, customers]) // Depend on customers, not pagination
+
+  const handlePageChange = (newPage: number) => {
+    if (newPage < 1 || newPage > pagination.totalPages) return
+    fetchCustomers(newPage)
+  }
 
   const handleRefresh = () => {
     setRefreshing(true)
-    fetchCustomers()
+    fetchCustomers(pagination.page)
+  }
+
+  // Handler untuk search dipanggil oleh SearchBar
+  const handleSearch = useCallback((query: string) => {
+    searchQueryRef.current = query
+    setIsSearching(!!query)
+    // Directly call fetchCustomers with page 1, bypassing the useEffect
+    fetchCustomers(1)
+  }, [])
+
+  const handleCoa = async (customer: OnlineCustomer) => {
+    if (!confirm(`Disconnect user ${customer.pppoe_username} (${customer.name})?\n\nIni akan memutus koneksi PPPoE pelanggan.`)) {
+      return
+    }
+
+    try {
+      const response = await adminApi.post('/api/v1/realtime/coa', {
+        pppoe_username: customer.pppoe_username
+      })
+
+      if (response.data.success) {
+        alert(`✅ ${response.data.message}`)
+        // Refresh after a short delay to allow disconnect to take effect
+        setTimeout(() => fetchCustomers(pagination.page), 2000)
+      } else {
+        alert(`⚠️ ${response.data.message}`)
+      }
+    } catch (error: any) {
+      console.error('CoA error:', error)
+      alert(`❌ Gagal mengirim CoA: ${error.response?.data?.message || error.message}`)
+    }
+  }
+
+  const handleSyncMacFromRadius = async () => {
+    if (!confirm(
+      'Sinkronkan MAC Address dari RADIUS?\n\n' +
+      'Ini akan mengupdate MAC address untuk pelanggan yang MAC-nya masih kosong.\n' +
+      'Data diambil dari history koneksi RADIUS.'
+    )) {
+      return
+    }
+
+    try {
+      setSyncingMac(true)
+      setError(null)
+
+      const response = await adminApi.post('/api/v1/technical-details/sync-mac-from-radius', {
+        dry_run: false
+      })
+
+      if (response.data.success) {
+        const { updated, skipped } = response.data.data.summary
+        alert(`✅ Sinkronisasi MAC Selesai!\n\nBerhasil: ${updated} pelanggan\nDilewati: ${skipped} pelanggan`)
+
+        // Refresh to show updated data
+        fetchCustomers(pagination.page)
+      } else {
+        setError('Gagal sinkronisasi MAC')
+      }
+    } catch (err: any) {
+      console.error('Error syncing MAC:', err)
+      setError(err.response?.data?.message || err.message || 'Gagal sinkronisasi MAC')
+    } finally {
+      setSyncingMac(false)
+    }
   }
 
   const getStatusColor = (status: string) => {
@@ -172,16 +317,6 @@ export default function OnlineCustomersPage() {
     }
   }
 
-  const filteredCustomers = customers.filter(customer => {
-    const matchesSearch = customer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                       customer.phone.includes(searchQuery) ||
-                       customer.pppoe_username?.toLowerCase().includes(searchQuery.toLowerCase())
-
-    const matchesStatus = filterStatus === 'all' || customer.online_status === filterStatus
-
-    return matchesSearch && matchesStatus
-  })
-
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -201,6 +336,16 @@ export default function OnlineCustomersPage() {
           >
             <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
             <span>Refresh</span>
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleSyncMacFromRadius}
+            disabled={syncingMac}
+            className="flex items-center space-x-2"
+            title="Sync MAC addresses from RADIUS"
+          >
+            <RefreshCw className={`h-4 w-4 ${syncingMac ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">{syncingMac ? 'Syncing...' : 'Sync MAC'}</span>
           </Button>
           <div className="flex items-center space-x-2">
             <span className="text-sm text-muted-foreground">Auto Refresh:</span>
@@ -222,7 +367,10 @@ export default function OnlineCustomersPage() {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
+        <Card
+          className={`cursor-pointer transition-colors hover:bg-muted/50 ${filterStatus === 'all' ? 'ring-2 ring-primary' : ''}`}
+          onClick={() => setFilterStatus('all')}
+        >
           <CardContent className="p-6">
             <div className="flex items-center justify-between space-y-0 pb-2">
               <h3 className="text-sm font-medium text-muted-foreground">Total Pelanggan</h3>
@@ -235,7 +383,10 @@ export default function OnlineCustomersPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card
+          className={`cursor-pointer transition-colors hover:bg-muted/50 ${filterStatus === 'online' ? 'ring-2 ring-green-500' : ''}`}
+          onClick={() => setFilterStatus('online')}
+        >
           <CardContent className="p-6">
             <div className="flex items-center justify-between space-y-0 pb-2">
               <h3 className="text-sm font-medium text-muted-foreground">Online</h3>
@@ -248,7 +399,10 @@ export default function OnlineCustomersPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card
+          className={`cursor-pointer transition-colors hover:bg-muted/50 ${filterStatus === 'offline' ? 'ring-2 ring-red-500' : ''}`}
+          onClick={() => setFilterStatus('offline')}
+        >
           <CardContent className="p-6">
             <div className="flex items-center justify-between space-y-0 pb-2">
               <h3 className="text-sm font-medium text-muted-foreground">Offline</h3>
@@ -261,37 +415,50 @@ export default function OnlineCustomersPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card
+          className={`cursor-pointer transition-colors hover:bg-muted/50 ${filterStatus === 'idle' ? 'ring-2 ring-yellow-500' : ''}`}
+          onClick={() => setFilterStatus('idle')}
+        >
           <CardContent className="p-6">
             <div className="flex items-center justify-between space-y-0 pb-2">
-              <h3 className="text-sm font-medium text-muted-foreground">Total Traffic</h3>
-              <Activity className="h-4 w-4 text-muted-foreground" />
+              <h3 className="text-sm font-medium text-muted-foreground">Idle</h3>
+              <Activity className="h-4 w-4 text-yellow-600" />
             </div>
-            <div className="text-sm font-bold">
-              <div>↓ {formatBytes(stats.total_traffic.download)}</div>
-              <div>↑ {formatBytes(stats.total_traffic.upload)}</div>
-            </div>
+            <div className="text-2xl font-bold text-yellow-600">{stats.idle_customers}</div>
             <p className="text-xs text-muted-foreground">
-              Current session traffic
+              {((stats.idle_customers / stats.total_customers) * 100).toFixed(1)}% dari total
             </p>
           </CardContent>
         </Card>
       </div>
+
+      {/* Traffic Card - separate, not clickable */}
+      <Card>
+        <CardContent className="p-6">
+          <div className="flex items-center justify-between space-y-0 pb-2">
+            <h3 className="text-sm font-medium text-muted-foreground">Total Traffic</h3>
+            <Activity className="h-4 w-4 text-muted-foreground" />
+          </div>
+          <div className="text-sm font-bold">
+            <div>↓ {formatBytes(stats.total_traffic.download)}</div>
+            <div>↑ {formatBytes(stats.total_traffic.upload)}</div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Current session traffic
+          </p>
+        </CardContent>
+      </Card>
 
       {/* Search and Filters */}
       <Card>
         <CardContent className="pt-6">
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="flex-1">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Cari pelanggan online..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
+              <SearchBar
+                onSearch={handleSearch}
+                onSearchChange={setIsSearching}
+                placeholder="Cari pelanggan online..."
+              />
             </div>
             <div className="flex items-center space-x-2">
               <select
@@ -303,6 +470,18 @@ export default function OnlineCustomersPage() {
                 <option value="online">Online</option>
                 <option value="offline">Offline</option>
                 <option value="idle">Idle</option>
+              </select>
+              <select
+                value={pagination.pageSize}
+                onChange={(e) => {
+                  setPagination({ ...pagination, pageSize: parseInt(e.target.value), page: 1 })
+                }}
+                className="rounded-md border border-input bg-background px-2 py-2 text-sm w-16 text-center"
+              >
+                <option value="10">10</option>
+                <option value="20">20</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
               </select>
               <Button variant="outline" size="icon">
                 <Filter className="h-4 w-4" />
@@ -329,95 +508,134 @@ export default function OnlineCustomersPage() {
               <p className="text-muted-foreground mb-4">{error}</p>
               <Button onClick={fetchCustomers}>Try Again</Button>
             </div>
-          ) : filteredCustomers.length === 0 ? (
+          ) : customers.length === 0 ? (
             <div className="flex items-center justify-center py-8 text-center">
               <Users className="h-12 w-12 text-muted-foreground mb-4" />
               <h3 className="text-lg font-semibold mb-2">No Customers Found</h3>
               <p className="text-muted-foreground mb-4">
-                {searchQuery || filterStatus !== 'all'
+                {searchQueryRef.current || filterStatus !== 'all'
                   ? 'Try adjusting your search or filters'
                   : 'No customers are currently online'
                 }
               </p>
             </div>
           ) : (
+            <>
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="border-b">
-                    <th className="text-left p-4 font-medium text-foreground">Status</th>
-                    <th className="text-left p-4 font-medium text-foreground">Pelanggan</th>
-                    <th className="text-left p-4 font-medium text-foreground">Kontak</th>
-                    <th className="text-left p-4 font-medium text-foreground">Paket</th>
-                    <th className="text-left p-4 font-medium text-foreground">Signal</th>
-                    <th className="text-left p-4 font-medium text-foreground">Uptime</th>
-                    <th className="text-left p-4 font-medium text-foreground">Traffic</th>
-                    <th className="text-left p-4 font-medium text-foreground">Aksi</th>
+                    <th className="text-left py-2 px-3 font-medium text-foreground text-xs">Status</th>
+                    <th className="text-left py-2 px-3 font-medium text-foreground text-xs">Pelanggan</th>
+                    <th className="text-left py-2 px-3 font-medium text-foreground text-xs">Kontak</th>
+                    <th className="text-left py-2 px-3 font-medium text-foreground text-xs">IP Address</th>
+                    <th className="text-left py-2 px-3 font-medium text-foreground text-xs">Paket</th>
+                    <th className="text-left py-2 px-3 font-medium text-foreground text-xs">MAC Address</th>
+                    <th className="text-left py-2 px-3 font-medium text-foreground text-xs">Signal</th>
+                    <th className="text-left py-2 px-3 font-medium text-foreground text-xs">Uptime</th>
+                    <th className="text-left py-2 px-3 font-medium text-foreground text-xs">Traffic (Session)</th>
+                    <th className="text-left py-2 px-3 font-medium text-foreground text-xs">Aksi</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredCustomers.map((customer) => (
+                  {customers.map((customer) => (
                     <tr key={customer.id} className="border-b hover:bg-muted/50">
-                      <td className="p-4">
-                        <Badge className={getStatusColor(customer.online_status)}>
+                      <td className="py-2 px-3">
+                        <Badge className={`${getStatusColor(customer.online_status)} text-xs`}>
                           <span className="flex items-center space-x-1">
                             {getStatusIcon(customer.online_status)}
                             <span className="capitalize">{customer.online_status}</span>
                           </span>
                         </Badge>
                       </td>
-                      <td className="p-4">
-                        <div>
-                          <div className="font-medium">{customer.name}</div>
-                          <div className="text-sm text-muted-foreground">{customer.phone}</div>
-                          {customer.address && (
-                            <div className="text-xs text-muted-foreground mt-1 truncate max-w-xs">
-                              {customer.address}
-                            </div>
+                      <td className="py-2 px-3">
+                        <div className="text-xs">
+                          <div className="font-medium truncate max-w-[150px]">{customer.name}</div>
+                          <div className="text-muted-foreground truncate max-w-[150px]">{customer.phone}</div>
+                        </div>
+                      </td>
+                       <td className="py-2 px-3">
+                         <div className="text-xs">
+                           <span className="text-muted-foreground">{customer.pppoe_username}</span>
+                           <span className="text-muted-foreground mx-1">•</span>
+                           <span>{customer.status}</span>
+                         </div>
+                       </td>
+                       <td className="py-2 px-3">
+                         <div className="text-xs font-mono">
+                           {customer.ip_address ? (
+                             <a href={`http://${customer.ip_address}`} target="_blank" rel="noopener noreferrer"
+                                className="text-blue-600 hover:underline">
+                               {customer.ip_address}
+                             </a>
+                           ) : <span className="text-muted-foreground">-</span>}
+                         </div>
+                       </td>
+                       <td className="py-2 px-3">
+                         <div className="text-xs">
+                           <span className="font-medium">{customer.package_name}</span>
+                           <span className="text-muted-foreground mx-1">•</span>
+                           <span className="text-muted-foreground">{customer.package_speed}</span>
+                         </div>
+                       </td>
+                      <td className="py-2 px-3">
+                        <div className="text-xs font-mono">
+                          {customer.mac_address ? (
+                            <span className="text-foreground">{customer.mac_address}</span>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
                           )}
                         </div>
                       </td>
-                      <td className="p-4">
-                        <div className="text-sm">
-                          <div>Username: {customer.pppoe_username}</div>
-                          <div className="text-muted-foreground">Status: {customer.status}</div>
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        <div className="text-sm">
-                          <div className="font-medium">{customer.package_name}</div>
-                          <div className="text-muted-foreground">{customer.package_speed}</div>
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        <div className="flex items-center space-x-2">
-                          <Signal className={`h-4 w-4 ${getSignalStrengthColor(customer.rx_power)}`} />
-                          {customer.rx_power && (
-                            <span className="text-sm">{customer.rx_power} dBm</span>
+                      <td className="py-2 px-3">
+                        <div className="text-xs">
+                          {customer.rx_power ? (
+                            <span className={getSignalStrengthColor(customer.rx_power)}>
+                              RX: {customer.rx_power} dBm
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                          {customer.tx_power && customer.tx_power !== '-' && (
+                            <span className="text-muted-foreground ml-2">
+                              TX: {customer.tx_power} dBm
+                            </span>
                           )}
                         </div>
                       </td>
-                      <td className="p-4">
-                        <div className="flex items-center space-x-1 text-sm">
+                      <td className="py-2 px-3">
+                        <div className="flex items-center space-x-1 text-xs">
                           <Clock className="h-3 w-3 text-muted-foreground" />
-                          <span>{formatUptime(customer.uptime)}</span>
+                          <span>{customer.uptime_formatted || formatUptime(customer.uptime)}</span>
                         </div>
                       </td>
-                      <td className="p-4">
-                        <div className="text-sm">
-                          <div>↓ {formatBytes(customer.data_used?.download || 0)}</div>
-                          <div>↑ {formatBytes(customer.data_used?.upload || 0)}</div>
+                      <td className="py-2 px-3">
+                        <div className="text-xs">
+                          <span className="text-muted-foreground">↓</span> {formatBytes(customer.data_used?.download || 0)}
+                          <span className="text-muted-foreground mx-1">|</span>
+                          <span className="text-muted-foreground">↑</span> {formatBytes(customer.data_used?.upload || 0)}
                         </div>
                       </td>
-                      <td className="p-4">
-                        <div className="flex items-center space-x-2">
+                      <td className="py-2 px-3">
+                        <div className="flex items-center space-x-1">
                           {customer.location && (
-                            <Button variant="outline" size="icon">
-                              <MapPin className="h-4 w-4" />
+                            <Button variant="outline" size="icon" className="h-7 w-7">
+                              <MapPin className="h-3 w-3" />
                             </Button>
                           )}
-                          <Button variant="outline" size="icon">
-                            <RefreshCw className="h-4 w-4" />
+                          {customer.online_status === 'online' && (
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              onClick={() => handleCoa(customer)}
+                              title="Disconnect (CoA)"
+                              className="h-7 w-7 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                            >
+                              <WifiOff className="h-3 w-3" />
+                            </Button>
+                          )}
+                          <Button variant="outline" size="icon" className="h-7 w-7">
+                            <RefreshCw className="h-3 w-3" />
                           </Button>
                         </div>
                       </td>
@@ -426,6 +644,39 @@ export default function OnlineCustomersPage() {
                 </tbody>
               </table>
             </div>
+
+            {/* Pagination */}
+            {pagination.totalPages > 1 && (
+              <div className="mt-4 flex items-center justify-between">
+                <div className="text-xs text-muted-foreground">
+                  Menampilkan {(pagination.page - 1) * pagination.pageSize + 1} - {Math.min(pagination.page * pagination.pageSize, pagination.total)} dari {pagination.total} pelanggan
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => handlePageChange(pagination.page - 1)}
+                    disabled={pagination.page === 1}
+                    className="h-7 w-7"
+                  >
+                    <ChevronLeft className="h-3 w-3" />
+                  </Button>
+                  <span className="text-xs">
+                    Halaman {pagination.page} dari {pagination.totalPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => handlePageChange(pagination.page + 1)}
+                    disabled={pagination.page === pagination.totalPages}
+                    className="h-7 w-7"
+                  >
+                    <ChevronRight className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+            )}
+            </>
           )}
         </CardContent>
       </Card>

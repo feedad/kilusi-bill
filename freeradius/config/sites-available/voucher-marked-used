@@ -1,0 +1,32 @@
+# Configuration to mark hotspot vouchers as used
+# This site is used specifically for hotspot voucher sessions
+
+server voucher_marked_used {
+    listen {
+        type = acct
+        ipaddr = *
+        port = 1814
+    }
+    
+    accounting {
+        detail
+        sql
+        
+        # Call script when session ends for hotspot users (HS-*)
+        exec
+        if (User-Name =~ /^HS-/) {
+            # Only call when session actually stops
+            if ((Acct-Stop-Time != NULL) && ((Acct-Stop-Time != Acct-Start-Time))) {
+                update {
+                    &request: += &session-state:
+                }
+                # Call our script to mark voucher as used
+                exec-wait {
+                    program = "/usr/bin/bash"
+                    script = "/root/kilusi-bill/freeradius/config/voucher-mark-used.sh"
+                    input_pairs = "%{User-Name} %{Acct-Session-Time} %{Acct-Terminate-Cause} %{Acct-Start-Time} %{Acct-Stop-Time}"
+                }
+            }
+        }
+    }
+}

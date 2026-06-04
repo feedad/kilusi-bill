@@ -37,6 +37,8 @@ import {
   TicketCheck,
   Wrench,
   PlusCircle,
+  CheckCircle,
+  AlertTriangle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -141,6 +143,12 @@ const navigationGroups: NavGroup[] = [
         roles: ['admin'],
       },
       {
+        name: 'Mitra',
+        href: '/admin/mitra',
+        icon: MapPin,
+        roles: ['admin'],
+      },
+      {
         name: 'Support Tiket',
         href: '/admin/support',
         icon: Headset,
@@ -203,9 +211,15 @@ const navigationGroups: NavGroup[] = [
     roles: ['admin'],
     items: [
       {
-        name: 'Billing & Invoice',
+        name: 'Tagihan',
         href: '/admin/billing',
         icon: CreditCard,
+        roles: ['admin'],
+      },
+      {
+        name: 'Verifikasi Pembayaran',
+        href: '/admin/payments-verification',
+        icon: CheckCircle,
         roles: ['admin'],
       },
       {
@@ -330,17 +344,10 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     }))
     .filter(group => group.items.length > 0)
 
-  const handleLogout = async () => {
+  const handleLogout = () => {
     setIsLoggingOut(true)
-    try {
-      await logout()
-      onClose()
-    } catch (error) {
-      console.error('Logout error:', error)
-      onClose()
-    } finally {
-      setIsLoggingOut(false)
-    }
+    logout() // Instant logout - no await needed
+    // No need to close sidebar as redirect happens immediately
   }
 
   return (

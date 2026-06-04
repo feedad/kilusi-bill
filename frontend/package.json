@@ -1,6 +1,6 @@
 {
   "name": "kilusi-bill-frontend",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "description": "Kilusi Bill Frontend - Next.js Application",
   "private": true,
   "scripts": {

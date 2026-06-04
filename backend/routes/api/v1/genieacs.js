@@ -74,7 +74,7 @@ router.get('/devices', asyncHandler(async (req, res) => {
     }
 
     // Process devices dengan format yang sama seperti adminGenieacs.js
-    const devices = devicesRaw.map((device, i) => {
+    const processedDevices = devicesRaw.map((device, i) => {
         // Extract basic info
         const id = device._id || device.DeviceID?.SerialNumber || '-';
         const serialNumber = device.DeviceID?.SerialNumber || device._id || '-';
@@ -94,7 +94,10 @@ router.get('/devices', asyncHandler(async (req, res) => {
         const rxPower = getParameterWithPaths(device, parameterPaths.rxPower);
 
         // Extract tags/nomor pelanggan
-        const tag = (Array.isArray(device.Tags) && device.Tags.length > 0)
+        const tags = device._tags || device.Tags || [];
+        const customerIdTag = tags.find(t => t.startsWith('id:'))?.replace('id:', '');
+        
+        const tagString = (Array.isArray(device.Tags) && device.Tags.length > 0)
             ? device.Tags.join(', ')
             : (typeof device.Tags === 'string' && device.Tags)
                 ? device.Tags
@@ -119,8 +122,10 @@ router.get('/devices', asyncHandler(async (req, res) => {
             password: password,
             userKonek: userKonek,
             rxPower: rxPower,
-            tag: tag,
-            tags: device._tags || device.Tags || [],
+            tag: tagString,
+            customerId: customerIdTag,
+            customerName: 'Memuat...', // Will be filled later
+            tags: tags,
             _tags: device._tags || [],
             Tags: device.Tags || [],
             parameters: device,
@@ -128,15 +133,49 @@ router.get('/devices', asyncHandler(async (req, res) => {
         };
     });
 
+    // Bulk fetch customer names to improve performance
+    const customerIds = processedDevices
+        .filter(d => d.customerId && !isNaN(d.customerId))
+        .map(d => parseInt(d.customerId));
+
+    if (customerIds.length > 0) {
+        try {
+            const customerNamesResult = await query(
+                `SELECT id, name FROM customers WHERE id = ANY($1)`,
+                [customerIds]
+            );
+            
+            const nameMap = {};
+            customerNamesResult.rows.forEach(row => {
+                nameMap[row.id] = row.name;
+            });
+
+            processedDevices.forEach(device => {
+                if (device.customerId && nameMap[device.customerId]) {
+                    device.customerName = nameMap[device.customerId];
+                    // Update tag string to show name for easier admin viewing
+                    device.tag = `${device.customerName} (${device.tag})`;
+                } else if (device.customerId) {
+                    device.customerName = 'Pelanggan Tidak Ditemukan';
+                } else {
+                    device.customerName = '-';
+                }
+            });
+        } catch (dbErr) {
+            logger.error('Failed to fetch customer names for ACS list:', dbErr);
+        }
+    }
+
     // Apply filters
-    let filteredDevices = devices;
+    let filteredDevices = processedDevices;
 
     if (search) {
         filteredDevices = filteredDevices.filter(device =>
             device.serialNumber.toLowerCase().includes(search.toLowerCase()) ||
             device.pppoeUsername.toLowerCase().includes(search.toLowerCase()) ||
             device.ssid.toLowerCase().includes(search.toLowerCase()) ||
-            device.tag.toLowerCase().includes(search.toLowerCase())
+            device.tag.toLowerCase().includes(search.toLowerCase()) ||
+            (device.customerName && device.customerName.toLowerCase().includes(search.toLowerCase()))
         );
     }
 
@@ -157,7 +196,7 @@ router.get('/devices', asyncHandler(async (req, res) => {
         online_devices: devicesRaw.filter(dev => dev._lastInform && (now - new Date(dev._lastInform).getTime()) < 3600 * 1000).length,
         offline_devices: 0,
         warning_devices: 0,
-        total_customers: devices.filter(d => d.tag !== '-').length
+        total_customers: processedDevices.filter(d => d.customerId).length
     };
     stats.offline_devices = stats.total_devices - stats.online_devices;
 

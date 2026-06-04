@@ -1,5 +1,6 @@
 'use client';
 
+import { CONFIG } from '@/lib/config'
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -21,6 +22,7 @@ interface PaymentMethod {
   gateway: string;
   method: string;
   name: string;
+  displayName?: string;
   icon: string;
   color: string;
   type: string;
@@ -30,7 +32,14 @@ interface PaymentMethod {
   instructions?: string[];
   active: boolean;
   logo?: string;
-  // Manual transfer specific fields
+  requires_proof?: boolean;
+  // Manual transfer specific fields (from settings)
+  bankName?: string;
+  accountNumber?: string;
+  accountName?: string;
+  provider?: string;
+  phoneNumber?: string;
+  // Legacy fields (for backward compatibility)
   bank_name?: string;
   account_number?: string;
   account_holder?: string;
@@ -56,23 +65,6 @@ export default function PaymentMethodSelector({
   const [searchTerm, setSearchTerm] = useState('');
   const [loadingMethods, setLoadingMethods] = useState(false);
   const [error, setError] = useState('');
-
-  // Group methods by type
-  const groupMethods = (methodsList: PaymentMethod[]) => {
-    return {
-      popular: methodsList.filter(m => ['QRIS', 'DANA', 'GOPAY', 'OVO'].includes(m.method)),
-      qris: methodsList.filter(m => m.method === 'QRIS'),
-      ewallet: methodsList.filter(m => ['DANA', 'GOPAY', 'OVO', 'SHOPEEPAY'].includes(m.method)),
-      bank_transfer: methodsList.filter(m => m.type === 'bank' || m.type === 'va'),
-      manual_transfer: methodsList.filter(m => m.type === 'manual_transfer'),
-      other: methodsList.filter(m =>
-        !['QRIS', 'DANA', 'GOPAY', 'OVO', 'SHOPEEPAY'].includes(m.method) &&
-        m.type !== 'bank' &&
-        m.type !== 'va' &&
-        m.type !== 'manual_transfer'
-      )
-    };
-  };
 
   // Filter methods based on search and amount
   const getFilteredMethods = () => {
@@ -117,7 +109,7 @@ export default function PaymentMethodSelector({
         // Get customer token from localStorage
         const customerToken = localStorage.getItem('customer_token');
 
-        const response = await fetch(`/api/v1/customer-payments/methods${amount ? `?amount=${amount}` : ''}`, {
+        const response = await fetch(`${CONFIG.API_BASE_URL}/api/v1/customer-payments/methods${amount ? `?amount=${amount}` : ''}`, {
           headers: {
             'Authorization': `Bearer ${customerToken}`,
             'Content-Type': 'application/json'
@@ -131,8 +123,13 @@ export default function PaymentMethodSelector({
         const data = await response.json();
 
         if (data.success) {
-          setMethods(data.data.methods || []);
-          setGroupedMethods(data.data.grouped || {});
+          const qrisMethod: PaymentMethod = {
+            gateway: 'qris', method: 'qris', name: 'QRIS (KILUSI)', displayName: 'Scan dengan aplikasi bank/e-wallet pendukung QRIS',
+            icon: 'bi-qr-code', color: 'info', type: 'qris', fee_customer: '0', active: true
+          }
+          setMethods([qrisMethod, ...(data.data.methods || [])]);
+          const grouped = data.data.grouped || {};
+          setGroupedMethods({ ...grouped, qris: [qrisMethod, ...(grouped.qris || [])] });
         } else {
           setError(data.error || 'Failed to load payment methods');
         }
@@ -238,7 +235,7 @@ export default function PaymentMethodSelector({
             <div className="flex flex-col gap-1.5 mt-2">
               <div className="flex items-center gap-2">
                 <Badge variant="secondary" className="text-[10px] h-5 px-1.5 font-medium bg-slate-700/50 text-slate-400 border border-slate-600 block w-fit">
-                  {method.type === 'manual_transfer' ? 'MANUAL' : method.type.toUpperCase()}
+                  {method.type?.startsWith('manual_') ? 'MANUAL' : (method.type || '').toUpperCase()}
                 </Badge>
               </div>
 
@@ -260,18 +257,42 @@ export default function PaymentMethodSelector({
           </div>
         )}
 
-        {/* Show bank details for manual transfer */}
-        {method.type === 'manual_transfer' && isSelected && (
+        {/* Show bank details for manual payment */}
+        {method.type?.startsWith('manual_') && isSelected && (
           <div className="mt-3 p-3 bg-blue-900/20 border border-blue-700/50 rounded-lg">
-            <p className="text-sm font-semibold text-blue-200 mb-2">Detail Rekening:</p>
+            <p className="text-sm font-semibold text-blue-200 mb-2">Detail Pembayaran:</p>
             <div className="space-y-1 text-sm text-blue-300">
-              <p><span className="font-medium">Bank:</span> {method.bank_name}</p>
-              <p><span className="font-medium">No. Rekening:</span> {method.account_number}</p>
-              <p><span className="font-medium">Atas Nama:</span> {method.account_holder}</p>
+              {method.type === 'manual_bank' && (
+                <>
+                  <p><span className="font-medium">Bank:</span> {method.bankName}</p>
+                  <p><span className="font-medium">No. Rekening:</span> {method.accountNumber}</p>
+                  <p><span className="font-medium">Atas Nama:</span> {method.accountName}</p>
+                </>
+              )}
+              {method.type === 'manual_ewallet' && (
+                <>
+                  <p><span className="font-medium">E-Wallet:</span> {method.provider}</p>
+                  <p><span className="font-medium">No. HP:</span> {method.phoneNumber}</p>
+                  {method.accountName && <p><span className="font-medium">Atas Nama:</span> {method.accountName}</p>}
+                </>
+              )}
+              {method.type === 'manual_cash' && (
+                <p>Silakan bayar tunai ke admin kami</p>
+              )}
             </div>
             <p className="text-xs text-blue-400 mt-2 italic">
-              Setelah transfer, upload bukti pembayaran untuk verifikasi.
+              Setelah pembayaran, upload bukti pembayaran untuk verifikasi.
             </p>
+            {amount && (
+              <div className="mt-3 pt-3 border-t border-blue-700/50">
+                <p className="text-sm font-semibold text-blue-200">
+                  Total Transfer: Rp {amount.toLocaleString('id-ID')}
+                </p>
+                <p className="text-xs text-blue-400 mt-1">
+                  ⚠️ Transfer sesuai nominal sampai digit terakhir agar diproses otomatis
+                </p>
+              </div>
+            )}
           </div>
         )}
 
@@ -321,7 +342,17 @@ export default function PaymentMethodSelector({
   }
 
   const filteredMethods = getFilteredMethods();
-  const filteredGroups = groupMethods(filteredMethods);
+  const filteredMethodsSet = new Set(filteredMethods.map(m => m.method));
+
+  // Filter each group from backend by the filtered methods
+  const filteredGroups = {
+    popular: (groupedMethods.popular || []).filter(m => filteredMethodsSet.has(m.method)),
+    qris: (groupedMethods.qris || []).filter(m => filteredMethodsSet.has(m.method)),
+    ewallet: (groupedMethods.ewallet || []).filter(m => filteredMethodsSet.has(m.method)),
+    bank_transfer: (groupedMethods.bank_transfer || []).filter(m => filteredMethodsSet.has(m.method)),
+    manual: (groupedMethods.manual || []).filter(m => filteredMethodsSet.has(m.method)),
+    other: (groupedMethods.other || []).filter(m => filteredMethodsSet.has(m.method))
+  };
 
   return (
     <div className="space-y-8">
@@ -338,7 +369,7 @@ export default function PaymentMethodSelector({
         />
       </div>
 
-      /* Amount Display */
+      {/* Amount Display */}
       {amount && (
         <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-5 backdrop-blur-sm">
           <div className="flex justify-between items-center">
@@ -388,11 +419,11 @@ export default function PaymentMethodSelector({
       )}
 
       {/* Manual Transfer */}
-      {filteredGroups.manual_transfer?.length > 0 && (
+      {filteredGroups.manual?.length > 0 && (
         <MethodSection
           title="🏦 Transfer Manual"
-          methods={filteredGroups.manual_transfer}
-          groupKey="manual_transfer"
+          methods={filteredGroups.manual}
+          groupKey="manual"
         />
       )}
 

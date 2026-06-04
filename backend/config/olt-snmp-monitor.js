@@ -1,5 +1,13 @@
 const snmp = require('net-snmp');
 
+const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes (signal rarely changes)
+const oltOnuCache = new Map(); // key: `${host}:${vendor}`, value: { onus, cachedAt }
+let signalByUsernameCache = new Map(); // key: pppoeUsername, value: { rx_power, tx_power, distance, temperature, olt_name, onu_index, cachedAt }
+let lastSignalRefreshTime = 0;
+let cacheRefreshInProgress = false;
+let lastRadacctSessions = [];
+let lastOltsConfig = [];
+
 const OLT_OIDS = {
   zte: {
     uptime: '1.3.6.1.2.1.1.3.0',
@@ -33,7 +41,8 @@ const OLT_OIDS = {
     onuRxPower: '1.3.6.1.4.1.50224.3.3.3.1.4',   // Index + .0.0, value -1619
     onuName: '1.3.6.1.4.1.50224.3.3.2.1.2',      // Customer Name
     onuDistance: '1.3.6.1.4.1.50224.3.3.2.1.15', // Distance (Simple Index)
-    onuTemperature: '1.3.6.1.4.1.50224.3.3.2.1.10' // Temp (Unused here, override in loop)
+    onuTemperature: '1.3.6.1.4.1.50224.3.3.2.1.10', // Temp (Unused here, override in loop)
+    onuTxPower: null // HSGQ EPON TX Power OID - need to discover
   },
   hioso: {
     uptime: '1.3.6.1.2.1.1.3.0',
@@ -294,14 +303,19 @@ async function setOnuName(config, index, name) {
 
     const targetOid = `${nameOidBase}.${index}`;
 
-    // Sanitize name: remove special chars, limit length
-    const safeName = name.replace(/[^a-zA-Z0-9\s-_]/g, '').substring(0, 30);
+    // Sanitize name: only ASCII alphanumeric, space, underscore, hyphen — max 30 chars
+    const safeName = name.replace(/[^a-zA-Z0-9 _-]/g, '').substring(0, 30);
+
+    // Pad to 16 bytes with nulls — OLT uses fixed-size buffer, without padding
+    // it reads adjacent memory as part of the name (garbage bytes after the string)
+    const padded = Buffer.alloc(16);
+    padded.write(safeName, 0, safeName.length, 'ascii');
 
     await new Promise((resolve, reject) => {
       session.set([{
         oid: targetOid,
         type: snmp.ObjectType.OctetString,
-        value: safeName
+        value: padded
       }], (error) => {
         if (error) reject(error);
         else resolve();
@@ -342,7 +356,7 @@ async function getOnuList(config) {
       throw new Error('Vendor not supported: ' + vendor);
     }
 
-    const { onuSn, onuStatus, onuRxPower, onuName, onuDistance, onuTemperature } = OLT_OIDS[vendor];
+    const { onuSn, onuStatus, onuRxPower, onuName, onuDistance, onuTemperature, onuTxPower } = OLT_OIDS[vendor];
 
     console.log(`[OLT Monitor] Walking OIDs for ${vendor} on ${host}:`);
     console.log(`  - onuSn: ${onuSn}`);
@@ -351,9 +365,10 @@ async function getOnuList(config) {
     console.log(`  - onuName: ${onuName}`);
     if (onuDistance) console.log(`  - onuDistance: ${onuDistance}`);
     if (onuTemperature) console.log(`  - onuTemperature: ${onuTemperature}`);
+    if (onuTxPower) console.log(`  - onuTxPower: ${onuTxPower}`);
 
     // Sequential walks for better debugging
-    let snList = [], statusList = [], rxList = [], nameList = [], distList = [], tempList = [];
+    let snList = [], statusList = [], rxList = [], nameList = [], distList = [], tempList = [], txList = [];
 
     try {
       snList = await snmpWalk(session, onuSn);
@@ -407,9 +422,17 @@ async function getOnuList(config) {
       }
     }
 
-    // session.close() moved to end
+    // TX Power Walk (if available)
+    if (onuTxPower && !useOnDemandProbe) {
+      try {
+        txList = await snmpWalk(session, onuTxPower);
+        console.log(`[OLT Monitor] TxPower Walk returned ${txList.length} items`);
+      } catch (e) {
+        console.error(`[OLT Monitor] TxPower Walk failed: ${e.message}`);
+      }
+    }
 
-    // Map by index suffix
+    // Map by index suffix (session still needed for on-demand probe below)
     const onuMap = {};
 
     // Helper to extract suffix
@@ -442,13 +465,13 @@ async function getOnuList(config) {
       if (val.length === 12 && (vendor === 'hsgq' || vendor === 'hioso')) {
         val = val.match(/.{1,2}/g).join(':');
       }
-
       onuMap[suffix] = {
         index: suffix,
         sn: val, // MAC/SN
         status: 'offline', // default
         rxPower: '-',
         rxRaw: 0,
+        txPower: '-',
         name: '-',
         distance: '-',
         temperature: '-'
@@ -494,14 +517,40 @@ async function getOnuList(config) {
       }
     });
 
+    // Merge TX Power (if available)
+    if (txList.length > 0) {
+      txList.forEach(item => {
+        let suffix = getSuffix(item.oid, onuTxPower);
+        if (vendor === 'hsgq' && suffix.endsWith('.0.0')) suffix = suffix.replace('.0.0', '');
+        if (onuMap[suffix]) {
+          let val = item.value;
+          let txDbm = parseFloat(val);
+          // TX Power conversion (similar to RX Power)
+          if (!isNaN(txDbm)) {
+            if (vendor === 'hsgq') {
+              // HSGQ EPON: check if needs division
+              if (Math.abs(txDbm) > 1000) txDbm = txDbm / 100;
+            } else if (Math.abs(txDbm) > 1000) {
+              txDbm = txDbm / 100;
+            }
+            if (txDbm > 60000 || val === 2147483647) txDbm = -Infinity;
+            onuMap[suffix].txPower = (txDbm === -Infinity || isNaN(txDbm)) ? '-' : txDbm.toFixed(2);
+          } else {
+            onuMap[suffix].txPower = '-';
+          }
+        }
+      });
+    }
+
     // Merge Name
     for (const item of nameList) {
       let suffix = getSuffix(item.oid, onuName);
       if (vendor === 'hsgq' && suffix.endsWith('.0.0')) suffix = suffix.replace('.0.0', '');
 
       if (onuMap[suffix]) {
-        const name = item.value.toString();
-        onuMap[suffix].name = name;
+        const rawName = Buffer.isBuffer(item.value) ? item.value.toString('latin1') : String(item.value);
+        const name = rawName.replace(/[^\x20-\x7E]/g, '').trim();
+        onuMap[suffix].name = name || '-';
 
 
 
@@ -623,6 +672,8 @@ async function getOnuList(config) {
         if (vendor === 'hsgq') oIdx += '.0.0';
         oidsToGet.push(oIdx);
         oidMap[oIdx] = { suffix: s, type: 'rx' };
+
+
       });
 
       console.log(`[OLT Monitor] Probing ${oidsToGet.length} OIDs for ${targetSuffixes.length} Online ONUs...`);
@@ -684,6 +735,7 @@ async function getOnuList(config) {
       await Promise.all(chunkPromises);
     }
 
+    try { session.close(); } catch (e) { }
     console.log(`[OLT Monitor] Returning ${Object.keys(onuMap).length} ONUs`);
     return Object.values(onuMap);
 
@@ -754,6 +806,151 @@ async function rebootOnu(config, index, sn) {
   }
 }
 
+/**
+ * Get cached ONU list for an OLT — returns whatever is in cache (may be null)
+ */
+async function getCachedOnuList(config) {
+  const key = `${config.host}:${config.vendor || 'zte'}`;
+  const cached = oltOnuCache.get(key);
+  return cached ? cached.onus : null;
+}
+
+async function refreshCacheForOlt(config, key) {
+  try {
+    const onus = await getOnuList(config);
+    oltOnuCache.set(key, { onus, cachedAt: Date.now() });
+
+    // Re-run matching with updated OLT cache
+    if (lastRadacctSessions.length > 0 && lastOltsConfig.length > 0) {
+      const result = await doMatch(lastRadacctSessions, lastOltsConfig);
+      if (result.size > 0) signalByUsernameCache = result;
+    }
+
+    return onus;
+  } catch (e) {
+    console.error(`[OLT Cache] Refresh failed for ${key}:`, e.message);
+    throw e;
+  }
+}
+
+/**
+ * Match ONU signal data to customers by radacct sessions
+ * @param {Array} radacctSessions — rows from radacct with callingstationid, username
+ * @param {Array} oltsConfig — array of OLT config objects from DB
+ * @returns {Map} pppoeUsername -> { rx_power, tx_power, distance, temperature, olt_name, onu_index }
+ */
+async function doMatch(radacctSessions, oltsConfig) {
+  const result = new Map();
+
+  // Build mac -> username map from radacct (callingstationid or mac_address without separators)
+  const macToUsername = new Map();
+  for (const s of radacctSessions) {
+    const mac = (s.mac_address || s.callingstationid || '').toLowerCase().replace(/[:-]/g, '');
+    if (mac && s.username) {
+      macToUsername.set(mac, s.username);
+    }
+  }
+
+  for (const olt of oltsConfig) {
+    const oltConfig = {
+      host: olt.host,
+      community: olt.snmp_community,
+      version: olt.snmp_version || '2c',
+      port: olt.snmp_port || 161,
+      vendor: olt.type
+    };
+
+    const cacheKey = `${oltConfig.host}:${oltConfig.vendor || 'zte'}`;
+    const cached = oltOnuCache.get(cacheKey);
+    const onus = cached ? cached.onus : null;
+    if (!onus) continue;
+
+    for (const onu of onus) {
+      if (!onu.sn || onu.status !== 'online') continue;
+      const onuMac = onu.sn.toLowerCase().replace(/[:-]/g, '');
+      let matchedUsername = macToUsername.get(onuMac);
+
+      // Fuzzy match (tolerance 0x10)
+      if (!matchedUsername) {
+        let minDiff = BigInt(0x10);
+        for (const [sessionMac, username] of macToUsername.entries()) {
+          if (sessionMac.length !== onuMac.length) continue;
+          try {
+            const sessionMacInt = BigInt('0x' + sessionMac);
+            const onuMacInt = BigInt('0x' + onuMac);
+            const diff = sessionMacInt > onuMacInt ? sessionMacInt - onuMacInt : onuMacInt - sessionMacInt;
+            if (diff <= BigInt(0x10) && diff < minDiff) {
+              minDiff = diff;
+              matchedUsername = username;
+            }
+          } catch (e) { continue; }
+        }
+      }
+
+      if (matchedUsername) {
+        const toVal = (v) => (v === '-' || v == null || v === '') ? null : v;
+        result.set(matchedUsername, {
+          rx_power: toVal(onu.rxPower),
+          tx_power: toVal(onu.txPower),
+          distance: toVal(onu.distance),
+          temperature: toVal(onu.temperature),
+          olt_name: olt.name,
+          onu_index: onu.index
+        });
+      }
+    }
+  }
+
+  return result;
+}
+
+async function matchSignalToCustomers(radacctSessions, oltsConfig) {
+  lastRadacctSessions = radacctSessions;
+  lastOltsConfig = oltsConfig;
+
+  // Trigger background refresh for all OLTs (non-blocking)
+  for (const olt of oltsConfig) {
+    const oltConfig = {
+      host: olt.host,
+      community: olt.snmp_community,
+      version: olt.snmp_version || '2c',
+      port: olt.snmp_port || 161,
+      vendor: olt.type
+    };
+    const key = `${oltConfig.host}:${oltConfig.vendor || 'zte'}`;
+    const cached = oltOnuCache.get(key);
+
+    if (!cached || (Date.now() - cached.cachedAt) >= CACHE_TTL_MS) {
+      refreshCacheForOlt(oltConfig, key).catch(e => {
+        console.error(`[OLT Cache] Background refresh failed for ${key}:`, e.message);
+      });
+    }
+  }
+
+  // Run matching with whatever is in cache now
+  const result = await doMatch(lastRadacctSessions, lastOltsConfig);
+  signalByUsernameCache = result;
+  lastSignalRefreshTime = Date.now();
+  return signalByUsernameCache;
+}
+
+function isSignalCacheStale() {
+  return (Date.now() - lastSignalRefreshTime) >= CACHE_TTL_MS;
+}
+
+/**
+ * Get cached signal data for a list of usernames
+ */
+function getSignalForUsernames(usernames) {
+  const result = {};
+  for (const u of usernames) {
+    if (signalByUsernameCache.has(u)) {
+      result[u] = signalByUsernameCache.get(u);
+    }
+  }
+  return result;
+}
+
 module.exports = {
   getOLTDeviceInfo,
   getPONPorts,
@@ -763,6 +960,10 @@ module.exports = {
   findOnuBySn,
   setOnuName,
   getOnuList,
+  getCachedOnuList,
+  matchSignalToCustomers,
+  getSignalForUsernames,
+  isSignalCacheStale,
   rebootOnu,
   OLT_OIDS
 };

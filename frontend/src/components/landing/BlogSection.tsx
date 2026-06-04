@@ -55,7 +55,7 @@ export default function BlogSection() {
                                     <div className="p-6 flex-1 flex flex-col">
                                         <div className="flex items-center text-xs text-slate-500 mb-3 gap-2">
                                             <CalendarIcon className="w-4 h-4" />
-                                            {new Date(post.created_at).toLocaleDateString('id-ID')}
+                                            {new Date(post.created_at).toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' })}
                                         </div>
                                         <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2 line-clamp-2 group-hover:text-blue-600 transition-colors">
                                             {post.title}

@@ -461,7 +461,7 @@ router.get('/me', async (req, res) => {
 
         // Get customer data
         const customer = await getOne(
-            'SELECT c.id, c.name, c.phone, c.email, c.pppoe_username, c.status, c.package_id, p.name as package_name, p.price, p.speed FROM customers c LEFT JOIN packages p ON c.package_id = p.id WHERE c.id = $1',
+            'SELECT c.id, c.name, c.phone, c.email, s.service_number as pppoe_username, c.status, c.package_id, p.name as package_name, p.price, p.speed FROM customers c LEFT JOIN packages p ON c.package_id = p.id LEFT JOIN services s ON s.customer_id = c.id WHERE c.id = $1 LIMIT 1',
             [decoded.customerId]
         );
 

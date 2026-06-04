@@ -27,7 +27,7 @@ class BillingCycleService {
 
         try {
             const settings = await getOne(`
-                SELECT billing_cycle_type, invoice_advance_days, profile_default_period, fixed_day
+                SELECT billing_cycle_type, invoice_advance_days, profile_default_period, fixed_day, monthly_due_date, reconnection_method, suspension_time, invoice_time, reminder_time
                 FROM billing_settings
                 LIMIT 1
             `);
@@ -38,7 +38,10 @@ class BillingCycleService {
                     billing_cycle_type: 'profile',
                     invoice_advance_days: 5,
                     profile_default_period: 30,
-                    fixed_day: 1
+                    fixed_day: 1,
+                    monthly_due_date: 20,
+                    reconnection_method: 'payment_date',
+                    suspension_time: '10:00'
                 };
             } else {
                 this.billingSettings = settings;
@@ -53,7 +56,10 @@ class BillingCycleService {
                 billing_cycle_type: 'profile',
                 invoice_advance_days: 5,
                 profile_default_period: 30,
-                fixed_day: 1
+                fixed_day: 1,
+                monthly_due_date: 20,
+                reconnection_method: 'payment_date',
+                suspension_time: '10:00'
             };
         }
     }
@@ -61,6 +67,7 @@ class BillingCycleService {
     /**
      * Get customer's billing cycle type (override or system default)
      * Now checks the services table.
+     * Maps Indonesian cycle names (TETAP, BULANAN) to internal types (profile, monthly)
      */
     async getCustomerBillingCycle(customerId, serviceId = null) {
         try {
@@ -83,7 +90,25 @@ class BillingCycleService {
             }
 
             if (result && result.siklus) {
-                return result.siklus;
+                const dbCycle = result.siklus;
+                // Map Indonesian billing cycle names to internal types
+                const cycleMap = {
+                    'TETAP': 'fixed',
+                    'BULANAN': 'monthly',
+                    'PROFILE': 'profile',
+                    'tetap': 'fixed',
+                    'bulan': 'monthly',
+                    'profile': 'profile',
+                    'monthly': 'monthly',
+                    'fixed': 'fixed'
+                };
+                const mappedCycle = cycleMap[dbCycle];
+                if (mappedCycle) {
+                    return mappedCycle;
+                }
+                // If unknown cycle, log warning and return as-is
+                logger.warn(`Unknown billing cycle '${dbCycle}', using as-is`);
+                return dbCycle;
             }
 
             const settings = await this.getBillingSettings();
@@ -102,9 +127,9 @@ class BillingCycleService {
      * @param {number} profilePeriod - Profile period in days (for profile cycle)
      * @returns {Date} Calculated isolir date
      */
-    async calculateIsolirDate(customerId, activeDate, profilePeriod = null) {
+    async calculateIsolirDate(customerId, activeDate, profilePeriod = null, siklus = null) {
         try {
-            const billingCycle = await this.getCustomerBillingCycle(customerId);
+            const billingCycle = siklus || await this.getCustomerBillingCycle(customerId);
             const settings = await this.getBillingSettings();
 
             switch (billingCycle) {
@@ -117,7 +142,7 @@ class BillingCycleService {
                     return this.calculateFixedIsolirDate(activeDate, fixedDay);
 
                 case 'monthly':
-                    return this.calculateMonthlyIsolirDate(activeDate);
+                    return await this.calculateMonthlyIsolirDate(activeDate);
 
                 default:
                     logger.warn(`Unknown billing cycle: ${billingCycle}, using profile as default`);
@@ -146,32 +171,32 @@ class BillingCycleService {
      * isolir_date = same day every next month
      */
     calculateFixedIsolirDate(activeDate, fixedDay) {
-        const isolirDate = new Date(activeDate);
-
-        // Move to next month
-        isolirDate.setMonth(isolirDate.getMonth() + 1);
-
-        // Set to the specified day, adjusting for month length
-        const lastDayOfMonth = new Date(isolirDate.getFullYear(), isolirDate.getMonth() + 1, 0).getDate();
-        isolirDate.setDate(Math.min(fixedDay, lastDayOfMonth));
-
-        return isolirDate;
+        // Use safe month arithmetic to avoid JavaScript Date overflow
+        // e.g. May 31 + 1 month → June 30 (not July 1)
+        const y = activeDate.getFullYear();
+        const m = activeDate.getMonth() + 1;
+        const adjY = y + Math.floor(m / 12);
+        const adjM = m % 12;
+        const lastDayOfMonth = new Date(adjY, adjM + 1, 0).getDate();
+        const day = Math.min(fixedDay, lastDayOfMonth);
+        return new Date(adjY, adjM, day);
     }
 
     /**
      * Calculate isolir date for MONTHLY cycle
      * isolir_date = 20th of next month
      */
-    calculateMonthlyIsolirDate(activeDate) {
-        const isolirDate = new Date(activeDate);
+    async calculateMonthlyIsolirDate(activeDate) {
+        const settings = await this.getBillingSettings();
+        const dueDate = settings.monthly_due_date || 20;
 
-        // Move to next month
-        isolirDate.setMonth(isolirDate.getMonth() + 1);
-
-        // Set to 20th day
-        isolirDate.setDate(20);
-
-        return isolirDate;
+        // Use safe month arithmetic to avoid JavaScript Date overflow
+        const y = activeDate.getFullYear();
+        const m = activeDate.getMonth() + 1;
+        const adjY = y + Math.floor(m / 12);
+        const adjM = m % 12;
+        const lastDayOfMonth = new Date(adjY, adjM + 1, 0).getDate();
+        return new Date(adjY, adjM, Math.min(dueDate, lastDayOfMonth));
     }
 
     /**
@@ -237,11 +262,20 @@ class BillingCycleService {
                     break;
 
                 case 'fixed':
-                    nextIsolirDate = this.calculateFixedIsolirDate(periodStart, settings.fixed_day);
+                    // Get customer active date to get fixed day
+                    const service = await getOne(`
+                        SELECT active_date
+                        FROM services
+                        WHERE customer_id = $1
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                    `, [customerId]);
+                    const fixedDay = service && service.active_date ? new Date(service.active_date).getDate() : (settings.fixed_day || 1);
+                    nextIsolirDate = this.calculateFixedIsolirDate(periodStart, fixedDay);
                     break;
 
                 case 'monthly':
-                    nextIsolirDate = this.calculateMonthlyIsolirDate(periodStart);
+                    nextIsolirDate = await this.calculateMonthlyIsolirDate(periodStart);
                     break;
 
                 default:
@@ -346,27 +380,36 @@ class BillingCycleService {
                     invoice_advance_days = $2,
                     profile_default_period = $3,
                     fixed_day = $4,
+                    monthly_due_date = $5,
+                    reconnection_method = $6,
+                    suspension_time = $7,
                     updated_at = CURRENT_TIMESTAMP
                 RETURNING *
             `, [
                 newSettings.billing_cycle_type,
                 newSettings.invoice_advance_days,
                 newSettings.profile_default_period,
-                newSettings.fixed_day
+                newSettings.fixed_day,
+                newSettings.monthly_due_date,
+                newSettings.reconnection_method,
+                newSettings.suspension_time
             ]);
 
             if (result.rows.length === 0) {
                 // Insert if no existing settings
                 const insertResult = await query(`
                     INSERT INTO billing_settings (
-                        billing_cycle_type, invoice_advance_days, profile_default_period, fixed_day
-                    ) VALUES ($1, $2, $3, $4)
+                        billing_cycle_type, invoice_advance_days, profile_default_period, fixed_day, monthly_due_date, reconnection_method, suspension_time
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
                     RETURNING *
                 `, [
                     newSettings.billing_cycle_type,
                     newSettings.invoice_advance_days,
                     newSettings.profile_default_period,
-                    newSettings.fixed_day
+                    newSettings.fixed_day,
+                    newSettings.monthly_due_date,
+                    newSettings.reconnection_method,
+                    newSettings.suspension_time
                 ]);
 
                 return insertResult.rows[0];
@@ -376,6 +419,134 @@ class BillingCycleService {
         } catch (error) {
             logger.error('Error updating billing settings:', error);
             throw error;
+        }
+    }
+
+    /**
+     * Update service active_date and isolir_date after payment
+     * This should be called whenever an invoice is marked as paid
+     */
+    async updateServiceDatesAfterPayment(invoiceId, paymentDate = null) {
+        try {
+            // Get invoice, service, and ACTUAL payment date from payments table
+            const result = await query(`
+                SELECT
+                    i.id as invoice_id,
+                    i.customer_id,
+                    i.due_date,
+                    COALESCE(p.payment_date, i.payment_date) as payment_date,
+                    i.package_id,
+                    s.id as service_id,
+                    s.siklus,
+                    s.billing_type,
+                    s.status as service_status
+                FROM invoices i
+                LEFT JOIN services s ON s.customer_id = i.customer_id
+                LEFT JOIN LATERAL (
+                    SELECT payment_date
+                    FROM payments
+                    WHERE invoice_id = i.id AND is_rolled_back = FALSE
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                ) p ON true
+                WHERE i.id = $1
+                LIMIT 1
+            `, [invoiceId]);
+
+            if (result.rows.length === 0) {
+                logger.warn(`[UPDATE_DATES] No invoice found with id ${invoiceId}`);
+                return null;
+            }
+
+            const invoice = result.rows[0];
+
+            // Skip if no service found
+            if (!invoice.service_id) {
+                logger.warn(`[UPDATE_DATES] No service found for invoice ${invoiceId}`);
+                return null;
+            }
+
+            // Use provided payment_date or payment_date from payments table
+            const actualPaymentDate = paymentDate || invoice.payment_date;
+            if (!actualPaymentDate) {
+                logger.warn(`[UPDATE_DATES] No payment date available for invoice ${invoiceId}`);
+                return null;
+            }
+
+            // Get billing settings
+            const settings = await this.getBillingSettings();
+            const method = settings.reconnection_method || 'payment_date';
+
+            // Only update if reconnection method is 'payment_date'
+            if (method !== 'payment_date') {
+                logger.info(`[UPDATE_DATES] Reconnection method is '${method}', skipping date update`);
+                return null;
+            }
+
+            const dueDate = new Date(invoice.due_date);
+            const payDate = new Date(actualPaymentDate);
+
+            // Calculate new active_date
+            let newActiveDate;
+            if (payDate <= dueDate) {
+                newActiveDate = dueDate; // Bayar sebelum/sama due date
+            } else {
+                newActiveDate = payDate; // Bayar setelah due date
+            }
+
+            // Get billing cycle and calculate isolir_date
+            const dbCycle = invoice.siklus || settings.billing_cycle_type;
+            const cycleMap = {
+                'TETAP': 'fixed',
+                'BULANAN': 'monthly',
+                'PROFILE': 'profile',
+                'tetap': 'fixed',
+                'bulan': 'monthly',
+                'profile': 'profile',
+                'monthly': 'monthly',
+                'fixed': 'fixed'
+            };
+            const cycle = cycleMap[dbCycle] || settings.billing_cycle_type;
+
+            let newIsolirDate;
+            if (cycle === 'profile') {
+                const period = settings.profile_default_period || 30;
+                newIsolirDate = new Date(newActiveDate);
+                newIsolirDate.setDate(newIsolirDate.getDate() + period);
+            } else if (cycle === 'monthly') {
+                // Use safe month arithmetic to avoid JavaScript Date overflow
+                const y = newActiveDate.getFullYear();
+                const m = newActiveDate.getMonth() + 1;
+                const adjY = y + Math.floor(m / 12);
+                const adjM = m % 12;
+                const dueDay = settings.monthly_due_date || 20;
+                const lastDay = new Date(adjY, adjM + 1, 0).getDate();
+                newIsolirDate = new Date(adjY, adjM, Math.min(dueDay, lastDay));
+            } else if (cycle === 'fixed') {
+                // Use safe month arithmetic to avoid JavaScript Date overflow
+                const y = newActiveDate.getFullYear();
+                const m = newActiveDate.getMonth() + 1;
+                const adjY = y + Math.floor(m / 12);
+                const adjM = m % 12;
+                const lastDay = new Date(adjY, adjM + 1, 0).getDate();
+                const fixedDay = newActiveDate.getDate();
+                newIsolirDate = new Date(adjY, adjM, Math.min(fixedDay, lastDay));
+            }
+
+            // Update service dates
+            await query(`
+                UPDATE services
+                SET active_date = $1,
+                    isolir_date = $2,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = $3
+            `, [newActiveDate, newIsolirDate, invoice.service_id]);
+
+            logger.info(`✅ [UPDATE_DATES] Service ${invoice.service_id} dates updated: active_date=${newActiveDate.toISOString().split('T')[0]}, isolir_date=${newIsolirDate.toISOString().split('T')[0]} (cycle: ${dbCycle})`);
+            return { newActiveDate, newIsolirDate };
+
+        } catch (error) {
+            logger.error('[UPDATE_DATES] Error updating service dates after payment:', error);
         }
     }
 

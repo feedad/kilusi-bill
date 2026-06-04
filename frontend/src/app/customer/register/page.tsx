@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { toast } from 'react-hot-toast';
 import { UserIcon, PhoneIcon, MapPinIcon, TicketIcon, CheckBadgeIcon } from '@heroicons/react/24/outline';
+import { CONFIG } from '@/lib/config';
 import Link from 'next/link';
 
 export default function RegisterPage() {
@@ -35,8 +36,8 @@ export default function RegisterPage() {
             validateReferralCode(refCode);
         }
 
-        // Fetch Packages
-        fetch('/api/v1/landing/packages')
+        // Fetch Packages from landing page endpoint
+        fetch(`${CONFIG.API_BASE_URL}/api/v1/landing/packages`)
             .then(res => res.json())
             .then(data => {
                 if (data.success) setPackages(data.data);
@@ -83,7 +84,7 @@ export default function RegisterPage() {
         setLoading(true);
 
         try {
-            const res = await fetch('/api/v1/public/register', {
+            const res = await fetch(`${CONFIG.API_BASE_URL}/api/v1/public/register`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(formData)
@@ -139,7 +140,7 @@ export default function RegisterPage() {
                                 <option value="">-- Pilih Paket Internet --</option>
                                 {packages.map(pkg => (
                                     <option key={pkg.id} value={pkg.id}>
-                                        {pkg.name} - {pkg.speed} Mbps
+                                        {pkg.name} — {pkg.speed} — Rp {pkg.price?.toLocaleString('id-ID')}
                                     </option>
                                 ))}
                             </select>

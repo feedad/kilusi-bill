@@ -53,6 +53,8 @@ interface InvoiceDetail {
   paid_at?: string
   description: string
   payment_method?: string
+  payment_source?: string // 'tripay' | 'manual' | 'admin'
+  processed_by?: string // Admin name who processed the payment
   payment_details?: {
     method: string
     bank_name?: string
@@ -74,6 +76,8 @@ export default function InvoiceDetailPage() {
   const router = useRouter()
   const { customer } = useCustomerAuth()
   const [invoice, setInvoice] = useState<InvoiceDetail | null>(null)
+  const [company, setCompany] = useState<{ name: string; address: string; phone: string; email: string } | null>(null)
+  const [service, setService] = useState<{ active_date: string; isolir_date: string; status: string } | null>(null)
   const [loading, setLoading] = useState(true)
   const [downloading, setDownloading] = useState(false)
 
@@ -89,7 +93,10 @@ export default function InvoiceDetailPage() {
       const response = await api.get(`/api/v1/customer-billing/invoices/${invoiceId}`)
 
       if (response.data.success) {
-        setInvoice(response.data.data)
+        const data = response.data.data
+        setInvoice(data)
+        setCompany(data.company || null)
+        setService(data.service || null)
       } else {
         toast.error(`❌ ${response.data.message || 'Gagal memuat detail invoice'}`)
       }
@@ -132,30 +139,19 @@ export default function InvoiceDetailPage() {
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('id-ID', {
       year: 'numeric',
-      month: 'long',
+      month: '2-digit',
       day: 'numeric'
     })
   }
 
   const handlePayInvoice = async () => {
-    // In a real implementation, this would redirect to payment page
-    toast.success('🔄 Mengalihkan ke halaman pembayaran...')
+    router.push('/customer/billing')
   }
 
   const handleDownloadInvoice = async () => {
-    try {
-      setDownloading(true)
-      if (invoice?.download_url) {
-        // In a real implementation, this would download the invoice
-        toast.success('📥 Mengunduh invoice...')
-      } else {
-        toast.error('❌ File tidak tersedia')
-      }
-    } catch (error) {
-      toast.error('❌ Gagal mengunduh invoice')
-    } finally {
-      setDownloading(false)
-    }
+    setDownloading(true)
+    window.print() // Browser's "Save as PDF" — print only invoice content
+    setDownloading(false)
   }
 
   const handlePrintInvoice = () => {
@@ -294,17 +290,37 @@ export default function InvoiceDetailPage() {
                         <div className="text-sm text-gray-600 dark:text-gray-300">{invoice.customer.email}</div>
                       )}
                     </div>
-                  </div>
+                   </div>
 
-                  <div>
-                    <div className="text-sm text-gray-500 dark:text-gray-400 mb-2">Diterbitkan oleh:</div>
-                    <div>
-                      <div className="font-semibold">PT Kilusi Digital Network</div>
-                      <div className="text-sm text-gray-600 dark:text-gray-300">Jl. Technology No. 123</div>
-                      <div className="text-sm text-gray-600 dark:text-gray-300">Jakarta, Indonesia</div>
-                      <div className="text-sm text-gray-600 dark:text-gray-300">contact@kilusi.id</div>
-                    </div>
-                  </div>
+                   {/* Masa Aktif Layanan */}
+                   {service && (
+                     <div className="mb-6">
+                       <div className="text-sm text-gray-500 dark:text-gray-400 mb-2">Masa Aktif Layanan:</div>
+                       <div className="flex items-center gap-2">
+                         <span className={`inline-flex px-2 py-0.5 text-xs rounded-full ${
+                           service.status === 'active' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+                           'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                         }`}>
+                           {service.status === 'active' ? 'Aktif' : service.status === 'suspended' ? 'Ditangguhkan' : service.status}
+                         </span>
+                       </div>
+                       <div className="text-sm mt-2">
+                         {service.active_date ? new Date(service.active_date).toLocaleDateString('id-ID', { dateStyle: 'long' }) : '-'}
+                         {' — '}
+                         {service.isolir_date ? new Date(service.isolir_date).toLocaleDateString('id-ID', { dateStyle: 'long' }) : '-'}
+                       </div>
+                     </div>
+                   )}
+
+                   <div>
+                     <div className="text-sm text-gray-500 dark:text-gray-400 mb-2">Diterbitkan oleh:</div>
+                     <div>
+                       <div className="font-semibold">{company?.name || 'KITA SELALU TERKONEKSI'}</div>
+                       <div className="text-sm text-gray-600 dark:text-gray-300">{company?.address || ''}</div>
+                       {company?.email && <div className="text-sm text-gray-600 dark:text-gray-300">{company.email}</div>}
+                       {company?.phone && <div className="text-sm text-gray-600 dark:text-gray-300">{company.phone}</div>}
+                     </div>
+                   </div>
                 </div>
               </CardContent>
             </Card>
@@ -409,8 +425,25 @@ export default function InvoiceDetailPage() {
 
                   {invoice.payment_method && (
                     <div className="flex items-center justify-between">
-                      <span className="text-sm text-gray-600 dark:text-gray-300">Metode</span>
+                      <span className="text-sm text-gray-600 dark:text-gray-300">Metode Pembayaran</span>
                       <span className="font-medium">{invoice.payment_method}</span>
+                    </div>
+                  )}
+
+                  {invoice.payment_source && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-600 dark:text-gray-300">Tipe Pembayaran</span>
+                      <Badge variant="secondary" className="text-xs">
+                        {invoice.payment_source === 'tripay' ? 'Payment Gateway' :
+                         invoice.payment_source === 'manual' ? 'Transfer Manual' : 'Admin'}
+                      </Badge>
+                    </div>
+                  )}
+
+                  {invoice.processed_by && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-600 dark:text-gray-300">Diproses Oleh</span>
+                      <span className="font-medium">{invoice.processed_by}</span>
                     </div>
                   )}
                 </div>
@@ -465,7 +498,7 @@ export default function InvoiceDetailPage() {
             )}
 
             {/* Quick Actions */}
-            <Card>
+            <Card className="no-print">
               <CardHeader>
                 <CardTitle>Aksi Cepat</CardTitle>
               </CardHeader>

@@ -292,9 +292,77 @@ class RadiusService {
     /**
      * Get Active Sessions (from radacct)
      */
+    /**
+     * Get Active Sessions (from radacct)
+     */
     async getActiveSessions() {
         const result = await query("SELECT * FROM radacct WHERE acctstoptime IS NULL ORDER BY acctstarttime DESC");
         return result.rows;
+    }
+
+    /**
+     * Get Radius info for a specific customer
+     */
+    async getCustomerRadiusInfo(customerId) {
+        try {
+            // Get technical details for this customer
+            const techRes = await query(`
+                SELECT pppoe_username, ip_address_static
+                FROM technical_details td
+                JOIN services s ON td.service_id = s.id
+                WHERE s.customer_id = $1
+                LIMIT 1
+            `, [customerId]);
+
+            if (techRes.rows.length === 0) {
+                return {
+                    isOnline: false,
+                    pppoeUsername: null,
+                    radiusStatus: null
+                };
+            }
+
+            const { pppoe_username, ip_address_static } = techRes.rows[0];
+
+            if (!pppoe_username) {
+                return {
+                    isOnline: false,
+                    pppoeUsername: null,
+                    radiusStatus: null
+                };
+            }
+
+            // Check if online in RADIUS
+            const radacctQuery = `
+                SELECT 
+                    framedipaddress as "ipAddress",
+                    acctstarttime as "onlineTime",
+                    nasipaddress as "nasIP",
+                    acctsessiontime as "sessionTime",
+                    acctinputoctets as "uploadBytes",
+                    acctoutputoctets as "downloadBytes",
+                    callingstationid as "macAddress"
+                FROM radacct
+                WHERE username = $1
+                AND acctstoptime IS NULL
+                ORDER BY radacctid DESC
+                LIMIT 1
+            `;
+            const radRes = await query(radacctQuery, [pppoe_username]);
+
+            const isOnline = radRes.rows.length > 0;
+            const radiusStatus = isOnline ? radRes.rows[0] : null;
+
+            return {
+                isOnline,
+                pppoeUsername: pppoe_username,
+                staticIp: ip_address_static,
+                radiusStatus
+            };
+        } catch (error) {
+            logger.error(`Error getting radius info for customer ${customerId}:`, error);
+            throw error;
+        }
     }
 }
 

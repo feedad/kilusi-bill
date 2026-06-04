@@ -6,6 +6,27 @@
 import axios from 'axios'
 import { CONFIG } from './config'
 
+// ============= SAFE LOCALSTORAGE ACCESS =============
+// Prevents SSR errors by checking if window is defined
+
+function safeGetItem(key: string): string | null {
+  if (typeof window === 'undefined') return null
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function safeRemoveItem(key: string): void {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // Ignore errors
+  }
+}
+
 // ============= ADMIN API CLIENT =============
 // For JWT-based authentication (admin panel)
 
@@ -27,7 +48,7 @@ adminApi.interceptors.request.use(
         config.url?.includes('/auth/refresh')
 
       if (!isAuthEndpoint) {
-        const authStorage = localStorage.getItem(CONFIG.TOKEN_KEYS.ADMIN_JWT)
+        const authStorage = safeGetItem(CONFIG.TOKEN_KEYS.ADMIN_JWT)
         if (authStorage) {
           const parsed = JSON.parse(authStorage)
           const token = parsed.state?.token
@@ -54,9 +75,9 @@ adminApi.interceptors.response.use(
     if (error.response?.status === 401) {
       console.warn('⚠️ Admin token expired - clearing auth')
       // Clear admin auth storage
-      localStorage.removeItem(CONFIG.TOKEN_KEYS.ADMIN_JWT)
-      localStorage.removeItem(CONFIG.TOKEN_KEYS.AUTH_TOKEN)
-      localStorage.removeItem(CONFIG.TOKEN_KEYS.USER_DATA)
+      safeRemoveItem(CONFIG.TOKEN_KEYS.ADMIN_JWT)
+      safeRemoveItem(CONFIG.TOKEN_KEYS.AUTH_TOKEN)
+      safeRemoveItem(CONFIG.TOKEN_KEYS.USER_DATA)
 
       // Redirect to login if in browser
       if (typeof window !== 'undefined') {
@@ -81,7 +102,7 @@ export const customerApi = axios.create({
 customerApi.interceptors.request.use(
   (config) => {
     try {
-      const token = localStorage.getItem(CONFIG.TOKEN_KEYS.CUSTOMER_TOKEN)
+      const token = safeGetItem(CONFIG.TOKEN_KEYS.CUSTOMER_TOKEN)
       if (token) {
         config.headers.Authorization = `Bearer ${token}`
         console.log('👤 Customer API Request:', config.method?.toUpperCase(), config.url)
@@ -101,8 +122,8 @@ customerApi.interceptors.response.use(
     if (error.response?.status === 401) {
       console.warn('⚠️ Customer token expired - clearing auth')
       // Clear customer auth storage
-      localStorage.removeItem(CONFIG.TOKEN_KEYS.CUSTOMER_TOKEN)
-      localStorage.removeItem(CONFIG.TOKEN_KEYS.CUSTOMER_DATA)
+      safeRemoveItem(CONFIG.TOKEN_KEYS.CUSTOMER_TOKEN)
+      safeRemoveItem(CONFIG.TOKEN_KEYS.CUSTOMER_DATA)
 
       // Redirect to customer login if in browser
       if (typeof window !== 'undefined') {
@@ -152,17 +173,19 @@ export function getApiClient(userType: 'admin' | 'customer' | 'public' = 'public
  * Check if user is authenticated (admin or customer)
  */
 export function isAuthenticated(userType: 'admin' | 'customer'): boolean {
+  if (typeof window === 'undefined') return false
+
   switch (userType) {
     case 'admin':
       try {
-        const authStorage = localStorage.getItem(CONFIG.TOKEN_KEYS.ADMIN_JWT)
+        const authStorage = safeGetItem(CONFIG.TOKEN_KEYS.ADMIN_JWT)
         const parsed = authStorage ? JSON.parse(authStorage) : null
         return !!(parsed?.state?.token && parsed?.state?.isAuthenticated)
       } catch {
         return false
       }
     case 'customer':
-      return !!localStorage.getItem(CONFIG.TOKEN_KEYS.CUSTOMER_TOKEN)
+      return !!safeGetItem(CONFIG.TOKEN_KEYS.CUSTOMER_TOKEN)
     default:
       return false
   }
@@ -231,6 +254,7 @@ export const endpoints = {
     billing: '/api/v1/billing',
     packages: '/api/v1/packages',
     regions: '/api/v1/regions',
+    mitra: '/api/v1/mitra',
     dashboard: '/api/v1/dashboard',
     whatsapp: '/api/v1/whatsapp',
     radius: '/api/v1/radius',

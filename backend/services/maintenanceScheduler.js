@@ -1,5 +1,6 @@
 const { query } = require('../config/database');
 const { logger } = require('../config/logger');
+const { sendBroadcastNotification, broadcastWebSocket } = require('./broadcast-whatsapp-service');
 
 class MaintenanceScheduler {
   constructor() {
@@ -55,7 +56,7 @@ class MaintenanceScheduler {
         AND is_active = false
         AND scheduled_start_time <= $1
         AND (scheduled_end_time IS NULL OR scheduled_end_time > $1)
-        RETURNING id, title, message, type, target_areas, target_all
+        RETURNING *
       `;
 
       const activateResult = await query(activateQuery, [now]);
@@ -113,20 +114,45 @@ class MaintenanceScheduler {
 
   async broadcastActivatedMessage(message) {
     try {
-      // TODO: Implement WebSocket broadcast
-      // TODO: Send push notifications
-
       logger.info(`📢 Broadcasting message: ${message.title}`);
 
-      // For now, just log the message details
-      console.log({
-        messageId: message.id,
-        title: message.title,
-        message: message.message,
-        type: message.type,
-        targetAll: message.target_all,
-        targetAreas: message.target_areas
-      });
+      // Get full message details including WhatsApp settings
+      const messageDetails = await query(
+        'SELECT * FROM broadcast_messages WHERE id = $1',
+        [message.id]
+      );
+
+      if (messageDetails.rows.length === 0) {
+        logger.warn(`Message not found: ${message.id}`);
+        return;
+      }
+
+      const fullMessage = messageDetails.rows[0];
+
+      // Send WhatsApp notification if enabled
+      if (fullMessage.send_whatsapp_notification) {
+        try {
+          const result = await sendBroadcastNotification({
+            title: fullMessage.title,
+            message: fullMessage.message,
+            type: fullMessage.type,
+            target_all: fullMessage.target_all,
+            target_areas: fullMessage.target_areas,
+            whatsapp_template_id: fullMessage.whatsapp_template_id,
+            scheduled_start_time: fullMessage.scheduled_start_time,
+            scheduled_end_time: fullMessage.scheduled_end_time,
+            estimated_duration: fullMessage.estimated_duration
+          });
+
+          logger.info(`📱 WhatsApp broadcast completed for ${fullMessage.title}: ${result.sent} sent, ${result.failed} failed`);
+        } catch (waError) {
+          logger.error('WhatsApp broadcast error:', waError);
+          // Don't fail the activation if WhatsApp fails
+        }
+      }
+
+      // Broadcast to WebSocket for real-time banner updates
+      broadcastWebSocket(fullMessage, 'new');
 
     } catch (error) {
       logger.error('Error broadcasting activated message:', error);
@@ -203,6 +229,8 @@ class MaintenanceScheduler {
         auto_activate = true,
         auto_deactivate = true,
         send_push_notification = true,
+        send_whatsapp_notification = false,
+        whatsapp_template_id = null,
         priority = 'high'
       } = maintenanceData;
 
@@ -211,9 +239,10 @@ class MaintenanceScheduler {
           title, message, type, priority, target_areas, target_all,
           is_scheduled, scheduled_start_time, scheduled_end_time,
           auto_activate, auto_deactivate, send_push_notification,
+          send_whatsapp_notification, whatsapp_template_id,
           maintenance_type, estimated_duration, affected_services,
           contact_person, backup_plan, created_by
-        ) VALUES ($1, $2, 'maintenance', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        ) VALUES ($1, $2, 'maintenance', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
         RETURNING *
       `;
 
@@ -229,6 +258,8 @@ class MaintenanceScheduler {
         auto_activate,
         auto_deactivate,
         send_push_notification,
+        send_whatsapp_notification,
+        whatsapp_template_id,
         maintenance_type || 'general',
         estimated_duration,
         affected_services || [],

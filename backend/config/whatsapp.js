@@ -1,5 +1,5 @@
 const { Boom } = require('@hapi/boom');
-const { default: makeWASocket, DisconnectReason, useMultiFileAuthState } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestWaWebVersion, Browsers } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const { getSettingsWithCache } = require('./settingsManager');
 const loggerModule = require('./logger');
@@ -321,6 +321,25 @@ async function connectToWhatsApp() {
     }
 
     isConnecting = true;
+    
+    // Clean up any existing socket before creating a new one to prevent duplicate connections
+    if (sock) {
+        try {
+            console.log('🧹 Cleaning up existing socket before reconnect...');
+            sock.ev.removeAllListeners('connection.update');
+            sock.ev.removeAllListeners('creds.update');
+            sock.ev.removeAllListeners('messages.upsert');
+            if (sock.ws) {
+                try { sock.ws.close(); } catch(e) {}
+            }
+            try { sock.logout(); } catch(e) {}
+        } catch (cleanupError) {
+            console.warn('⚠️ Error cleaning up old socket:', cleanupError.message);
+        } finally {
+            sock = null;
+        }
+    }
+    
     connectionPromise = new Promise(async (resolve, reject) => {
         try {
             console.log('Memulai koneksi WhatsApp...');
@@ -352,35 +371,30 @@ async function connectToWhatsApp() {
 
             const { state, saveCreds } = authState;
 
-            // Dapatkan versi WhatsApp yang akan digunakan
-            const whatsappVersion = WHATSAPP_WEB_VERSION.FALLBACK_VERSION;
+            // Dapatkan versi WhatsApp yang akan digunakan dengan timeout
+            let waVersion;
+            try {
+                const versionPromise = fetchLatestWaWebVersion({});
+                const timeoutPromise = new Promise((_, rej) => 
+                    setTimeout(() => rej(new Error('Timeout fetching WhatsApp Web version')), 10000)
+                );
+                const versionResult = await Promise.race([versionPromise, timeoutPromise]);
+                waVersion = versionResult.version;
+                console.log('✅ WhatsApp Web version fetched:', waVersion);
+            } catch (versionError) {
+                console.warn('⚠️ Failed to fetch latest version, using fallback:', versionError.message);
+                waVersion = WHATSAPP_WEB_VERSION.FALLBACK_VERSION;
+            }
 
             sock = makeWASocket({
                 auth: state,
                 logger: whatsappLogger,
-                browser: ['Kilusi Bill', 'Chrome', '120.0.0.0'],
-                connectTimeoutMs: 180000, // Further increased timeout for better stability
-                qrTimeout: 90000, // Further increased QR timeout
-                defaultQueryTimeoutMs: 90000, // Further increased query timeout
-                retryRequestDelayMs: 3000, // Even slower retry for better stability
-                maxMsgRetryCount: 5, // Maximum message retry attempts
-                connectionRetryDelayMs: 5000, // Delay between connection retries
-                keepAliveIntervalMs: 25000, // Keep-alive interval to maintain connection
-                version: whatsappVersion,
-                printQRInTerminal: false, // Disable duplicate QR in terminal
-                emitOwnEvents: false, // Disable own events to reduce noise
-                fireOnInitQueries: true, // Wait for initial sync
-                syncFullHistory: false, // Skip full history sync for faster connect
-                getMessage: true, // Enable better message handling
-                // Additional stability options
-                transactionLogs: false, // Disable transaction logs for performance
-                mobile: false, // We're connecting from web, not mobile
-                // Better connection handling
-                shouldSyncHistoryMessage: () => false, // Don't sync old messages
-                generateHighQualityLinkPreview: false, // Disable link previews for performance
-                // Enhanced options for Android device compatibility
-                patchMessageBeforeSending: (message) => message, // Don't modify messages
-                markOnlineOnConnect: true, // Mark as online when connected
+                browser: Browsers.ubuntu('Chrome'),
+                version: waVersion,
+                printQRInTerminal: true,
+                markOnlineOnConnect: true,
+                generateHighQualityLinkPreview: false,
+                syncFullHistory: false
             });
 
 
@@ -522,6 +536,14 @@ async function connectToWhatsApp() {
                         mikrotikCommands.setSock(sock);
                     } catch (error) {
                         console.error('Error setting sock for mikrotik-commands:', error);
+                    }
+
+                    // Set sock instance untuk modul whatsapp-notifications (Baileys fallback)
+                    try {
+                        const whatsappNotifications = require('./whatsapp-notifications');
+                        whatsappNotifications.setSock(sock);
+                    } catch (error) {
+                        console.error('Error setting sock for whatsapp-notifications:', error);
                     }
 
                     // Kirim pesan ke admin bahwa bot telah terhubung
@@ -3842,48 +3864,93 @@ function getWhatsAppStatus() {
 
 // Fungsi untuk menghapus sesi WhatsApp
 async function deleteWhatsAppSession() {
-    try {
-        const sessionDir = getSetting('whatsapp_session_path', './whatsapp-session');
-        const fs = require('fs');
-        const path = require('path');
+    const sessionDir = getSetting('whatsapp_session_path', './whatsapp-session');
+    const pathModule = require('path');
 
-        // Hapus semua file di direktori sesi
-        if (fs.existsSync(sessionDir)) {
-            const files = fs.readdirSync(sessionDir);
-            for (const file of files) {
-                fs.unlinkSync(path.join(sessionDir, file));
+    try {
+        console.log('🧹 Memulai penghapusan sesi WhatsApp...');
+
+        // 1. CRITICAL: Reset connection guard FIRST to prevent deadlock
+        isConnecting = false;
+        connectionPromise = null;
+
+        // 2. Gracefully close existing socket and remove listeners
+        if (sock) {
+            try {
+                console.log('🔌 Closing existing WhatsApp socket...');
+                sock.ev.removeAllListeners('connection.update');
+                sock.ev.removeAllListeners('creds.update');
+                sock.ev.removeAllListeners('messages.upsert');
+                
+                if (sock.ws) {
+                    try { sock.ws.close(); } catch(e) {}
+                }
+                
+                try { await sock.logout(); } catch(e) {}
+            } catch (error) {
+                console.log('⚠️ Error saat menutup socket:', error.message);
+            } finally {
+                sock = null;
+                console.log('✅ Socket cleared');
             }
-            console.log(`Menghapus ${files.length} file sesi WhatsApp`);
         }
 
-        console.log('Sesi WhatsApp berhasil dihapus');
+        // 3. Delete session directory recursively
+        if (fs.existsSync(sessionDir)) {
+            try {
+                fs.rmSync(sessionDir, { recursive: true, force: true });
+                console.log(`✅ Direktori sesi WhatsApp dihapus: ${sessionDir}`);
+            } catch (rmError) {
+                console.error('❌ Gagal menghapus direktori sesi secara rekursif:', rmError.message);
+                // Fallback: try to delete files individually
+                try {
+                    const files = fs.readdirSync(sessionDir);
+                    for (const file of files) {
+                        const filePath = pathModule.join(sessionDir, file);
+                        try {
+                            const stat = fs.lstatSync(filePath);
+                            if (stat.isDirectory()) {
+                                fs.rmSync(filePath, { recursive: true, force: true });
+                            } else {
+                                fs.unlinkSync(filePath);
+                            }
+                        } catch (e) {
+                            console.warn(`⚠️ Could not delete ${filePath}:`, e.message);
+                        }
+                    }
+                    console.log(`✅ Fallback cleanup completed for ${files.length} items`);
+                } catch (e) {
+                    console.error('❌ Fallback cleanup also failed:', e.message);
+                }
+            }
+        }
 
-        // Reset status
+        // 4. Reset global status
         global.whatsappStatus = {
             connected: false,
             qrCode: null,
             phoneNumber: null,
             connectedSince: null,
-            status: 'session_deleted'
+            status: 'disconnected'
         };
 
-        // Restart koneksi WhatsApp
-        if (sock) {
-            try {
-                sock.logout();
-            } catch (error) {
-                console.log('Error saat logout:', error);
-            }
-        }
+        console.log('✅ Sesi WhatsApp berhasil dihapus dan direset sepenuhnya');
 
-        // Mulai ulang koneksi setelah 2 detik
+        // 5. Auto-restart connection after a short delay to generate fresh QR
         setTimeout(() => {
-            connectToWhatsApp();
+            console.log('🔄 Auto-restarting WhatsApp connection after session cleanup...');
+            connectToWhatsApp().catch(err => {
+                console.error('❌ Auto-reconnect after disconnect failed:', err.message);
+            });
         }, 2000);
 
         return { success: true, message: 'Sesi WhatsApp berhasil dihapus' };
     } catch (error) {
-        console.error('Error saat menghapus sesi WhatsApp:', error);
+        console.error('❌ Error saat menghapus sesi WhatsApp:', error);
+        // Ensure guards are reset even on error
+        isConnecting = false;
+        connectionPromise = null;
+        sock = null;
         return { success: false, message: error.message };
     }
 }

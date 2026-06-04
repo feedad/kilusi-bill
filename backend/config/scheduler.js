@@ -1,177 +1,191 @@
 const cron = require('node-cron');
+const path = require('path');
 const billingManager = require('./billing');
 const logger = require('./logger');
 
+const formatDateLocal = (date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
 class InvoiceScheduler {
     constructor() {
+        this.tasks = {
+            invoice: null,
+            reminder: null,
+            suspension: null
+        };
         this.initScheduler();
     }
 
     initScheduler() {
-        // Schedule monthly invoice generation on 1st of every month at 08:00
-        // This is for MONTHLY cycle customers only
-        cron.schedule('0 8 1 * *', async () => {
+        // All dynamic times loaded from billing_settings via rescheduleDynamicJobs()
+        this.rescheduleDynamicJobs();
+
+        // 4. RADIUS orphan cleanup - once daily at 03:00
+        cron.schedule('0 3 * * *', async () => {
             try {
-                logger.info('Starting automatic monthly invoice generation (MONTHLY cycle only)...');
-                await this.generateMonthlyInvoices();
-                logger.info('Automatic monthly invoice generation completed');
-            } catch (error) {
-                logger.error('Error in automatic monthly invoice generation:', error);
-            }
-        }, {
-            scheduled: true,
-            timezone: "Asia/Jakarta"
-        });
-
-        logger.info('Monthly invoice scheduler initialized - runs on 1st of every month at 08:00 (for MONTHLY cycle only)');
-
-        // Schedule DAILY invoice generation at 07:00 for FIXED and PROFILE cycles
-        // This generates invoices X days before each customer's isolir date
-        cron.schedule('0 7 * * *', async () => {
-            try {
-                logger.info('Starting daily invoice generation (FIXED/PROFILE cycles)...');
-                await this.generateDailyInvoicesForFixedAndProfile();
-                logger.info('Daily invoice generation (FIXED/PROFILE) completed');
-            } catch (error) {
-                logger.error('Error in daily invoice generation (FIXED/PROFILE):', error);
-            }
-        }, {
-            scheduled: true,
-            timezone: "Asia/Jakarta"
-        });
-
-        logger.info('Daily invoice scheduler initialized - runs daily at 07:00 (for FIXED/PROFILE cycles)');
-
-        // Schedule daily due date reminders at 09:00
-        cron.schedule('0 9 * * *', async () => {
-            try {
-                logger.info('Starting daily due date reminders...');
-                await this.sendDueDateReminders();
-                logger.info('Daily due date reminders completed');
-            } catch (error) {
-                logger.error('Error in daily due date reminders:', error);
-            }
-        }, {
-            scheduled: true,
-            timezone: "Asia/Jakarta"
-        });
-
-        logger.info('Due date reminder scheduler initialized - will run daily at 09:00');
-
-        // Schedule daily service suspension check at 10:00
-        cron.schedule('0 10 * * *', async () => {
-            try {
-                logger.info('Starting daily service suspension check...');
-                const serviceSuspension = require('./serviceSuspension');
-                await serviceSuspension.checkAndSuspendOverdueCustomers();
-                logger.info('Daily service suspension check completed');
-            } catch (error) {
-                logger.error('Error in daily service suspension check:', error);
-            }
-        }, {
-            scheduled: true,
-            timezone: "Asia/Jakarta"
-        });
-
-        // Schedule daily service restoration check at 11:00
-        cron.schedule('0 11 * * *', async () => {
-            try {
-                logger.info('Starting daily service restoration check...');
-                const serviceSuspension = require('./serviceSuspension');
-                await serviceSuspension.checkAndRestorePaidCustomers();
-                logger.info('Daily service restoration check completed');
-            } catch (error) {
-                logger.error('Error in daily service restoration check:', error);
-            }
-        }, {
-            scheduled: true,
-            timezone: "Asia/Jakarta"
-        });
-
-        logger.info('Service suspension/restoration scheduler initialized - will run daily at 10:00 and 11:00');
-
-        // Schedule voucher cleanup every 6 hours (00:00, 06:00, 12:00, 18:00)
-        cron.schedule('0 0,6,12,18 * * *', async () => {
-            try {
-                logger.info('Starting automatic voucher cleanup...');
-
-                // Make HTTP request to cleanup endpoint
-                const https = require('http');
-
-                const options = {
-                    hostname: 'localhost',
-                    port: process.env.PORT || 3004,
-                    path: '/voucher/cleanup-expired',
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
+                logger.info('Starting RADIUS orphan cleanup...');
+                const radiusDb = require('./radius-postgres');
+                const { query } = require('./database');
+                
+                // Get all active PPPoE usernames from radcheck
+                const activeUsers = await query(`
+                    SELECT username FROM radcheck WHERE username IS NOT NULL
+                `);
+                const activeUsernames = new Set(activeUsers.rows.map(r => r.username));
+                
+                // Find orphans in radusergroup
+                const radusergroupUsers = await query(`SELECT DISTINCT username FROM radusergroup`);
+                let cleaned = 0;
+                for (const row of radusergroupUsers.rows) {
+                    if (!activeUsernames.has(row.username)) {
+                        await radiusDb.deleteRadiusUser(row.username);
+                        cleaned++;
+                        logger.info(`Cleaned orphan RADIUS user: ${row.username}`);
                     }
-                };
-
-                const req = https.request(options, (res) => {
-                    let data = '';
-                    res.on('data', (chunk) => {
-                        data += chunk;
-                    });
-                    res.on('end', () => {
-                        try {
-                            const result = JSON.parse(data);
-                            if (result.success) {
-                                logger.info(`Automatic voucher cleanup completed: ${result.message}`);
-                                if (result.details) {
-                                    logger.info(`Database deleted: ${result.details.database_deleted}, Mikrotik deleted: ${result.details.mikrotik_deleted}`);
-                                }
-                            } else {
-                                logger.error('Automatic voucher cleanup failed:', result.message);
-                            }
-                        } catch (e) {
-                            logger.error('Error parsing voucher cleanup response:', e);
-                        }
-                    });
-                });
-
-                req.on('error', (e) => {
-                    logger.error('Error in automatic voucher cleanup request:', e.message);
-                });
-
-                req.write(JSON.stringify({}));
-                req.end();
-
+                }
+                logger.info(`RADIUS orphan cleanup completed: ${cleaned} removed`);
             } catch (error) {
-                logger.error('Error in automatic voucher cleanup:', error);
+                logger.error('Error in RADIUS orphan cleanup:', error);
             }
-        }, {
-            scheduled: true,
-            timezone: "Asia/Jakarta"
-        });
+        }, { scheduled: true, timezone: "Asia/Jakarta" });
+        logger.info('RADIUS orphan cleanup scheduler initialized - runs daily at 03:00');
 
-        logger.info('Voucher cleanup scheduler initialized - will run every 6 hours');
+        // 5. Voucher usage check every 1 minute
+        cron.schedule('* * * * *', async () => {
+            try { await this.checkVoucherUsage(); } 
+            catch (error) { logger.error('Error in voucher usage check:', error); }
+            try { await this.checkPrepaidTrialExpiry(); }
+            catch (error) { logger.error('Error in prepaid trial check:', error); }
+        }, { scheduled: true, timezone: "Asia/Jakarta" });
+        logger.info('Voucher usage update scheduler initialized');
+
+        // 6. GenieACS customer sync every 1 hour
+        cron.schedule('0 * * * *', async () => {
+            try {
+                const { exec } = require('child_process');
+                const scriptPath = path.join(__dirname, '../sync-acs-customers.js');
+                exec(`node ${scriptPath}`, (error) => {
+                    if (error) logger.error('Error in GenieACS customer sync:', error);
+                });
+            } catch (error) { logger.error('Error in GenieACS customer sync:', error); }
+        }, { scheduled: true, timezone: "Asia/Jakarta" });
+        logger.info('GenieACS customer sync scheduler initialized');
+
+        // 7. WhatsApp Meta template status sync every 30 minutes
+        cron.schedule('*/30 * * * *', async () => {
+            try {
+                const whatsappNotifications = require('./whatsapp-notifications');
+                await whatsappNotifications.syncMetaTemplateStatus();
+            } catch (error) {
+                logger.error('Error in Meta template status sync:', error);
+            }
+        }, { scheduled: true, timezone: "Asia/Jakarta" });
+        logger.info('Meta template status sync scheduler initialized (every 30 min)');
+    }
+
+    getDynamicInvoiceExpression(settings) {
+        try {
+            const timeStr = settings ? settings.invoice_time : '07:00';
+            const [h, m] = String(timeStr).split(':').map(Number);
+            return `${Math.min(59, Math.max(0, m||0))} ${Math.min(23, Math.max(0, h||7))} * * *`;
+        } catch { return '0 7 * * *'; }
+    }
+
+    getDynamicReminderExpression(settings) {
+        try {
+            const timeStr = settings ? settings.reminder_time : '09:00';
+            const [h, m] = String(timeStr).split(':').map(Number);
+            return `${Math.min(59, Math.max(0, m||0))} ${Math.min(23, Math.max(0, h||9))} * * *`;
+        } catch { return '0 9 * * *'; }
+    }
+
+    // Legacy init methods removed: monthly invoice (merged), daily fixed/profile (merged), daily billing day (merged),
+    // overdue update (frontend handles badge), autoSuspendCheck (moved to scheduleSuspensionCheck),
+    // restore check (all payment triggers are instant), Autopay polling (webhook is instant),
+    // RADIUS full sync (triggers are instant; only orphan cleanup remains)
 
 
+    async checkVoucherUsage() {
+        try {
+            const VoucherService = require('../services/voucher-service');
+            await VoucherService.checkExpiredVouchers();
+        } catch (error) {
+            logger.error('Error in voucher usage check:', error);
+        }
+    }
+
+    async checkPrepaidTrialExpiry() {
+        try {
+            const { query } = require('./database');
+            const serviceSuspension = require('./serviceSuspension');
+            const expiredTrials = await query(`
+                SELECT c.id, c.name, c.phone, t.pppoe_username, s.id as service_id
+                FROM customers c
+                JOIN services s ON s.customer_id = c.id
+                LEFT JOIN technical_details t ON t.service_id = s.id
+                WHERE s.billing_type = 'prepaid'
+                  AND s.status = 'active'
+                  AND s.trial_active = true
+                  AND s.trial_expires_at <= NOW()
+                LIMIT 20
+            `);
+
+            for (const customer of expiredTrials.rows) {
+                try {
+                    const unpaidInvoice = await query(`
+                        SELECT id FROM invoices
+                        WHERE customer_id = $1 AND status = 'unpaid'
+                        LIMIT 1
+                    `, [customer.id]);
+
+                    if (unpaidInvoice.rows.length > 0) {
+                        const customerData = {
+                            id: customer.id,
+                            name: customer.name,
+                            username: customer.pppoe_username,
+                            pppoe_username: customer.pppoe_username,
+                            status: 'active'
+                        };
+                        await serviceSuspension.suspendCustomerService(customerData, 'Masa trial 30 menit habis');
+                        logger.info(`Prepaid trial expired for ${customer.name} (${customer.id}) - suspended`);
+                    }
+
+                    await query(`
+                        UPDATE services SET trial_active = false, updated_at = NOW()
+                        WHERE customer_id = $1
+                    `, [customer.id]);
+                } catch (e) {
+                    logger.error(`Error processing trial expiry for ${customer.id}:`, e.message);
+                }
+            }
+        } catch (error) {
+            logger.error('Error in prepaid trial expiry check:', error);
+        }
     }
 
     async sendDueDateReminders() {
         try {
             const whatsappNotifications = require('./whatsapp-notifications');
-            const invoices = await billingManager.getInvoices();
-            const today = new Date();
+            const { query } = require('./database');
 
-            // Filter invoices that are due in the next 3 days
-            const upcomingInvoices = invoices.filter(invoice => {
-                if (invoice.status !== 'unpaid') return false;
+            // Get invoices where due_date is tomorrow (H-1 reminder)
+            const upcomingInvoices = await query(`
+                SELECT i.id, i.invoice_number, i.customer_id, i.due_date, i.status
+                FROM invoices i
+                WHERE i.status IN ('unpaid', 'sent')
+                  AND i.due_date = (CURRENT_DATE + INTERVAL '1 day')
+            `);
 
-                const dueDate = new Date(invoice.due_date);
-                const daysUntilDue = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
+            logger.info(`Found ${upcomingInvoices.rows.length} invoices with due_date tomorrow`);
 
-                return daysUntilDue >= 0 && daysUntilDue <= 3;
-            });
-
-            logger.info(`Found ${upcomingInvoices.length} invoices due in the next 3 days`);
-
-            for (const invoice of upcomingInvoices) {
+            for (const invoice of upcomingInvoices.rows) {
                 try {
                     await whatsappNotifications.sendDueDateReminder(invoice.id);
-                    logger.info(`Due date reminder sent for invoice ${invoice.invoice_number}`);
+                    logger.info(`Due date reminder sent for invoice ${invoice.invoice_number} (due tomorrow)`);
                 } catch (error) {
                     logger.error(`Error sending due date reminder for invoice ${invoice.invoice_number}:`, error);
                 }
@@ -189,7 +203,7 @@ class InvoiceScheduler {
             const BillingCycleService = require('./billing-cycle-service');
 
             const customersResult = await query(`
-                SELECT DISTINCT c.*, s.siklus, s.id as service_id, s.active_date as service_active_date,
+                SELECT DISTINCT c.*, s.siklus, s.id as service_id, s.service_number, s.active_date as service_active_date,
                        s.package_id as service_package_id
                 FROM customers c
                 JOIN services s ON s.customer_id = c.id
@@ -235,26 +249,59 @@ class InvoiceScheduler {
                     const targetDay = Math.min(billingDay, lastDayOfMonth);
                     const dueDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), targetDay);
 
-                    // Create invoice data with PPN calculation
+                    // Get tax settings from customer_default_settings
+                    const taxSetting = await query(`
+                        SELECT default_value FROM customer_default_settings
+                        WHERE field_name = 'tax_enabled' AND is_active = true
+                        LIMIT 1
+                    `);
+                    const taxEnabled = taxSetting.rows.length > 0 ? taxSetting.rows[0].default_value === 'true' : false;
+
+                    // Create invoice data - only apply tax if enabled
                     const basePrice = packageData.price;
-                    const taxRate = (packageData.tax_rate === 0 || (typeof packageData.tax_rate === 'number' && packageData.tax_rate > -1))
-                        ? Number(packageData.tax_rate)
-                        : 11.00; // Default 11% only when undefined/null/invalid
-                    const amountWithTax = billingManager.calculatePriceWithTax(basePrice, taxRate);
+                    let taxRate = 0;
+                    let amountWithTax = basePrice;
+
+                    if (taxEnabled) {
+                        // Get tax percentage from settings or use package tax_rate
+                        const taxPercentSetting = await query(`
+                            SELECT default_value FROM customer_default_settings
+                            WHERE field_name = 'tax_percentage' AND is_active = true
+                            LIMIT 1
+                        `);
+                        const defaultTaxPercent = taxPercentSetting.rows.length > 0
+                            ? parseFloat(taxPercentSetting.rows[0].default_value)
+                            : 11;
+
+                        taxRate = (packageData.tax_rate || packageData.tax_rate === 0)
+                            ? Number(packageData.tax_rate)
+                            : defaultTaxPercent;
+                        amountWithTax = billingManager.calculatePriceWithTax(basePrice, taxRate);
+                    }
 
                     const invoiceData = {
                         customer_id: customer.id,
                         package_id: customer.package_id,
+                        service_number: customer.service_number,
                         amount: amountWithTax, // Use price with tax
                         base_amount: basePrice, // Store base price for reference
                         tax_rate: taxRate, // Store tax rate for reference
-                        due_date: dueDate.toISOString().split('T')[0],
+                        due_date: formatDateLocal(dueDate),
                         notes: `Tagihan bulanan ${currentDate.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}`
                     };
 
                     // Create the invoice
                     const newInvoice = await billingManager.createInvoice(invoiceData);
                     logger.info(`Created invoice ${newInvoice.invoice_number} for customer ${customer.username}`);
+
+                    // Send WhatsApp notification for new invoice
+                    try {
+                        const whatsappNotifications = require('./whatsapp-notifications');
+                        await whatsappNotifications.sendInvoiceCreatedNotification(customer.id, newInvoice.id);
+                        logger.info(`WhatsApp notification sent for invoice ${newInvoice.invoice_number}`);
+                    } catch (notifError) {
+                        logger.error(`Failed to send WhatsApp notification for invoice ${newInvoice.invoice_number}:`, notifError.message);
+                    }
 
                 } catch (error) {
                     logger.error(`Error creating invoice for customer ${customer.username}:`, error);
@@ -268,15 +315,16 @@ class InvoiceScheduler {
     }
 
     // Generate invoices daily for customers whose billing_day is today
-    async generateDailyInvoicesByBillingDay() {
+    async generateDailyInvoicesByBillingDay(targetDate = null) {
         try {
+            const { query } = require('./database');
             // Get all active customers
             const customers = await billingManager.getCustomers();
             const activeCustomers = customers.filter(customer =>
                 customer.status === 'active' && customer.package_id
             );
 
-            const today = new Date();
+            const today = targetDate ? new Date(targetDate) : new Date();
             const todayDay = today.getDate();
             const currentYear = today.getFullYear();
             const currentMonth = today.getMonth();
@@ -318,20 +366,46 @@ class InvoiceScheduler {
                     }
 
                     // Set due date to today's date (which equals billing_day)
-                    const dueDate = new Date(currentYear, currentMonth, normalizedBillingDay)
-                        .toISOString()
-                        .split('T')[0];
+                    const dueDate = formatDateLocal(new Date(currentYear, currentMonth, normalizedBillingDay));
 
-                    // Calculate amount with tax
+                    // Get tax settings from customer_default_settings
+                    const taxSetting = await query(`
+                        SELECT default_value FROM customer_default_settings
+                        WHERE field_name = 'tax_enabled' AND is_active = true
+                        LIMIT 1
+                    `);
+                    const taxEnabled = taxSetting.rows.length > 0 ? taxSetting.rows[0].default_value === 'true' : false;
+
+                    // Calculate amount - only apply tax if enabled
                     const basePrice = packageData.price;
-                    const taxRate = (packageData.tax_rate === 0 || (typeof packageData.tax_rate === 'number' && packageData.tax_rate > -1))
-                        ? Number(packageData.tax_rate)
-                        : 11.00;
-                    const amountWithTax = billingManager.calculatePriceWithTax(basePrice, taxRate);
+                    let taxRate = 0;
+                    let amountWithTax = basePrice;
+
+                    if (taxEnabled) {
+                        // Get tax percentage from settings or use package tax_rate
+                        const taxPercentSetting = await query(`
+                            SELECT default_value FROM customer_default_settings
+                            WHERE field_name = 'tax_percentage' AND is_active = true
+                            LIMIT 1
+                        `);
+                        const defaultTaxPercent = taxPercentSetting.rows.length > 0
+                            ? parseFloat(taxPercentSetting.rows[0].default_value)
+                            : 11;
+
+                        taxRate = (packageData.tax_rate || packageData.tax_rate === 0)
+                            ? Number(packageData.tax_rate)
+                            : defaultTaxPercent;
+                        amountWithTax = billingManager.calculatePriceWithTax(basePrice, taxRate);
+                    }
+
+                    // Get service_number for this customer
+                    const svcResult = await query('SELECT service_number FROM services WHERE customer_id = $1 LIMIT 1', [customer.id]);
+                    const svcNumber = svcResult.rows.length > 0 ? svcResult.rows[0].service_number : null;
 
                     const invoiceData = {
                         customer_id: customer.id,
                         package_id: customer.package_id,
+                        service_number: svcNumber,
                         amount: amountWithTax,
                         base_amount: basePrice,
                         tax_rate: taxRate,
@@ -341,6 +415,15 @@ class InvoiceScheduler {
 
                     const newInvoice = await billingManager.createInvoice(invoiceData);
                     logger.info(`(Daily) Created invoice ${newInvoice.invoice_number} for customer ${customer.username}`);
+
+                    // Send WhatsApp notification for new invoice
+                    try {
+                        const whatsappNotifications = require('./whatsapp-notifications');
+                        await whatsappNotifications.sendInvoiceCreatedNotification(customer.id, newInvoice.id);
+                        logger.info(`WhatsApp notification sent for invoice ${newInvoice.invoice_number}`);
+                    } catch (notifError) {
+                        logger.error(`Failed to send WhatsApp notification for invoice ${newInvoice.invoice_number}:`, notifError.message);
+                    }
 
                 } catch (error) {
                     logger.error(`(Daily) Error creating invoice for customer ${customer.username}:`, error);
@@ -369,7 +452,7 @@ class InvoiceScheduler {
      * Generate invoices for FIXED and PROFILE cycle customers
      * Invoice is generated X days before their isolir date (based on invoice_advance_days setting)
      */
-    async generateDailyInvoicesForFixedAndProfile() {
+    async generateDailyInvoicesForFixedAndProfile(targetDate = null) {
         try {
             const { query, getOne } = require('./database');
             const BillingCycleService = require('./billing-cycle-service');
@@ -378,21 +461,16 @@ class InvoiceScheduler {
             const settings = await BillingCycleService.getBillingSettings();
             const advanceDays = settings.invoice_advance_days || 5;
 
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
+            const today = targetDate ? new Date(targetDate) : new Date();
 
-            // Calculate target date range for isolir (today + advanceDays)
-            const targetIsolirDate = new Date(today);
-            targetIsolirDate.setDate(targetIsolirDate.getDate() + advanceDays);
+            logger.info(`Checking for invoices to generate (advance_days: ${advanceDays})`);
 
             const currentYear = today.getFullYear();
             const currentMonth = today.getMonth();
             const startOfMonth = new Date(currentYear, currentMonth, 1);
-            const endOfMonth = new Date(currentYear, currentMonth + 1, 0);
+            const endOfMonth = new Date(currentYear, currentMonth + 1, 0, 23, 59, 59);
 
-            logger.info(`Checking for invoices to generate (advance_days: ${advanceDays}, target_isolir: ${targetIsolirDate.toISOString().split('T')[0]})`);
-
-            // Get all active services with FIXED or PROFILE cycle whose isolir date is within advance period
+            // Get all active services with FIXED (TETAP), PROFILE cycle whose isolir date matches target
             const servicesResult = await query(`
                 SELECT s.*, c.name as customer_name, c.phone as customer_phone,
                        p.name as package_name, p.price as package_price, p.tax_rate
@@ -400,13 +478,13 @@ class InvoiceScheduler {
                 JOIN customers c ON s.customer_id = c.id
                 LEFT JOIN packages p ON s.package_id = p.id
                 WHERE s.status = 'active'
-                AND s.siklus IN ('fixed', 'profile')
+                AND s.siklus IN ('fixed', 'profile', 'TETAP')
                 AND s.isolir_date IS NOT NULL
-                AND DATE(s.isolir_date) = $1
-            `, [targetIsolirDate.toISOString().split('T')[0]]);
+                AND DATE(s.isolir_date) = (CURRENT_DATE + INTERVAL '${advanceDays} days')::date
+            `);
 
             const eligibleServices = servicesResult.rows;
-            logger.info(`Found ${eligibleServices.length} services with isolir date on ${targetIsolirDate.toISOString().split('T')[0]}`);
+            logger.info(`Found ${eligibleServices.length} services with isolir date target (advance: ${advanceDays} days)`);
 
             let created = 0;
             let skipped = 0;
@@ -426,37 +504,63 @@ class InvoiceScheduler {
                         continue;
                     }
 
-                    // Calculate amount with tax
-                    const basePrice = service.package_price || 0;
-                    const taxRate = (service.tax_rate === 0 || (typeof service.tax_rate === 'number' && service.tax_rate > -1))
-                        ? Number(service.tax_rate)
-                        : 11.00;
-                    const amountWithTax = billingManager.calculatePriceWithTax(basePrice, taxRate);
+                    // Get tax settings from customer_default_settings
+                    const taxSetting = await query(`
+                        SELECT default_value FROM customer_default_settings
+                        WHERE field_name = 'tax_enabled' AND is_active = true
+                        LIMIT 1
+                    `);
+                    const taxEnabled = taxSetting.rows.length > 0 ? taxSetting.rows[0].default_value === 'true' : false;
 
-                    // Calculate due date based on billing cycle
-                    let dueDate;
-                    if (service.siklus === 'fixed') {
-                        // Fixed: use day from active_date
-                        const activeDay = new Date(service.active_date).getDate();
-                        dueDate = new Date(currentYear, currentMonth, Math.min(activeDay, 28));
-                    } else {
-                        // Profile: due date = isolir date
-                        dueDate = new Date(service.isolir_date);
+                    // Calculate amount - only apply tax if enabled
+                    const basePrice = service.package_price || 0;
+                    let taxRate = 0;
+                    let amountWithTax = basePrice;
+
+                    if (taxEnabled) {
+                        // Get tax percentage from settings or use package tax_rate
+                        const taxPercentSetting = await query(`
+                            SELECT default_value FROM customer_default_settings
+                            WHERE field_name = 'tax_percentage' AND is_active = true
+                            LIMIT 1
+                        `);
+                        const defaultTaxPercent = taxPercentSetting.rows.length > 0
+                            ? parseFloat(taxPercentSetting.rows[0].default_value)
+                            : 11;
+
+                        taxRate = (service.tax_rate || service.tax_rate === 0)
+                            ? Number(service.tax_rate)
+                            : defaultTaxPercent;
+                        amountWithTax = billingManager.calculatePriceWithTax(basePrice, taxRate);
                     }
+
+                    // due_date = isolir_date (both are DATE, no JS conversion needed)
+                    const isFixedCycle = service.siklus === 'fixed' || service.siklus === 'TETAP';
 
                     const invoiceData = {
                         customer_id: service.customer_id,
                         package_id: service.package_id,
+                        service_number: service.service_number,
                         amount: amountWithTax,
                         total_amount: amountWithTax,
                         base_amount: basePrice,
                         tax_rate: taxRate,
-                        due_date: dueDate.toISOString().split('T')[0],
-                        notes: `Tagihan ${service.siklus === 'fixed' ? 'siklus tetap' : 'siklus profile'} - ${today.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}`
+                        due_date: service.isolir_date,
+                        notes: `Tagihan ${isFixedCycle ? 'siklus tetap' : 'siklus profile'} - ${today.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}`
                     };
 
                     const newInvoice = await billingManager.createInvoice(invoiceData);
                     logger.info(`Created invoice ${newInvoice.invoice_number} for service ${service.service_number} (${service.siklus} cycle)`);
+
+                    // Send WhatsApp notification for new invoice
+                    try {
+                        const whatsappNotifications = require('./whatsapp-notifications');
+                        await whatsappNotifications.sendInvoiceCreatedNotification(service.customer_id, newInvoice.id);
+                        logger.info(`WhatsApp notification sent for invoice ${newInvoice.invoice_number}`);
+                    } catch (notifError) {
+                        logger.error(`Failed to send WhatsApp notification for invoice ${newInvoice.invoice_number}:`, notifError.message);
+                    }
+
                     created++;
 
                 } catch (error) {
@@ -474,6 +578,57 @@ class InvoiceScheduler {
     }
 
 
+    async rescheduleDynamicJobs() {
+        try {
+            logger.info('Rescheduling dynamic cron jobs...');
+            
+            if (this.tasks.invoice) { this.tasks.invoice.stop(); this.tasks.invoice = null; }
+            if (this.tasks.reminder) { this.tasks.reminder.stop(); this.tasks.reminder = null; }
+            if (this.tasks.suspension) { this.tasks.suspension.stop(); this.tasks.suspension = null; }
+
+            const BillingCycleService = require('./billing-cycle-service');
+            const settings = await BillingCycleService.getBillingSettings();
+
+            // 1. Invoices Job
+            const invoiceExpr = this.getDynamicInvoiceExpression(settings);
+            logger.info(`Scheduling daily invoice generation (all cycles) at expression: ${invoiceExpr}`);
+            this.tasks.invoice = cron.schedule(invoiceExpr, async () => {
+                try {
+                    logger.info('Starting daily invoice generation (all cycles)...');
+                    await this.generateDailyInvoicesByBillingDay();
+                    await this.generateDailyInvoicesForFixedAndProfile();
+                    const today = new Date();
+                    if (today.getDate() === 1) await this.generateMonthlyInvoices();
+                } catch (err) { logger.error('Invoice cron error:', err); }
+            }, { scheduled: true, timezone: "Asia/Jakarta" });
+
+            // 2. Reminders Job
+            const reminderExpr = this.getDynamicReminderExpression(settings);
+            logger.info(`Scheduling daily due date reminders at expression: ${reminderExpr}`);
+            this.tasks.reminder = cron.schedule(reminderExpr, async () => {
+                try { await this.sendDueDateReminders(); }
+                catch (err) { logger.error('Reminder cron error:', err); }
+            }, { scheduled: true, timezone: "Asia/Jakarta" });
+
+            // 3. Suspension Job
+            const timeStr = settings.suspension_time || '23:59';
+            const [hour, minute] = timeStr.split(':').map(Number);
+            const safeHour = (hour >= 0 && hour <= 23) ? hour : 23;
+            const safeMinute = (minute >= 0 && minute <= 59) ? minute : 59;
+            const suspensionExpr = `${safeMinute} ${safeHour} * * *`;
+
+            logger.info(`Scheduling daily service suspension check at ${safeHour}:${safeMinute} (${suspensionExpr})`);
+            this.tasks.suspension = cron.schedule(suspensionExpr, async () => {
+                try {
+                    logger.info('Starting daily service suspension check...');
+                    const serviceSuspension = require('./serviceSuspension');
+                    await serviceSuspension.checkAndSuspendOverdueCustomers();
+                } catch (err) { logger.error('Suspension cron error:', err); }
+            }, { scheduled: true, timezone: "Asia/Jakarta" });
+        } catch (error) {
+            logger.error('Error rescheduling dynamic jobs:', error);
+        }
+    }
 }
 
 module.exports = new InvoiceScheduler(); 

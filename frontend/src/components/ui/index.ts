@@ -4,6 +4,7 @@ export { Label } from './label'
 export { Textarea } from './textarea'
 export { Switch } from './switch'
 export { Badge, badgeVariants } from './badge'
+export { SearchInput, InlineSearch } from './search-input'
 export {
   Card,
   CardHeader,

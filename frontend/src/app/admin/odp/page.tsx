@@ -107,7 +107,7 @@ function ODPCard({ odp, onEdit, onDelete, onViewDetails }: ODPCardProps) {
   }
 
   const status = statusConfig[odp.status] || statusConfig.active
-  const utilization = parseFloat(odp.utilization_percentage) || 0
+  const utilization = parseFloat(String(odp.utilization_percentage ?? 0)) || 0
 
   return (
     <Card className="hover:shadow-lg transition-shadow">

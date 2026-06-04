@@ -58,7 +58,7 @@ export function RevenueChart({ period = '6months', height = 300 }: RevenueChartP
 
   const formatMonth = (dateString: string) => {
     const date = new Date(dateString)
-    return date.toLocaleDateString('id-ID', { month: 'short', year: '2-digit' })
+    return date.toLocaleDateString('id-ID', { month: '2-digit', year: 'numeric' })
   }
 
   const calculateTotalRevenue = () => {

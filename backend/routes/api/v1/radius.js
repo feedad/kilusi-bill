@@ -4,6 +4,15 @@ const { logger } = require('../../../config/logger');
 const { asyncHandler } = require('../../../middleware/response');
 const radiusService = require('../../../services/radius-service');
 
+// Helper: reload FreeRADIUS clients from database (HUP signal, no downtime)
+function reloadFreeRadiusClients() {
+    const { exec } = require('child_process');
+    exec('docker kill -s HUP kilusi-freeradius', (err) => {
+        if (err) logger.warn('FreeRADIUS HUP failed:', err.message);
+        else logger.info('FreeRADIUS HUP sent — reloading NAS client list');
+    });
+}
+
 // Ensure SNMP Monitor service is running (side-effect import)
 require('../../../services/snmp-monitor-service');
 
@@ -24,6 +33,7 @@ router.get('/nas/:id', asyncHandler(async (req, res) => {
 router.post('/nas', asyncHandler(async (req, res) => {
     try {
         const data = await radiusService.createNas(req.body);
+        reloadFreeRadiusClients();
         res.status(201).json({ success: true, message: 'NAS created successfully', data });
     } catch (e) {
         if (e.code === 'CONFLICT') return res.status(409).json({ success: false, message: e.message });
@@ -35,6 +45,7 @@ router.post('/nas', asyncHandler(async (req, res) => {
 router.put('/nas/:id', asyncHandler(async (req, res) => {
     try {
         const data = await radiusService.updateNas(req.params.id, req.body);
+        reloadFreeRadiusClients();
         res.json({ success: true, message: 'NAS updated successfully', data });
     } catch (e) {
         if (e.code === 'NOT_FOUND') return res.sendNotFound('NAS Server');
@@ -47,6 +58,7 @@ router.put('/nas/:id', asyncHandler(async (req, res) => {
 router.delete('/nas/:id', asyncHandler(async (req, res) => {
     const success = await radiusService.deleteNas(req.params.id);
     if (!success) return res.sendNotFound('NAS Server');
+    reloadFreeRadiusClients();
     res.json({ success: true, message: 'NAS deleted successfully' });
 }));
 
@@ -157,6 +169,40 @@ router.get('/connection-status-public/:username', asyncHandler(async (req, res) 
             public_endpoint: true
         }
     });
+}));
+
+// POST /api/v1/radius/orphan-cleanup - Remove RADIUS users without active service
+router.post('/orphan-cleanup', asyncHandler(async (req, res) => {
+    try {
+        const { query } = require('../../../config/database');
+        const radiusDb = require('../../../config/radius-postgres');
+        
+        // Get all PPPoE usernames from radcheck
+        const radcheckUsers = await query(`SELECT username FROM radcheck WHERE username IS NOT NULL`);
+        
+        // Get all active service numbers from services
+        const activeServices = await query(`
+            SELECT DISTINCT s.service_number FROM services s 
+            WHERE s.status IN ('active', 'suspended')
+        `);
+        const serviceNumbers = new Set(activeServices.rows.map(r => r.service_number));
+        
+        let cleaned = 0;
+        for (const row of radcheckUsers.rows) {
+            const baseUsername = row.username.split('@')[0];
+            // Check if any active service number matches this username
+            if (!serviceNumbers.has(baseUsername)) {
+                await radiusDb.deleteRadiusUser(row.username);
+                cleaned++;
+                logger.info(`Orphan cleanup: removed ${row.username}`);
+            }
+        }
+        
+        return res.sendSuccess({ cleaned }, { message: `${cleaned} orphan users cleaned` });
+    } catch (error) {
+        logger.error('Orphan cleanup error:', error);
+        return res.sendError('INTERNAL_ERROR', 'Gagal membersihkan orphan RADIUS');
+    }
 }));
 
 module.exports = router;

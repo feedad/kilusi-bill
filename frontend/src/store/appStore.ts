@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { persist, createJSONStorage } from 'zustand/middleware'
 
 interface AppState {
   // UI States
@@ -119,11 +119,13 @@ export const useAppStore = create<AppState>()(
 
       setTheme: (theme: 'light' | 'dark') => {
         set({ theme })
-        // Apply theme to document
-        if (theme === 'dark') {
-          document.documentElement.classList.add('dark')
-        } else {
-          document.documentElement.classList.remove('dark')
+        // Apply theme to document (only in browser)
+        if (typeof window !== 'undefined') {
+          if (theme === 'dark') {
+            document.documentElement.classList.add('dark')
+          } else {
+            document.documentElement.classList.remove('dark')
+          }
         }
       },
 
@@ -164,6 +166,16 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'app-storage',
+      storage: createJSONStorage(() => {
+        if (typeof window === 'undefined') {
+          return {
+            getItem: () => null,
+            setItem: () => {},
+            removeItem: () => {},
+          }
+        }
+        return localStorage
+      }),
       partialize: (state) => ({
         sidebarOpen: state.sidebarOpen,
         theme: state.theme,

@@ -458,9 +458,9 @@ async function createInvoice(invoiceData) {
         const sql = `
             INSERT INTO invoices (
                 customer_id, package_id, invoice_number, amount, due_date, 
-                status, notes
+                status, notes, service_number
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING *
         `;
         
@@ -471,7 +471,8 @@ async function createInvoice(invoiceData) {
             invoiceData.amount,
             invoiceData.due_date,
             invoiceData.status || 'unpaid',
-            invoiceData.notes || null
+            invoiceData.notes || null,
+            invoiceData.service_number || null
         ];
         
         const result = await query(sql, values);
@@ -481,6 +482,7 @@ async function createInvoice(invoiceData) {
         logger.error('Error creating invoice:', error);
         throw error;
     }
+}
 }
 
 /**

@@ -288,3 +288,76 @@ CLAUDE_REMINDERS.md
 .eslintcache
 .stylelintcache
 !genieacs/genieacs.env
+
+# =====================================================================
+# Agent Instructions & Internal Docs (may contain secrets)
+# =====================================================================
+AGENTS.md
+API_DOCUMENTATION.md
+BILLING_WORKFLOW_VERIFICATION.md
+OMNICHAT_INTEGRATION_API_DOCS.md
+TECHNICIAN_SYSTEM_SUMMARY.md
+TECHNICIAN_WORKFLOW.md
+WALLED_GARDEN_CONFIG.md
+WHATSAPP_IMPLEMENTATION_ANALYSIS.md
+
+# =====================================================================
+# Backup & Test Directories
+# =====================================================================
+.backup-qris/
+.testsprite/
+
+# =====================================================================
+# External / Scratch Data
+# =====================================================================
+WeConnect/
+PELANGGAN_GABUNGAN.csv
+backend/scratch/
+backend/whatsapp-session/
+deploy/
+backend/public/qris-test/
+
+# =====================================================================
+# Debug, Test & One-Time Scripts (backend root)
+# =====================================================================
+backend/check-*.js
+backend/check_*.js
+backend/debug-*.js
+backend/debug_*.js
+backend/fix_*.js
+backend/import-payments.js
+backend/insert-templates.js
+backend/peek_device.js
+backend/process-payments.js
+backend/scratch_db.js
+backend/sync-*.js
+backend/sync_*.js
+backend/test-*.js
+backend/test_*.js
+backend/verify_dates.js
+
+# =====================================================================
+# Scripts directory (tools, migrations, one-time fixes)
+# =====================================================================
+backend/scripts/
+
+# =====================================================================
+# Test files
+# =====================================================================
+backend/config/*.test.js
+backend/services/*.test.js
+
+# =====================================================================
+# Shell scripts (migration tools)
+# =====================================================================
+backend/migrate-*.sh
+backend/rollback-*.sh
+
+# =====================================================================
+# Internal Notes & Documentation
+# =====================================================================
+backend/APPROVED_TEST_NUMBERS.txt
+backend/TEST_RESULTS.md
+backend/*.md
+docs/
+docker-compose.cloudflared.yml

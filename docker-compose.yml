@@ -59,7 +59,7 @@ services:
         condition: service_healthy
     environment:
       # Database connection (passed to SQL module)
-      DB_HOST: ${POSTGRES_HOST:-postgres}
+      DB_HOST: localhost
       DB_PORT: ${POSTGRES_PORT:-5432}
       DB_NAME: ${POSTGRES_DATABASE:-kilusi_bill}
       DB_USER: ${POSTGRES_USER:-kilusi_user}
@@ -75,12 +75,7 @@ services:
       - ./freeradius/config/default:/opt/etc/raddb/sites-enabled/default:ro
       - ./freeradius/config/clients.conf:/opt/etc/raddb/clients.conf:ro
       - freeradius_logs:/var/log/freeradius
-    ports:
-      - "1812:1812/udp" # RADIUS Authentication
-      - "1813:1813/udp" # RADIUS Accounting
-      - "18120:18120" # RADIUS Status (optional)
-    networks:
-      - kilusi-network
+    network_mode: host
     command: freeradius -f -l stdout -X
     healthcheck:
       test: [ "CMD", "pgrep", "radiusd" ]
@@ -109,6 +104,8 @@ services:
       - ./genieacs/genieacs.env
     ports:
       - "7547:7547"
+    volumes:
+      - /root/kilusi-bill/genieacs/cwmp.auth:/opt/genieacs/ext/cwmp.auth:ro
     depends_on:
       - mongo
     networks:
@@ -123,6 +120,8 @@ services:
       - ./genieacs/genieacs.env
     ports:
       - "7557:7557"
+    volumes:
+      - /root/kilusi-bill/genieacs/cwmp.auth:/opt/genieacs/ext/cwmp.auth:ro
     depends_on:
       - mongo
     networks:
@@ -137,6 +136,8 @@ services:
       - ./genieacs/genieacs.env
     ports:
       - "7567:7567"
+    volumes:
+      - /root/kilusi-bill/genieacs/cwmp.auth:/opt/genieacs/ext/cwmp.auth:ro
     depends_on:
       - mongo
     networks:
@@ -155,6 +156,7 @@ services:
       - ./genieacs/ui-config/kilusi-theme-native.css:/opt/genieacs/public/kilusi-theme-native.css
       - ./genieacs/ui-config/logo.svg:/opt/genieacs/public/logo.svg
       - ./genieacs/provisions:/opt/genieacs/provisions
+      - /root/kilusi-bill/genieacs/cwmp.auth:/opt/genieacs/ext/cwmp.auth:ro
     depends_on:
       - mongo
     networks:

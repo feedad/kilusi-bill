@@ -46,7 +46,8 @@ interface Broadcast {
     priority: number
     createdAt: string
     target_all?: boolean
-    target_areas?: string // JSON string or array from backend
+    target_areas?: string[]
+    target_mitra?: string[]
 }
 
 const BROADCAST_TYPES = [
@@ -61,6 +62,8 @@ export default function BroadcastPage() {
     const [saving, setSaving] = useState(false)
     const [broadcasts, setBroadcasts] = useState<Broadcast[]>([])
     const [regions, setRegions] = useState<{ id: string, name: string }[]>([])
+    const [mitraList, setMitraList] = useState<{ id: string, name: string }[]>([])
+    const [whatsappTemplates, setWhatsappTemplates] = useState<any[]>([])
     const [showForm, setShowForm] = useState(false)
     const [editingId, setEditingId] = useState<string | null>(null)
 
@@ -75,30 +78,62 @@ export default function BroadcastPage() {
         priority: 0,
         target_all: true,
         target_areas: [] as string[],
+        target_mitra: [] as string[],
+        sendWhatsAppNotification: false,
+        whatsappTemplateId: 'custom',
     })
 
     useEffect(() => {
         fetchBroadcasts()
         fetchRegions()
+        fetchMitra()
+        fetchWhatsappTemplates()
     }, [])
 
     const fetchRegions = async () => {
         try {
-            const response = await adminApi.get('/api/v1/regions')
+            const response = await adminApi.get('/api/v1/regions?limit=200')
             if (response.data.success) {
-                setRegions(response.data.data || [])
+                setRegions(Array.isArray(response.data.data) ? response.data.data : [])
             }
         } catch (error) {
             console.error('Error fetching regions:', error)
-            // Fallback for empty/missing table
             setRegions([])
+        }
+    }
+
+    const fetchMitra = async () => {
+        try {
+            const response = await adminApi.get('/api/v1/mitra?limit=200')
+            if (response.data.success) {
+                setMitraList(Array.isArray(response.data.data) ? response.data.data : [])
+            }
+        } catch (error) {
+            console.error('Error fetching mitra:', error)
+            setMitraList([])
+        }
+    }
+
+    const fetchWhatsappTemplates = async () => {
+        try {
+            const response = await adminApi.get('/api/v1/whatsapp-templates')
+            if (response.data.success && response.data.data) {
+                // Filter only enabled templates with APPROVED status
+                const templates = response.data.data.templates.filter((t: any) =>
+                    t.enabled && (t.meta_status === 'APPROVED' || t.meta_status === 'approved')
+                )
+                setWhatsappTemplates(templates)
+            }
+        } catch (error) {
+            console.error('Error fetching WhatsApp templates:', error)
+            setWhatsappTemplates([])
         }
     }
 
     const fetchBroadcasts = async () => {
         setLoading(true)
         try {
-            const response = await adminApi.get('/api/v1/broadcasts')
+            const response = await adminApi.get('/api/v1/broadcast')
             if (response.data.success) {
                 setBroadcasts(response.data.broadcasts || [])
             }
@@ -143,11 +178,11 @@ export default function BroadcastPage() {
             startDate: '',
             endDate: '',
             priority: 0,
-            startDate: '',
-            endDate: '',
-            priority: 0,
             target_all: true,
             target_areas: [],
+            target_mitra: [],
+            sendWhatsAppNotification: false,
+            whatsappTemplateId: 'custom',
         })
         setEditingId(null)
         setShowForm(false)
@@ -170,6 +205,15 @@ export default function BroadcastPage() {
                         ? (broadcast.target_areas as string).replace(/[\[\]"]/g, '').split(',').map(s => s.trim()).filter(Boolean)
                         : [])
                 : [],
+            target_mitra: (broadcast as any).target_mitra
+                ? (Array.isArray((broadcast as any).target_mitra)
+                    ? (broadcast as any).target_mitra
+                    : typeof (broadcast as any).target_mitra === 'string'
+                        ? ((broadcast as any).target_mitra as string).replace(/[\[\]"]/g, '').split(',').map((s: string) => s.trim()).filter(Boolean)
+                        : [])
+                : [],
+            sendWhatsAppNotification: false,
+            whatsappTemplateId: 'custom',
         })
         setEditingId(broadcast.id)
         setShowForm(true)
@@ -185,12 +229,16 @@ export default function BroadcastPage() {
         try {
             const payload = {
                 ...form,
-                target_areas: form.target_all ? [] : form.target_areas
+                target_areas: form.target_all ? [] : form.target_areas,
+                target_mitra: form.target_all ? [] : form.target_mitra,
+                // Map camelCase to snake_case for backend
+                send_whatsapp_notification: form.sendWhatsAppNotification,
+                whatsapp_template_id: form.whatsappTemplateId
             }
 
             if (editingId) {
                 // Update existing
-                const response = await adminApi.put(`/api/v1/broadcasts/${editingId}`, payload)
+                const response = await adminApi.put(`/api/v1/broadcast/${editingId}`, payload)
                 if (response.data.success) {
                     toast.success('Pengumuman berhasil diperbarui')
                     fetchBroadcasts()
@@ -198,9 +246,12 @@ export default function BroadcastPage() {
                 }
             } else {
                 // Create new
-                const response = await adminApi.post('/api/v1/broadcasts', payload)
+                const response = await adminApi.post('/api/v1/broadcast', payload)
                 if (response.data.success) {
-                    toast.success('Broadcast berhasil dibuat')
+                    const waMsg = form.sendWhatsAppNotification
+                        ? ` dan WhatsApp ${form.whatsappTemplateId === 'custom' ? '(custom)' : '(template)'} terkirim ke`
+                        : ''
+                    toast.success('Broadcast berhasil dibuat' + waMsg)
                     fetchBroadcasts()
                     resetForm()
                 }
@@ -229,7 +280,7 @@ export default function BroadcastPage() {
         if (!confirm('Hapus broadcast ini?')) return
 
         try {
-            await adminApi.delete(`/api/v1/broadcasts/${id}`)
+            await adminApi.delete(`/api/v1/broadcast/${id}`)
             toast.success('Broadcast dihapus')
             fetchBroadcasts()
         } catch (error) {
@@ -241,7 +292,7 @@ export default function BroadcastPage() {
 
     const toggleActive = async (broadcast: Broadcast) => {
         try {
-            await adminApi.put(`/api/v1/broadcasts/${broadcast.id}`, {
+            await adminApi.put(`/api/v1/broadcast/${broadcast.id}`, {
                 ...broadcast,
                 isActive: !broadcast.isActive,
             })
@@ -445,6 +496,71 @@ export default function BroadcastPage() {
                                         <p className="text-xs text-muted-foreground mt-2">
                                             Pilih wilayah target dari dropdown. (Data diambil dari tabel regions)
                                         </p>
+
+                                        {/* Mitra Filter */}
+                                        <div className="pt-4 border-t mt-4">
+                                            <label className="text-sm font-medium mb-1 block">
+                                                Pilih Mitra
+                                            </label>
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <Button variant="outline" className="w-full justify-between">
+                                                        {form.target_mitra.length > 0
+                                                            ? `${form.target_mitra.length} Mitra Dipilih`
+                                                            : "Pilih Mitra..."}
+                                                        <ChevronDown className="ml-2 h-4 w-4 opacity-50" />
+                                                    </Button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent className="w-[300px] max-h-[300px] overflow-y-auto">
+                                                    <DropdownMenuLabel>Daftar Mitra</DropdownMenuLabel>
+                                                    <DropdownMenuSeparator />
+                                                    {mitraList.length === 0 ? (
+                                                        <div className="p-2 text-sm text-muted-foreground text-center">
+                                                            Tidak ada data mitra
+                                                        </div>
+                                                    ) : (
+                                                        mitraList.map((m) => (
+                                                            <DropdownMenuCheckboxItem
+                                                                key={m.id}
+                                                                checked={form.target_mitra.includes(m.name)}
+                                                                onCheckedChange={(checked) => {
+                                                                    setForm(prev => ({
+                                                                        ...prev,
+                                                                        target_mitra: checked
+                                                                            ? [...prev.target_mitra, m.name]
+                                                                            : prev.target_mitra.filter(name => name !== m.name)
+                                                                    }))
+                                                                }}
+                                                            >
+                                                                {m.name}
+                                                            </DropdownMenuCheckboxItem>
+                                                        ))
+                                                    )}
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+
+                                            {form.target_mitra.length > 0 && (
+                                                <div className="flex flex-wrap gap-1 mt-2">
+                                                    {form.target_mitra.map(m => (
+                                                        <Badge key={m} variant="secondary" className="text-xs bg-blue-100 dark:bg-blue-900">
+                                                            {m}
+                                                            <button
+                                                                onClick={() => setForm(prev => ({
+                                                                    ...prev,
+                                                                    target_mitra: prev.target_mitra.filter(name => name !== m)
+                                                                }))}
+                                                                className="ml-1 hover:text-red-500"
+                                                            >
+                                                                ×
+                                                            </button>
+                                                        </Badge>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            <p className="text-xs text-muted-foreground mt-2">
+                                                Filter pelanggan berdasarkan mitra
+                                            </p>
+                                        </div>
                                     </div>
                                 )}
                             </div>
@@ -460,6 +576,83 @@ export default function BroadcastPage() {
                             <label htmlFor="isActive" className="text-sm font-medium">
                                 Aktifkan pengumuman ini
                             </label>
+                        </div>
+
+                        {/* WhatsApp Notification Section */}
+                        <div className="p-4 border rounded-lg bg-gray-50 dark:bg-gray-800/50">
+                            <label className="text-sm font-medium mb-3 block">📱 Notifikasi WhatsApp (Opsional)</label>
+
+                            <div className="space-y-3">
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="checkbox"
+                                        checked={form.sendWhatsAppNotification}
+                                        onChange={(e) => setForm({ ...form, sendWhatsAppNotification: e.target.checked })}
+                                        id="sendWhatsApp"
+                                    />
+                                    <label htmlFor="sendWhatsApp" className="text-sm font-medium">
+                                        Kirim notifikasi WhatsApp ke pelanggan
+                                    </label>
+                                </div>
+
+                                {form.sendWhatsAppNotification && (
+                                    <div className="ml-6 space-y-3">
+                                        <div>
+                                            <label className="text-sm font-medium mb-1 block">
+                                                Pilih Format Pesan:
+                                            </label>
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={() => setForm({ ...form, whatsappTemplateId: 'custom' })}
+                                                    className={`px-3 py-2 text-sm rounded-lg border transition-colors ${
+                                                        form.whatsappTemplateId === 'custom'
+                                                            ? 'bg-blue-500 text-white border-blue-500'
+                                                            : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 hover:bg-gray-50'
+                                                    }`}
+                                                >
+                                                    Custom Message
+                                                </button>
+                                                <button
+                                                    onClick={() => setForm({ ...form, whatsappTemplateId: 'template' })}
+                                                    className={`px-3 py-2 text-sm rounded-lg border transition-colors ${
+                                                        form.whatsappTemplateId === 'template'
+                                                            ? 'bg-green-500 text-white border-green-500'
+                                                            : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 hover:bg-gray-50'
+                                                    }`}
+                                                    disabled={whatsappTemplates.length === 0}
+                                                >
+                                                    Template WhatsApp {whatsappTemplates.length > 0 ? `(${whatsappTemplates.length})` : '(Belum ada template approved)'}
+                                                </button>
+                                            </div>
+                                            <p className="text-xs text-muted-foreground">
+                                                {form.whatsappTemplateId === 'custom'
+                                                    ? 'Pesan custom akan dikirim satu per satu (mungkin terkena rate limit)'
+                                                    : 'Gunakan template yang sudah disetujui Meta untuk broadcast bulk'}
+                                            </p>
+                                        </div>
+
+                                        {form.whatsappTemplateId === 'template' && whatsappTemplates.length > 0 && (
+                                            <div>
+                                                <label className="text-sm font-medium mb-1 block">
+                                                    Pilih Template:
+                                                </label>
+                                                <select
+                                                    value={form.whatsappTemplateId}
+                                                    onChange={(e) => setForm({ ...form, whatsappTemplateId: e.target.value })}
+                                                    className="w-full px-3 py-2 text-sm border rounded-lg bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600"
+                                                >
+                                                    <option value="template">-- Pilih Template --</option>
+                                                    {whatsappTemplates.map(t => (
+                                                        <option key={t.id} value={t.template_id}>
+                                                            {t.name} ({t.category})
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
                         {/* Preview */}
@@ -528,9 +721,16 @@ export default function BroadcastPage() {
                                                             {broadcast.isActive ? 'Aktif' : 'Nonaktif'}
                                                         </Badge>
                                                         {!broadcast.target_all && (
-                                                            <Badge variant="outline" className="text-xs">
-                                                                Target Area
-                                                            </Badge>
+                                                            <div className="flex gap-1">
+                                                                <Badge variant="outline" className="text-xs">
+                                                                    Target Area
+                                                                </Badge>
+                                                                {(broadcast.target_mitra && broadcast.target_mitra.length > 0) && (
+                                                                    <Badge variant="outline" className="text-xs bg-blue-50 dark:bg-blue-900">
+                                                                        Target Mitra
+                                                                    </Badge>
+                                                                )}
+                                                            </div>
                                                         )}
                                                     </div>
                                                     <p className="text-sm text-muted-foreground mt-1">{broadcast.content}</p>

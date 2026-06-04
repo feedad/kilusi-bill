@@ -1,5 +1,5 @@
 const logger = require('./logger');
-const { getMikrotikConnection } = require('./mikrotik');
+const MikrotikService = require('../services/mikrotik-service');
 const { getSetting } = require('./settingsManager');
 
 /**

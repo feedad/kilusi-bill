@@ -8,6 +8,41 @@ Welcome to Kilusi Bill documentation. This folder contains essential public docu
 - [Installation Guide](../README-SETUP.md) - Complete installation instructions
 - [Quick Start](../README.md#quick-start) - Get up and running quickly
 
+### Core Documentation
+- **[Product Requirements Document (PRD)](product/PRD.md)** - Complete product specification including:
+  - Executive summary and product overview
+  - Target users and user roles
+  - Core features and functional requirements
+  - Non-functional requirements
+  - Integration requirements
+  - User stories and success metrics
+  - Product roadmap
+
+- **[Technical Specification (TechSpec)](technical/TechSpec.md)** - Comprehensive technical documentation including:
+  - System architecture and design patterns
+  - Technology stack (backend, frontend, infrastructure)
+  - Complete database schema with all tables
+  - API specifications with examples
+  - Frontend and backend architecture
+  - Security specifications
+  - Deployment architecture
+  - Performance considerations
+  - Monitoring and logging
+  - Development guidelines
+
+- **[Application Flow Document](flows/ApplicationFlow.md)** - Detailed operational flows including:
+  - User authentication flows (admin and customer)
+  - Customer registration flows
+  - Service activation and modification flows
+  - Billing and payment flows (automated and manual)
+  - RADIUS authentication flows
+  - SNMP monitoring flows
+  - WhatsApp notification flows
+  - Support ticket flows
+  - Installation scheduling and execution flows
+  - Data synchronization flows
+  - System startup and error handling flows
+
 ### Deployment
 - See [Docker Compose](../docker-compose.yml) for container deployment
 - See [Installation Script](../install.sh) for automated setup
@@ -20,6 +55,19 @@ Welcome to Kilusi Bill documentation. This folder contains essential public docu
 ### Configuration
 - [FreeRADIUS SQL Module](../freeradius/config/mods-available/sql) - RADIUS database configuration
 - [Environment Example](../.env.docker.example) - Configuration template
+
+## 📖 Documentation Structure
+
+```
+docs/
+├── product/
+│   └── PRD.md              # Product Requirements Document
+├── technical/
+│   └── TechSpec.md         # Technical Specification
+├── flows/
+│   └── ApplicationFlow.md  # Application Flow Diagrams
+└── README.md               # This file
+```
 
 ## 📖 Additional Resources
 

@@ -64,8 +64,17 @@ router.post('/connect', asyncHandler(async (req, res) => {
 
 // POST /api/v1/whatsapp/disconnect
 router.post('/disconnect', asyncHandler(async (req, res) => {
-    const data = await whatsappService.disconnect();
-    res.json({ success: true, message: 'WhatsApp disconnected successfully', data });
+    const result = await whatsappService.disconnect();
+    if (!result || !result.success) {
+        return res.status(500).json({ success: false, message: result?.message || 'Failed to disconnect WhatsApp' });
+    }
+    // Verify socket is actually cleared
+    const { getSock } = require('../../../config/whatsapp');
+    const sock = getSock();
+    if (sock && sock.user) {
+        return res.status(500).json({ success: false, message: 'Disconnect incomplete - socket still active' });
+    }
+    res.json({ success: true, message: 'WhatsApp disconnected successfully', data: result });
 }));
 
 // GET /api/v1/whatsapp/regions-stats

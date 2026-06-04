@@ -5,6 +5,9 @@ const { query } = require('../../../config/database');
 const { jwtAuth } = require('../../../middleware/jwtAuth');
 const { asyncHandler } = require('../../../middleware/response');
 const PaymentGatewayManager = require('../../../config/paymentGateway');
+const BillingCycleService = require('../../../config/billing-cycle-service');
+const { createAccountingTransaction } = require('../../../config/accounting');
+const telegramService = require('../../../services/telegram-service');
 
 // Initialize payment gateway manager
 const paymentGateway = new PaymentGatewayManager();
@@ -40,14 +43,14 @@ webhookRouter.post('/:gateway', asyncHandler(async (req, res) => {
       false // Will be updated after validation
     ]);
 
-    // Process webhook with payment gateway
-    const webhookResult = await paymentGateway.handleWebhook(req.body, req.headers, gateway);
+    // Process webhook with payment gateway (pass body+headers as object, gateway as string)
+    const webhookResult = await paymentGateway.handleWebhook({ body: req.body, headers: req.headers }, gateway);
 
     if (webhookResult && webhookResult.reference) { // Changed from order_id to reference for consistency
       if (webhookResult.status === 'success') {
         // Find the invoice to get customer details for the message
         const invoiceCheck = await query(`
-          SELECT i.invoice_number, c.name as customer_name, i.final_amount as total_amount
+          SELECT i.invoice_number, c.name as customer_name, i.total_amount as total_amount
           FROM payment_transactions pt
           JOIN invoices i ON pt.invoice_id = i.id
           JOIN customers c ON i.customer_id = c.id
@@ -57,42 +60,141 @@ webhookRouter.post('/:gateway', asyncHandler(async (req, res) => {
         // Update payment transaction
         const updateResult = await query(`
           UPDATE payment_transactions
-          SET status = 'success',
-              completed_at = NOW(),
-              gateway_response = $1,
+          SET status = 'paid',
+              fee_amount = COALESCE($1, fee_amount),
+              net_amount = CASE WHEN $2 > 0 THEN $2 ELSE amount - COALESCE($1, fee_amount) END,
+              amount_received = COALESCE($3, amount_received),
+              paid_at = NOW(),
+              gateway_response = $4,
               updated_at = NOW()
-          WHERE gateway_reference = $2
+          WHERE gateway_reference = $5
           RETURNING *
-        `, [JSON.stringify(webhookResult), webhookResult.reference]);
+        `, [webhookResult.fee_amount || null, webhookResult.net_amount || null, webhookResult.amount_received || null, JSON.stringify(webhookResult), webhookResult.reference]);
 
         if (updateResult.rows.length === 0) {
           logger.warn(`Webhook received for unknown or already processed transaction: ${webhookResult.reference}`);
         } else {
           const transaction = updateResult.rows[0];
-          const invoiceId = transaction.invoice_id;
+           const invoiceId = transaction.invoice_id;
 
-          // Update invoice status
-          await query(`
-            UPDATE invoices SET
-              status = 'paid',
-              payment_method = $1,
-              payment_gateway = $2,
-              payment_gateway_status = $3,
-              payment_gateway_response = $4,
-              payment_date = NOW(),
-              updated_at = NOW()
-            WHERE id = $5
-          `, [
-            webhookResult.payment_method || 'tripay',
-            gateway,
-            webhookResult.status,
-            JSON.stringify(webhookResult),
-            invoiceId
-          ]);
+            // [DEBUG] Log invoice status before update
+            const statusBefore = await query(`SELECT status FROM invoices WHERE id = $1`, [invoiceId]);
+            logger.info(`[WEBHOOK-DEBUG] Invoice ${invoiceId} status BEFORE: ${statusBefore.rows[0]?.status}`);
 
-          logger.info(`💰 Invoice ${invoiceId} paid via webhook from ${gateway}`);
+            // Update invoice status
+            await query(`
+             UPDATE invoices SET
+               status = 'paid',
+               payment_method = $1,
+               payment_gateway = $2,
+               payment_gateway_status = $3,
+               payment_gateway_response = $4,
+               payment_fee_amount = COALESCE($5, 0),
+               fee_bearer = COALESCE($6, fee_bearer),
+               paid_at = NOW(),
+               payment_date = NOW(),
+               updated_at = NOW()
+             WHERE id = $7
+           `, [
+             webhookResult.payment_method || 'tripay',
+             gateway,
+             webhookResult.status,
+             JSON.stringify(webhookResult),
+             webhookResult.fee_amount || null,
+             webhookResult.fee_bearer || null,
+             invoiceId
+           ]);
 
-          // Send Telegram Notification
+            logger.info(`💰 Invoice ${invoiceId} paid via webhook from ${gateway}`);
+
+            // [DEBUG] Log invoice status after update
+            const statusAfter = await query(`SELECT status FROM invoices WHERE id = $1`, [invoiceId]);
+            logger.info(`[WEBHOOK-DEBUG] Invoice ${invoiceId} status AFTER update: ${statusAfter.rows[0]?.status}`);
+
+            // Notify autopay (non-blocking)
+           const autopayService = require('../../../services/autopay-service');
+           const invResult = await query('SELECT invoice_number, amount, customer_id FROM invoices WHERE id = $1', [invoiceId]);
+           if (invResult.rows.length > 0) {
+               const custResult = await query('SELECT name FROM customers WHERE id = $1', [invResult.rows[0].customer_id]);
+               autopayService.notifyAutopayInvoicePaid({
+                   invoice_number: invResult.rows[0].invoice_number,
+                   amount: invResult.rows[0].amount,
+                   customer_name: custResult.rows[0]?.name || '',
+               }).catch(e => logger.warn('Autopay notify failed:', e.message));
+           }
+
+             // Update service dates after payment using actual payment timestamp
+             const paymentTimestamp = webhookResult.paid_at ? new Date(webhookResult.paid_at * 1000) : new Date();
+             const updatedDates = await BillingCycleService.updateServiceDatesAfterPayment(invoiceId, paymentTimestamp);
+
+            // [DEBUG] Log invoice status after date update
+            const statusAfterDates = await query(`SELECT status FROM invoices WHERE id = $1`, [invoiceId]);
+            logger.info(`[WEBHOOK-DEBUG] Invoice ${invoiceId} status AFTER updateDates: ${statusAfterDates.rows[0]?.status}`);
+
+             // Restore service if all invoices paid (Tripay payment reactivates)
+            try {
+                const unpaidCheck = await query(
+                    `SELECT COUNT(*) as cnt FROM invoices WHERE customer_id = (SELECT customer_id FROM invoices WHERE id = $1) AND status IN ('unpaid','suspended')`,
+                    [invoiceId]
+                );
+                if (parseInt(unpaidCheck.rows[0].cnt) === 0) {
+                    const serviceSuspension = require('../../../config/serviceSuspension');
+                    const svcData = await query(
+                        `SELECT s.id, s.service_number, c.name, p.group as package_group, p.pppoe_profile
+                         FROM services s JOIN customers c ON c.id = s.customer_id
+                         LEFT JOIN packages p ON p.id = s.package_id
+                         WHERE s.customer_id = (SELECT customer_id FROM invoices WHERE id = $1) LIMIT 1`,
+                        [invoiceId]
+                    );
+                    if (svcData.rows.length > 0 && svcData.rows[0].id) {
+                        await serviceSuspension.restoreServiceByServiceId(
+                            svcData.rows[0].id,
+                            { name: svcData.rows[0].name, service_number: svcData.rows[0].service_number, package_group: svcData.rows[0].package_group, pppoe_profile: svcData.rows[0].pppoe_profile },
+                            'Tripay - full restoration'
+                        );
+                        await query(`UPDATE services SET status = 'active', updated_at = NOW() WHERE customer_id = (SELECT customer_id FROM invoices WHERE id = $1)`, [invoiceId]);
+                        logger.info(`🔄 Service ${svcData.rows[0].id} restored via Tripay webhook`);
+                    }
+                } else {
+                    logger.info(`ℹ️ Customer still has ${unpaidCheck.rows[0].cnt} unpaid invoices, skipping restore`);
+                }
+            } catch (e) { logger.warn('Restore service after Tripay payment failed:', e.message); }
+
+            // [DEBUG] Log invoice status after restore
+            const statusAfterRestore = await query(`SELECT status FROM invoices WHERE id = $1`, [invoiceId]);
+            logger.info(`[WEBHOOK-DEBUG] Invoice ${invoiceId} status AFTER restore: ${statusAfterRestore.rows[0]?.status}`);
+
+            // Insert into payments table for notification + portal history
+            const payResult = await query(
+                `INSERT INTO payments (invoice_id, amount, payment_method, payment_date, notes, created_at)
+                 VALUES ($1, $2, $3, NOW(), $4, NOW()) RETURNING *`,
+                [invoiceId, parseFloat(transaction.amount_received) || transaction.amount,
+                 webhookResult.payment_method || gateway,
+                 `Tripay ${webhookResult.payment_method || gateway} — Rp ${Math.round(parseFloat(transaction.amount_received) || transaction.amount).toLocaleString('id-ID')}`]
+            );
+
+            // [DEBUG] Log invoice status after payments INSERT
+            const statusFinal = await query(`SELECT status FROM invoices WHERE id = $1`, [invoiceId]);
+            logger.info(`[WEBHOOK-DEBUG] Invoice ${invoiceId} status FINAL: ${statusFinal.rows[0]?.status}`);
+
+            // Send WhatsApp notification
+           try {
+               const whatsappNotifications = require('../../../config/whatsapp-notifications');
+                await whatsappNotifications.sendPaymentReceivedNotification(payResult.rows[0].id, {
+                    dueDate: updatedDates?.newIsolirDate
+                });
+               logger.info(`📱 WhatsApp payment notification sent for invoice ${invoiceId}`);
+            } catch (e) { logger.warn('Tripay payment notification failed:', e.message); }
+
+            // Create accounting transaction (non-blocking)
+            try {
+                const custResult = await query(`SELECT c.name, i.invoice_number FROM invoices i JOIN customers c ON c.id = i.customer_id WHERE i.id = $1`, [invoiceId]);
+                await createAccountingTransaction('revenue', transaction.amount_received || transaction.amount,
+                    `Pembayaran Tripay invoice #${custResult.rows[0]?.invoice_number || invoiceId} dari ${custResult.rows[0]?.name || 'Customer'}`,
+                    'payment', payResult.rows[0].id);
+            } catch (acctErr) { logger.warn('Tripay accounting transaction failed:', acctErr.message); }
+
+            // Send Telegram Notification
           if (invoiceCheck.rows.length > 0) {
             const inv = invoiceCheck.rows[0];
             const message = `
@@ -304,7 +406,7 @@ router.post('/create', jwtAuth, asyncHandler(async (req, res) => {
       invoice_id,
       gateway,
       paymentResult.token || paymentResult.gateway_transaction_id,
-      paymentResult.order_id,
+      paymentResult.token || paymentResult.order_id,
       payment_method,
       'invoice',
       invoice.final_amount || invoice.amount,
@@ -318,6 +420,9 @@ router.post('/create', jwtAuth, asyncHandler(async (req, res) => {
       JSON.stringify(paymentResult),
       new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours expiry
     ];
+
+    // [DEBUG] Log paymentResult token vs order_id for gateway_reference fix verification
+    logger.info(`[PAYMENT-DEBUG] token="${paymentResult.token}" order_id="${paymentResult.order_id}" → stored_ref="${paymentResult.token || paymentResult.order_id}"`);
 
     const transactionResult = await query(transactionQuery, transactionValues);
 
@@ -444,11 +549,14 @@ router.put('/transactions/:id/status', jwtAuth, asyncHandler(async (req, res) =>
     if (status === 'paid') {
       await query(`
         UPDATE invoices
-        SET status = 'paid', payment_date = NOW(), payment_gateway_status = 'paid'
+        SET status = 'paid', payment_date = $2, payment_gateway_status = 'paid'
         WHERE id = $1
-      `, [transaction.invoice_id]);
+      `, [transaction.invoice_id, transaction.created_at]);
 
       logger.info(`💰 Invoice ${transaction.invoice_id} marked as paid via transaction ${id}`);
+      
+      // Update service dates after payment using transaction creation time
+      await BillingCycleService.updateServiceDatesAfterPayment(transaction.invoice_id, transaction.created_at);
     }
 
     res.json({

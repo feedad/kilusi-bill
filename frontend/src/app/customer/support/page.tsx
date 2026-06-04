@@ -187,7 +187,7 @@ export default function CustomerSupportPage() {
     } else {
       return date.toLocaleDateString('id-ID', {
         year: 'numeric',
-        month: 'short',
+        month: '2-digit',
         day: 'numeric'
       })
     }

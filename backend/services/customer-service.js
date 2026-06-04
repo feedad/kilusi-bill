@@ -1,8 +1,11 @@
-const { query } = require('../config/database');
+const { query, getOne } = require('../config/database');
 const { logger } = require('../config/logger');
 const RadiusCommentService = require('./radius-comment-service');
 const radiusDb = require('../config/radius-postgres');
 const billingService = require('../services/billing-service');
+const BillingCycleService = require('../config/billing-cycle-service');
+const kilusiOmnichat = require('../config/kilusi-whatsapp');
+const MikrotikService = require('./mikrotik-service');
 
 class CustomerService {
     /**
@@ -31,7 +34,10 @@ class CustomerService {
                     customer.active_date,
                     customer.profile_period || null
                 );
-                customer.calculated_isolir_date = isolirDate.toISOString().split('T')[0];
+                const y = isolirDate.getFullYear();
+                const m = String(isolirDate.getMonth() + 1).padStart(2, '0');
+                const d = String(isolirDate.getDate()).padStart(2, '0');
+                customer.calculated_isolir_date = `${y}-${m}-${d}`;
             }
         } catch (error) {
             logger.error(`Error calculating isolir date for customer ${customer.id}:`, error);
@@ -42,7 +48,7 @@ class CustomerService {
     /**
      * Get all customers with pagination and filtering
      */
-    static async getAllCustomers({ page = 1, limit = 10, search = '', status = '', has_service = null, exclude_status = null }) {
+    static async getAllCustomers({ page = 1, limit = 10, search = '', status = '', has_service = null, exclude_status = null, sort_field = 'created_at', sort_direction = 'desc', region_id = '', package_id = '', router_id = '', mitra_id = '' }) {
         const offset = (page - 1) * limit;
         let whereClause = 'WHERE 1=1';
         let queryParams = [];
@@ -70,10 +76,60 @@ class CustomerService {
             whereClause += ` AND c.package_id IS NULL`;
         }
 
+        if (region_id) {
+            whereClause += ` AND c.region_id = $${queryParams.length + 1}`;
+            queryParams.push(region_id);
+        }
+
+        if (package_id) {
+            whereClause += ` AND c.package_id = $${queryParams.length + 1}`;
+            queryParams.push(package_id);
+        }
+
+        if (router_id) {
+            whereClause += ` AND c.nas_id = $${queryParams.length + 1}`;
+            queryParams.push(router_id);
+        }
+
+        if (mitra_id) {
+            whereClause += ` AND c.region_id IN (SELECT id FROM regions WHERE mitra_id = $${queryParams.length + 1}::uuid)`;
+            queryParams.push(mitra_id);
+        }
+
         // Count query
         const countQuery = `SELECT COUNT(*) as total FROM customers_view c ${whereClause}`;
         const countResult = await query(countQuery, queryParams);
         const total = parseInt(countResult.rows[0].total);
+
+        // Determine sort field logic
+        let orderByClause = 'c.created_at DESC'; // Default
+        const direction = sort_direction === 'asc' ? 'ASC' : 'DESC';
+
+        if (sort_field) {
+            switch (sort_field) {
+                case 'name':
+                    orderByClause = `c.name ${direction}`;
+                    break;
+                case 'service_number':
+                    orderByClause = `c.service_number ${direction}`;
+                    break;
+                case 'isolir_date':
+                    orderByClause = `c.isolir_date ${direction}`;
+                    break;
+                case 'region':
+                    orderByClause = `r.name ${direction}`; // Sort by region name instead of ID for better UX
+                    break;
+                case 'customer_id':
+                    orderByClause = `c.customer_id ${direction}`;
+                    break;
+                case 'created_at':
+                    orderByClause = `c.created_at ${direction}`;
+                    break;
+                default:
+                    // Keep default
+                    break;
+            }
+        }
 
         // Data query - Reading from View
         const dataQuery = `
@@ -94,6 +150,9 @@ class CustomerService {
                 
                 -- Region name from regions table
                 r.name as region_name,
+                
+                -- Mitra name via regions
+                m.name as mitra_name,
                 
                 -- Derived fields
                 CASE
@@ -122,9 +181,10 @@ class CustomerService {
             FROM customers_view c
             LEFT JOIN packages p ON c.package_id = p.id
             LEFT JOIN regions r ON c.region_id = r.id
+            LEFT JOIN mitra m ON m.id = r.mitra_id
             LEFT JOIN odps o ON c.odp_code = o.id::text
             ${whereClause}
-            ORDER BY c.created_at DESC
+            ORDER BY ${orderByClause}
             LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}
         `;
 
@@ -186,7 +246,7 @@ class CustomerService {
 
         // Get sessions
         const sessionsResult = await query(`
-            SELECT id, session_id, username, ip_address, mac_address, start_time, last_seen as stop_time, active, session_time
+            SELECT id, username, ip_address, mac_address, start_time, last_seen as stop_time, active, session_time
             FROM customer_sessions WHERE username = $1 ORDER BY start_time DESC LIMIT 10
         `, [customer.pppoe_username]);
 
@@ -310,7 +370,7 @@ class CustomerService {
     static async createService(customerId, data, client = null) {
         let {
             package_id, pppoe_username, pppoe_password,
-            status = 'active', billing_type = 'postpaid',
+            status = 'pending', billing_type = 'postpaid',
             active_date = new Date(), isolir_date, siklus,
             odp_id, odp_port, cable_type, cable_length,
             address, installation_address, latitude, longitude,
@@ -342,11 +402,20 @@ class CustomerService {
                 pppoe_username = serviceNumber;
             }
 
-            // Validation - PPPoE Uniqueness check inside execution context to be safe
+            // Validation - PPPoE Uniqueness check inside execution context
             if (pppoe_username) {
-                const existingUsername = await dbClient.query('SELECT id FROM technical_details WHERE pppoe_username = $1', [pppoe_username]);
+                const existingUsername = await dbClient.query(
+                    `SELECT t.service_id, s.customer_id, s.status, s.package_id, s.billing_type
+                     FROM technical_details t
+                     JOIN services s ON t.service_id = s.id
+                     WHERE t.pppoe_username = $1`, [pppoe_username]);
                 if (existingUsername.rows.length > 0) {
-                    // If conflicts, throw. (Frontend usually checks this, but for auto-gen safety)
+                    const existing = existingUsername.rows[0];
+                    if (existing.customer_id === customerId) {
+                        // Same customer — skip, return existing service
+                        return existing.service_id;
+                    }
+                    // Different customer — conflict
                     throw { code: 'RESOURCE_CONFLICT', message: 'Username PPPoE sudah terdaftar', field: 'pppoe_username' };
                 }
             }
@@ -381,6 +450,21 @@ class CustomerService {
             return serviceId;
         };
 
+        // Calculate isolir_date if not provided, based on billing cycle
+        if (!isolir_date && siklus) {
+            const calcActiveDate = active_date instanceof Date ? active_date : new Date(active_date);
+            if (!isNaN(calcActiveDate.getTime())) {
+                try {
+                    const calculated = await BillingCycleService.calculateIsolirDate(
+                        customerId, calcActiveDate, null, siklus
+                    );
+                    isolir_date = calculated;
+                } catch (e) {
+                    logger.warn(`Failed to calculate isolir date for customer ${customerId}: ${e.message}`);
+                }
+            }
+        }
+
         let serviceId;
         if (client) {
             serviceId = await executeServiceInsert(client);
@@ -402,7 +486,7 @@ class CustomerService {
         // But if client is passed, we assume caller handles transaction. 
         // We will return data needed for post-tasks.
 
-        return { serviceId, pppoe_username, billing_type, package_id };
+        return { serviceId, pppoe_username, pppoe_password, billing_type, package_id };
     }
 
     /**
@@ -438,14 +522,6 @@ class CustomerService {
             client.release();
         }
 
-        // Create invoice
-        let invoiceResult = { invoice: null, message: 'Invoice creation pending' };
-        try {
-            invoiceResult = await billingService.createCustomerInvoice(customer.id, serviceData.package_id, serviceData.billing_type);
-        } catch (e) {
-            logger.error('Failed to create initial invoice', e);
-        }
-
         // Update Mikrotik/RADIUS
         let radiusCommentUpdated = false;
         if (serviceData.pppoe_username && customer.name) {
@@ -459,7 +535,6 @@ class CustomerService {
 
         return {
             customer,
-            invoiceResult,
             radiusCommentUpdated
         };
     }
@@ -489,8 +564,7 @@ class CustomerService {
 
         // Validation - duplicate checks
         if (phone && phone !== current.phone) {
-            // Check in Identity table
-            const exist = await query('SELECT id FROM customers WHERE phone = $1 AND id != $2 AND status != \'pending\'', [phone, id]);
+            const exist = await query('SELECT id FROM customers WHERE phone = $1 AND id != $2', [phone, id]);
             if (exist.rows.length > 0) throw { code: 'RESOURCE_CONFLICT', message: 'Nomor telepon sudah terdaftar', field: 'phone' };
         }
         if (pppoe_username && pppoe_username !== current.pppoe_username) {
@@ -544,13 +618,15 @@ class CustomerService {
                     WHERE id = $13
                 `, [package_id, status, active_date, isolir_date, siklus, billing_type, address_installation, latitude, longitude, finalRegionId, finalArea, nasId, serviceId]);
 
-                await client.query(`
-                    UPDATE technical_details SET
-                        pppoe_username = COALESCE($1, pppoe_username),
-                        pppoe_password = COALESCE($2, pppoe_password),
-                         updated_at = CURRENT_TIMESTAMP
-                    WHERE service_id = $3
-                `, [pppoe_username, pppoe_password, serviceId]);
+                if (pppoe_username || pppoe_password) {
+                    await client.query(`
+                        UPDATE technical_details SET
+                            pppoe_username = COALESCE($1, pppoe_username),
+                            pppoe_password = COALESCE($2, pppoe_password),
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE service_id = $3
+                    `, [pppoe_username || null, pppoe_password || null, serviceId]);
+                }
 
                 await client.query(`
                     UPDATE network_infrastructure SET
@@ -595,35 +671,346 @@ class CustomerService {
             }
         }
 
+        // Package Change - Update RADIUS and Kick User
+        let packageUpdated = false;
+        let invoiceUpdated = false;
+        if (package_id && package_id !== current.package_id) {
+            logger.info(`🔄 Package changed for customer ${id} from ${current.package_id} to ${package_id}`);
+
+            try {
+                // Get both old and new package details
+                const packagesResult = await query(`
+                  SELECT id, name, speed, price, "group", pppoe_profile
+                  FROM packages
+                  WHERE id = $1 OR id = $2
+                `, [current.package_id, package_id]);
+
+                if (packagesResult.rows.length >= 2) {
+                    const oldPackage = packagesResult.rows.find(p => p.id === current.package_id);
+                    const newPackage = packagesResult.rows.find(p => p.id === package_id);
+
+                    // Prepaid package change: block if paid invoice with future due_date exists
+                    const billingType = updatedCustomer.billing_type || current.billing_type;
+
+                    if (billingType === 'prepaid') {
+                        const blockingCheck = await query(`
+                            SELECT MAX(due_date) as max_due FROM invoices
+                            WHERE customer_id = $1 AND status = 'paid' AND due_date > CURRENT_DATE
+                        `, [id]);
+                        const maxDue = blockingCheck.rows[0]?.max_due;
+
+                        if (maxDue) {
+                            const dueStr = new Date(maxDue).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+                            throw Object.assign(new Error(`Tidak dapat mengubah paket. Anda memiliki pembayaran di muka hingga ${dueStr}`), { code: 'BLOCKED_BY_PREPAID' });
+                        }
+
+                        // Update all unpaid invoices to new package price
+                        const updResult = await query(`
+                            UPDATE invoices SET
+                                amount = $1, total_amount = $1,
+                                package_id = $2, updated_at = NOW()
+                            WHERE customer_id = $3 AND status IN ('unpaid', 'sent', 'draft')
+                        `, [newPackage.price, package_id, id]);
+
+                        invoiceUpdated = updResult.rowCount > 0;
+                    }
+
+                    // Record package change history
+                    await query(`
+                        INSERT INTO package_change_history 
+                        (customer_id, service_number, old_package_id, new_package_id, 
+                         old_package_name, new_package_name, old_price, new_price,
+                         billing_type, invoice_updated)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    `, [
+                        id, updatedCustomer.service_number,
+                        oldPackage.id, newPackage.id,
+                        oldPackage.name, newPackage.name,
+                        oldPackage.price, newPackage.price,
+                        billingType, invoiceUpdated
+                    ]);
+
+                    // Get RADIUS username (try multiple possible usernames)
+                    const radiusUserResult = await query(`
+                        SELECT username FROM radcheck
+                        WHERE LOWER(username) = LOWER($1)
+                           OR LOWER(username) = LOWER($2)
+                           OR LOWER(username) = LOWER($3)
+                        LIMIT 1
+                    `, [updatedCustomer.name, updatedCustomer.pppoe_username, updatedCustomer.service_number]);
+
+                    if (radiusUserResult.rows.length > 0) {
+                        const radiusUsername = radiusUserResult.rows[0].username;
+
+                        // Update RADIUS group (use main query, not radius-postgres db.query)
+                        await query(`DELETE FROM radusergroup WHERE username = $1`, [radiusUsername]);
+                        await query(`INSERT INTO radusergroup (username, groupname, priority) VALUES ($1, $2, 1)`, [radiusUsername, newPackage.group]);
+
+                        // Update MikroTik profile and kick user
+                        const MikrotikService = require('../services/mikrotik-service');
+                        await MikrotikService.setPPPoESecretProfile(radiusUsername, newPackage.pppoe_profile, `Package change to ${newPackage.group}`);
+
+                        packageUpdated = true;
+                        logger.info(`✅ Package updated for ${radiusUsername}: group=${newPackage.group}, profile=${newPackage.pppoe_profile}, user kicked`);
+
+                        // Send WhatsApp notification for package change
+                        await this.sendPackageChangeNotification(updatedCustomer, oldPackage, newPackage, billingType, invoiceUpdated);
+                    } else {
+                        logger.warn(`⚠️ No RADIUS user found for customer ${id}, skipping package update`);
+                    }
+                }
+            } catch (e) {
+                logger.error(`❌ Failed to update package for customer ${id}: ${e.message}`);
+                // Re-throw BLOCKED_BY_PREPAID so the API can return a proper error
+                if (e.code === 'BLOCKED_BY_PREPAID') throw e;
+            }
+        }
+
+        // If package was updated, add package info to updatedCustomer for auto RADIUS sync
+        if (packageUpdated && updatedCustomer) {
+            const packageInfo = await query('SELECT "group" as package_group, pppoe_profile, speed as package_speed FROM packages WHERE id = $1', [updatedCustomer.package_id]);
+            if (packageInfo.rows.length > 0) {
+                updatedCustomer.package_group = packageInfo.rows[0].package_group;
+                updatedCustomer.pppoe_profile = packageInfo.rows[0].pppoe_profile;
+                updatedCustomer.package_speed = packageInfo.rows[0].package_speed;
+            }
+        }
+
+        // Registration Approved Notification - when status changes from pending to active
+        let registrationApprovedNotified = false;
+        if (status && status === 'active' && current.status === 'pending') {
+            try {
+                // Get installation details
+                const installationResult = await query(`
+                  SELECT i.scheduled_date, u.name as technician_name, u.phone as technician_phone
+                  FROM installations i
+                  LEFT JOIN users u ON u.id = i.technician_id
+                  WHERE i.customer_id = $1
+                  ORDER BY i.created_at DESC
+                  LIMIT 1
+                `, [id]);
+
+                // Get package details
+                const packageResult = await query('SELECT name, speed FROM packages WHERE id = $1', [updatedCustomer.package_id]);
+                const packageName = packageResult.rows[0]?.name || 'Paket Standard';
+                const packageSpeed = packageResult.rows[0]?.speed || '-';
+
+                // Format installation date/time
+                let installationDate = 'Menunggu jadwal';
+                let installationTime = '';
+                let technicianName = 'Menunggu penugasan';
+                let technicianPhone = '-';
+
+                if (installationResult.rows.length > 0) {
+                    const install = installationResult.rows[0];
+                    if (install.scheduled_date) {
+                        const dateObj = new Date(install.scheduled_date);
+                        installationDate = dateObj.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+                        installationTime = dateObj.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+                    }
+                    if (install.technician_name) {
+                        technicianName = install.technician_name;
+                        technicianPhone = install.technician_phone || '-';
+                    }
+                }
+
+                // Send notification
+                const whatsappNotifications = require('../config/whatsapp-notifications');
+                await whatsappNotifications.sendRegistrationApprovedNotification(
+                  updatedCustomer.phone,
+                  {
+                    customerName: updatedCustomer.nama_customer || updatedCustomer.name,
+                    packageName: packageName,
+                    packageSpeed: packageSpeed,
+                    installationDate: installationDate,
+                    installationTime: installationTime,
+                    technicianName: technicianName,
+                    technicianPhone: technicianPhone
+                  }
+                );
+
+                registrationApprovedNotified = true;
+                logger.info(`📱 Registration approved notification sent to ${updatedCustomer.nama_customer || updatedCustomer.name} (${updatedCustomer.phone})`);
+            } catch (error) {
+                logger.error(`Failed to send registration approved notification to customer ${id}:`, error.message);
+                // Don't throw - notification failure shouldn't break the update
+            }
+        }
+
         return {
             customer: updatedCustomer,
             changes: {
-                radiusCommentUpdated
+                radiusCommentUpdated,
+                packageUpdated,
+                invoiceUpdated,
+                registrationApprovedNotified
             }
         };
+    }
+
+    /**
+     * Send WhatsApp notification for package change
+     */
+    static async sendPackageChangeNotification(customer, oldPackage, newPackage, billingType, invoiceUpdated) {
+        try {
+            if (!customer.phone) {
+                logger.warn(`No phone number for customer ${customer.id}, skipping package change notification`);
+                return;
+            }
+
+            // Get company info
+            const companyInfo = await query("SELECT value FROM app_config WHERE key = 'company_name'");
+            const companyName = companyInfo.rows[0]?.value || 'KITA SELALU TERKONEKSI';
+
+            const supportInfo = await query("SELECT value FROM app_config WHERE key = 'support_phone'");
+            const supportPhone = supportInfo.rows[0]?.value || '08123456789';
+
+            // Determine if upgrade or downgrade
+            const oldPrice = parseFloat(oldPackage.price) || 0;
+            const newPrice = parseFloat(newPackage.price) || 0;
+
+            let changeType, emoji, notificationType;
+            if (newPrice > oldPrice) {
+                changeType = 'upgrade';
+                emoji = '📈';
+                notificationType = 'package_upgrade';
+            } else if (newPrice < oldPrice) {
+                changeType = 'downgrade';
+                emoji = '📉';
+                notificationType = 'package_downgrade';
+            } else {
+                changeType = 'ubah';
+                emoji = '🔄';
+                notificationType = 'package_change';
+            }
+
+            // Build status-specific message
+            let statusMessage;
+            if (billingType === 'prepaid' && invoiceUpdated) {
+                statusMessage = `Tagihan Anda telah diperbarui ke Rp ${newPrice.toLocaleString('id-ID')}. Segera lakukan pembayaran.\n\n`;
+            } else {
+                statusMessage = `Total tagihan Anda akan berubah pada tagihan berikutnya.\n\n`;
+            }
+
+            // Build message with single template
+            const message = `*${emoji} PERUBAHAN PAKET BERHASIL*\n\n` +
+                `Halo ${customer.nama_customer || customer.name},\n\n` +
+                `Paket internet Anda telah di ${changeType}:\n\n` +
+                `📦 Dari: ${oldPackage.name}\n` +
+                `💰 Harga: Rp ${oldPrice.toLocaleString('id-ID')}/bulan\n\n` +
+                `📦 Ke: ${newPackage.name}\n` +
+                `💰 Harga: Rp ${newPrice.toLocaleString('id-ID')}/bulan\n\n` +
+                statusMessage +
+                `─────────────────────\n` +
+                `${companyName}\n` +
+                `Hubungi: ${supportPhone}\n\n` +
+                `_Terima kasih telah berlangganan._`;
+
+            // Send WhatsApp message
+            await kilusiOmnichat.sendMessage(customer.phone, message, {
+                customer_id: customer.id,
+                customer_name: customer.nama_customer || customer.name,
+                notification_type: notificationType,
+                source: 'customer_service'
+            });
+
+            logger.info(`📱 Package change notification sent to ${customer.nama_customer || customer.name} (${customer.phone}): ${oldPackage.name} → ${newPackage.name}`);
+        } catch (error) {
+            logger.error(`Failed to send package change notification to customer ${customer.id}:`, error.message);
+            // Don't throw - notification failure shouldn't break the package update
+        }
     }
 
     /**
      * Delete customer
      */
     static async deleteCustomer(id) {
+        // DETEKSI: Jika ID panjangnya 11 digit, itu kemungkinan besar adalah service_number
+        if (id.length >= 11) {
+            return await this.deleteServiceByNumber(id);
+        }
+
         const currentRes = await query('SELECT * FROM customers WHERE id = $1', [id]);
         if (currentRes.rows.length === 0) return null;
         const customer = currentRes.rows[0];
 
-        // Check deps
-        const invoiceCheck = await query('SELECT COUNT(*) as count FROM invoices WHERE customer_id = $1', [id]);
+        // Dapatkan semua pppoe_username dari semua layanan pelanggan ini
+        const services = await query(`
+            SELECT t.pppoe_username 
+            FROM services s
+            JOIN technical_details t ON s.id = t.service_id
+            WHERE s.customer_id = $1
+        `, [id]);
+
+        // Bersihkan Radius & Kick untuk setiap layanan
+        for (const srv of services.rows) {
+            if (srv.pppoe_username) {
+                try {
+                    await radiusDb.deleteRadiusUser(srv.pppoe_username);
+                    await MikrotikService.disconnectRadiusUser(srv.pppoe_username);
+                    logger.info(`✅ Cleaned up Radius and kicked user ${srv.pppoe_username} (Customer Deletion)`);
+                } catch (e) {
+                    logger.error(`❌ Failed Radius cleanup for ${srv.pppoe_username}: ${e.message}`);
+                }
+            }
+        }
+
+        // Hapus semua invoice yang masih unpaid (admin bisa hapus pelanggan baru)
+        await query('DELETE FROM invoices WHERE customer_id = $1 AND status IN (\'unpaid\', \'draft\')', [id]);
+
+        // Cek masih ada invoice paid/sent — tetap blokir
+        const invoiceCheck = await query('SELECT COUNT(*) as count FROM invoices WHERE customer_id = $1 AND status NOT IN (\'unpaid\', \'draft\')', [id]);
         if (parseInt(invoiceCheck.rows[0].count) > 0) {
-            throw { code: 'RESOURCE_CONFLICT', message: 'Pelanggan masih memiliki invoice', count: invoiceCheck.rows[0].count };
+            throw { code: 'RESOURCE_CONFLICT', message: 'Pelanggan masih memiliki invoice paid/sent', count: invoiceCheck.rows[0].count };
         }
 
-        const sessionCheck = await query('SELECT COUNT(*) as count FROM customer_sessions WHERE username = $1', [customer.pppoe_username]);
-        if (parseInt(sessionCheck.rows[0].count) > 0) {
-            throw { code: 'RESOURCE_CONFLICT', message: 'Pelanggan masih memiliki sesi aktif', count: sessionCheck.rows[0].count };
-        }
-
+        // Hapus semua data turunan agar ID reuse aman
+        await query('DELETE FROM network_infrastructure WHERE service_id IN (SELECT id FROM services WHERE customer_id = $1)', [id]);
+        await query('DELETE FROM technical_details WHERE service_id IN (SELECT id FROM services WHERE customer_id = $1)', [id]);
+        await query('DELETE FROM services WHERE customer_id = $1', [id]);
         await query('DELETE FROM customers WHERE id = $1', [id]);
         return customer;
+    }
+
+    /**
+     * Delete specific service by its number
+     */
+    static async deleteServiceByNumber(serviceNumber) {
+        const srvRes = await query(`
+            SELECT s.id, s.customer_id, s.service_number, t.pppoe_username 
+            FROM services s
+            LEFT JOIN technical_details t ON s.id = t.service_id
+            WHERE s.service_number = $1
+        `, [serviceNumber]);
+        
+        if (srvRes.rows.length === 0) return null;
+        
+        const service = srvRes.rows[0];
+        const customerRes = await query('SELECT name FROM customers WHERE id = $1', [service.customer_id]);
+        
+        // Bersihkan Radius & Kick
+        if (service.pppoe_username) {
+            try {
+                await radiusDb.deleteRadiusUser(service.pppoe_username);
+                await MikrotikService.disconnectRadiusUser(service.pppoe_username);
+                logger.info(`✅ Cleaned up Radius and kicked user ${service.pppoe_username} (Service Deletion)`);
+            } catch (e) {
+                logger.error(`❌ Failed Radius cleanup for ${service.pppoe_username}: ${e.message}`);
+            }
+        }
+
+        // Hapus detail teknis dan infrastruktur (karena linked ke service_id)
+        await query('DELETE FROM technical_details WHERE service_id = $1', [service.id]);
+        await query('DELETE FROM network_infrastructure WHERE service_id = $1', [service.id]);
+        
+        // Hapus layanan itu sendiri
+        await query('DELETE FROM services WHERE id = $1', [service.id]);
+        
+        return {
+            id: service.customer_id,
+            name: customerRes.rows[0]?.name || 'Unknown',
+            service_number: service.service_number
+        };
     }
 }
 

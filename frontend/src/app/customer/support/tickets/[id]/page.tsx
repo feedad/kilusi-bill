@@ -187,7 +187,7 @@ export default function CustomerTicketDetailPage() {
     } else {
       return date.toLocaleDateString('id-ID', {
         day: 'numeric',
-        month: 'short',
+        month: '2-digit',
         hour: '2-digit',
         minute: '2-digit'
       })

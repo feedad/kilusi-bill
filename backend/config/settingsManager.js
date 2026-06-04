@@ -29,7 +29,31 @@ const ENV_MAPPING = {
   'admin_password': 'ADMIN_PASSWORD',
   'tripay.api_key': 'TRIPAY_API_KEY',
   'tripay.private_key': 'TRIPAY_PRIVATE_KEY',
-  'tripay.merchant_code': 'TRIPAY_MERCHANT_CODE'
+  'tripay.merchant_code': 'TRIPAY_MERCHANT_CODE',
+
+  // WhatsApp Omnichat Integration
+  'whatsapp_provider': 'KILUSI_WHATSAPP_PROVIDER',
+  'kilusi_omnichat_api_key': 'KILUSI_OMNICHAT_API_KEY',
+  'kilusi_omnichat_api_url': 'KILUSI_OMNICHAT_API_URL',
+  'kilusi_omnichat_timeout': 'KILUSI_OMNICHAT_TIMEOUT',
+  'kilusi_omnichat_retry_count': 'KILUSI_OMNICHAT_RETRY_COUNT',
+  'kilusi_omnichat_retry_delay': 'KILUSI_OMNICHAT_RETRY_DELAY',
+  'baileys_fallback_enabled': 'KILUSI_BAILEYS_FALLBACK_ENABLED',
+
+  // Omnichat Template Names (for mapping system templates to Omnichat templates)
+  'kilusi_template_invoice_created': 'KILUSI_TEMPLATE_INVOICE_CREATED',
+  'kilusi_template_payment_received': 'KILUSI_TEMPLATE_PAYMENT_RECEIVED',
+  'kilusi_template_overdue_notice': 'KILUSI_TEMPLATE_OVERDUE_NOTICE',
+  'kilusi_template_service_suspension': 'KILUSI_TEMPLATE_SERVICE_SUSPENSION',
+  'kilusi_template_service_restoration': 'KILUSI_TEMPLATE_SERVICE_RESTORATION',
+  'kilusi_template_welcome_message': 'KILUSI_TEMPLATE_WELCOME_MESSAGE',
+  'kilusi_template_due_date_reminder': 'KILUSI_TEMPLATE_DUE_DATE_REMINDER',
+
+  // Omnichat Contact Sync Settings
+  'omnichat_sync_enabled': 'KILUSI_OMNICHAT_SYNC_ENABLED',
+  'omnichat_sync_schedule': 'KILUSI_OMNICHAT_SYNC_SCHEDULE',
+  'omnichat_sync_time': 'KILUSI_OMNICHAT_SYNC_TIME',
+  'omnichat_sync_tags_enabled': 'KILUSI_OMNICHAT_SYNC_TAGS_ENABLED'
 };
 
 /**
@@ -103,24 +127,20 @@ async function initialize() {
 
 /**
  * Get a setting value (Synchronous)
+ * NOTE: Returns cached value only. Does NOT auto-initialize to avoid circular dependency.
+ * For database settings, call initialize() or getSettingAsync() first.
  */
 function getSetting(key, defaultValue) {
-  // If not initialized, try to load file settings at least (for bootstrap)
-  if (!isInitialized && Object.keys(localCache).length === 0) {
-    localCache = loadFileSettings();
-  }
-
-  // 1. Check Env Vars directly (Priority)
+  // 1. Check Env Vars directly (Priority) - works even before initialization
   if (ENV_MAPPING[key] && process.env[ENV_MAPPING[key]]) {
     return process.env[ENV_MAPPING[key]];
   }
 
-  // 2. Check local initialized cache
+  // 2. Check local initialized cache (from file/DB if initialized)
   if (localCache[key] !== undefined) return localCache[key];
 
   // Support dot notation for nested objects
   if (key.includes('.')) {
-    // Check nested env override logic if necessary, or skip
     const parts = key.split('.');
     let value = localCache;
     for (const part of parts) {
@@ -131,6 +151,20 @@ function getSetting(key, defaultValue) {
   }
 
   return defaultValue;
+}
+
+/**
+ * Get a setting value (Asynchronous)
+ * Ensures initialization before returning value
+ */
+async function getSettingAsync(key, defaultValue) {
+  // Ensure initialized before getting
+  if (!isInitialized) {
+    await initialize();
+  }
+
+  // Return the value from cache after initialization
+  return getSetting(key, defaultValue);
 }
 
 /**
@@ -186,8 +220,10 @@ function getAllSettings() {
 module.exports = {
   initialize, // New method to start async loading
   getSetting,
+  getSettingAsync, // Async version of getSetting
   updateSetting,
   getAllSettings,
   getSettingsWithCache,
-  refreshSettings
+  refreshSettings,
+  isInitialized: () => isInitialized // Export initialized state
 };

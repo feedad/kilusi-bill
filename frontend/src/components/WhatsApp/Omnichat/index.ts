@@ -1,0 +1,6 @@
+export { default as OmnichatDashboard } from './OmnichatDashboard'
+export { default as OmnichatMessages } from './OmnichatMessages'
+export { default as OmnichatTemplates } from './OmnichatTemplates'
+export { default as OmnichatContacts } from './OmnichatContacts'
+export { default as OmnichatAnalytics } from './OmnichatAnalytics'
+export { default as OmnichatSettings } from './OmnichatSettings'

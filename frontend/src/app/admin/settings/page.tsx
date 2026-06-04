@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui'
 import {
   Settings,
   Building,
@@ -20,6 +20,7 @@ import {
   Palette,
   Upload,
   Image,
+  CreditCard,
 } from 'lucide-react'
 import { Button } from '@/components/ui'
 import { Input } from '@/components/ui'
@@ -204,6 +205,7 @@ export default function SettingsPage() {
         botToken: '',
         chatId: '',
       },
+
     },
     security: {
       sessionTimeout: 30,
@@ -431,7 +433,11 @@ export default function SettingsPage() {
                         <p className="text-xs text-muted-foreground mb-2">Logo saat ini:</p>
                         <div className="flex items-center gap-4">
                           <img
-                            src={settings.branding.logoUrl.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${settings.branding.logoUrl}` : settings.branding.logoUrl}
+                            src={settings.branding.logoUrl.startsWith('http')
+                              ? settings.branding.logoUrl
+                              : settings.branding.logoUrl.startsWith('/')
+                                ? `${typeof window !== 'undefined' ? window.location.origin : ''}${settings.branding.logoUrl}`
+                                : settings.branding.logoUrl}
                             alt="Logo Preview"
                             className="h-10 object-contain bg-white p-1 rounded"
                             onError={(e) => {

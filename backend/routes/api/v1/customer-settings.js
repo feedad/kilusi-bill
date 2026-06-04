@@ -149,6 +149,9 @@ router.put('/defaults', async (req, res) => {
       });
     }
 
+    // SYNC: Update backend system configuration if relevant settings changed
+    await syncToBackendConfiguration(settings);
+
     res.json({
       success: true,
       message: 'Settings updated successfully',
@@ -165,6 +168,95 @@ router.put('/defaults', async (req, res) => {
     });
   }
 });
+
+// Helper to sync specific UI settings to backend configuration tables
+async function syncToBackendConfiguration(settings) {
+  try {
+    const BillingCycleService = require('../../../config/billing-cycle-service');
+    const updates = {};
+    let hasUpdates = false;
+
+    // 1. Sync 'invoice_days_before_suspend' -> 'invoice_advance_days'
+    if (settings.invoice_days_before_suspend) {
+      const val = parseInt(settings.invoice_days_before_suspend.value || settings.invoice_days_before_suspend);
+      if (!isNaN(val)) {
+        updates.invoice_advance_days = val;
+        hasUpdates = true;
+      }
+    }
+
+    // 2. Sync 'due_date_day' -> 'monthly_due_date'
+    if (settings.due_date_day) {
+      const val = parseInt(settings.due_date_day.value || settings.due_date_day);
+      if (!isNaN(val)) {
+        updates.monthly_due_date = val;
+        hasUpdates = true;
+      }
+    }
+
+    // 3. Sync 'reconnection_calculation' -> 'reconnection_method'
+    if (settings.reconnection_calculation) {
+      updates.reconnection_method = settings.reconnection_calculation.value || settings.reconnection_calculation;
+      hasUpdates = true;
+    }
+
+    // 4. Sync 'isolate_time' -> 'suspension_time'
+    if (settings.isolate_time) {
+      const val = settings.isolate_time.value || settings.isolate_time;
+      // Basic validation for HH:MM format
+      if (/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(val)) {
+        updates.suspension_time = val;
+        hasUpdates = true;
+      }
+    }
+
+    // 5. Sync 'invoice_time' -> 'invoice_time'
+    if (settings.invoice_time) {
+      const val = settings.invoice_time.value || settings.invoice_time;
+      if (/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(val)) {
+        updates.invoice_time = val;
+        hasUpdates = true;
+      }
+    }
+
+    // 6. Sync 'reminder_time' -> 'reminder_time'
+    if (settings.reminder_time) {
+      const val = settings.reminder_time.value || settings.reminder_time;
+      if (/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(val)) {
+        updates.reminder_time = val;
+        hasUpdates = true;
+      }
+    }
+
+    // 7. Sync 'grace_period_days' -> 'grace_period_days'
+    if (settings.grace_period_days !== undefined) {
+      const val = parseInt(settings.grace_period_days.value ?? settings.grace_period_days);
+      if (!isNaN(val) && val >= 0) {
+        updates.grace_period_days = val;
+        hasUpdates = true;
+      }
+    }
+
+    if (hasUpdates) {
+      // Fetch current to merge
+      const current = await BillingCycleService.getBillingSettings();
+
+      // Merge updates
+      const merged = { ...current, ...updates };
+
+      // Save
+      await BillingCycleService.updateBillingSettings(merged);
+      logger.info('Synced UI settings to billing_settings:', updates);
+
+      // Reschedule dynamic cron jobs with new settings
+      const scheduler = require('../../../config/scheduler');
+      scheduler.rescheduleDynamicJobs().catch(err => logger.error('Failed to reschedule cron jobs:', err));
+    }
+  } catch (error) {
+    logger.error('Error syncing settings to backend config:', error);
+    // Don't throw, allow the main update to succeed
+  }
+}
 
 // GET /api/v1/customer-settings/defaults/:fieldName - Get specific default setting
 router.get('/defaults/:fieldName', async (req, res) => {

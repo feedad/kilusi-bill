@@ -16,7 +16,6 @@ import {
 } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import { adminApi, endpoints } from '@/lib/api-clients'
-import { CustomerStatusWidget } from '@/components/dashboard/CustomerStatusWidget'
 import { MonthlyRevenueChart } from '@/components/dashboard/MonthlyRevenueChart'
 
 interface DashboardStats {
@@ -204,7 +203,10 @@ export default function AdminDashboard() {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <Card className="hover:shadow-md transition-shadow">
+        <Card
+          className="cursor-pointer transition-all hover:shadow-md hover:scale-105"
+          onClick={() => window.location.href = '/admin/customers'}
+        >
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-foreground">Total Customers</CardTitle>
             <Users className="h-4 w-4 text-muted-foreground" />
@@ -218,10 +220,13 @@ export default function AdminDashboard() {
           </CardContent>
         </Card>
 
-        <Card className="hover:shadow-md transition-shadow">
+        <Card
+          className="cursor-pointer transition-all hover:shadow-md hover:scale-105"
+          onClick={() => window.location.href = '/admin/online-customers'}
+        >
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-foreground">Online Customers</CardTitle>
-            <Activity className="h-4 w-4 text-muted-foreground" />
+            <Activity className="h-4 w-4 text-green-600" />
           </CardHeader>
           <CardContent className="pt-0">
             <div className="text-xl font-bold text-foreground">{stats.onlineCustomers}</div>
@@ -232,10 +237,13 @@ export default function AdminDashboard() {
           </CardContent>
         </Card>
 
-        <Card className="hover:shadow-md transition-shadow">
+        <Card
+          className="cursor-pointer transition-all hover:shadow-md hover:scale-105"
+          onClick={() => window.location.href = '/admin/billing'}
+        >
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-foreground">Monthly Revenue</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
+            <DollarSign className="h-4 w-4 text-green-600" />
           </CardHeader>
           <CardContent className="pt-0">
             <div className="text-xl font-bold text-foreground">{formatCurrency(stats.monthlyRevenue || 0)}</div>
@@ -246,10 +254,13 @@ export default function AdminDashboard() {
           </CardContent>
         </Card>
 
-        <Card className="hover:shadow-md transition-shadow">
+        <Card
+          className="cursor-pointer transition-all hover:shadow-md hover:scale-105"
+          onClick={() => window.location.href = '/admin/billing?status=overdue'}
+        >
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-foreground">Overdue Invoices</CardTitle>
-            <CreditCard className="h-4 w-4 text-muted-foreground" />
+            <CreditCard className="h-4 w-4 text-red-600" />
           </CardHeader>
           <CardContent className="pt-0">
             <div className="text-xl font-bold text-error">{stats.overdueInvoices}</div>
@@ -259,11 +270,6 @@ export default function AdminDashboard() {
             </div>
           </CardContent>
         </Card>
-      </div>
-
-      {/* Customer Status Widget - Full Width */}
-      <div className="mb-8">
-        <CustomerStatusWidget limit={20} />
       </div>
 
       {/* Revenue Overview */}
@@ -309,10 +315,13 @@ export default function AdminDashboard() {
 
       {/* Additional Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        <Card className="hover:shadow-md transition-shadow">
+        <Card
+          className="cursor-pointer transition-all hover:shadow-md hover:scale-105"
+          onClick={() => window.location.href = '/admin/billing?status=pending'}
+        >
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-foreground">Pending Invoices</CardTitle>
-            <FileText className="h-4 w-4 text-muted-foreground" />
+            <FileText className="h-4 w-4 text-orange-600" />
           </CardHeader>
           <CardContent className="pt-0">
             <div className="text-lg font-semibold text-foreground">{stats.pendingInvoices}</div>
@@ -320,10 +329,13 @@ export default function AdminDashboard() {
           </CardContent>
         </Card>
 
-        <Card className="hover:shadow-md transition-shadow">
+        <Card
+          className="cursor-pointer transition-all hover:shadow-md hover:scale-105"
+          onClick={() => window.location.href = '/admin/packages'}
+        >
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-foreground">Service Packages</CardTitle>
-            <Package className="h-4 w-4 text-muted-foreground" />
+            <Package className="h-4 w-4 text-blue-600" />
           </CardHeader>
           <CardContent className="pt-0">
             <div className="text-lg font-semibold text-foreground">{stats.totalPackages}</div>
@@ -331,7 +343,7 @@ export default function AdminDashboard() {
           </CardContent>
         </Card>
 
-        <Card className="hover:shadow-md transition-shadow">
+        <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-foreground">Active Rate</CardTitle>
             <Activity className="h-4 w-4 text-muted-foreground" />
@@ -344,10 +356,13 @@ export default function AdminDashboard() {
           </CardContent>
         </Card>
 
-        <Card className="hover:shadow-md transition-shadow">
+        <Card
+          className="cursor-pointer transition-all hover:shadow-md hover:scale-105"
+          onClick={() => window.location.href = '/admin/customers?status=inactive'}
+        >
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-foreground">Inactive Customers</CardTitle>
-            <TrendingDown className="h-4 w-4 text-muted-foreground" />
+            <TrendingDown className="h-4 w-4 text-red-600" />
           </CardHeader>
           <CardContent className="pt-0">
             <div className="text-lg font-semibold text-warning">{stats.inactiveCustomers}</div>

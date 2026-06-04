@@ -21,6 +21,7 @@ interface SyncNameDialogProps {
     oltId: string
     onuIndex: string | number
     currentName: string
+    onuSn?: string
     onSuccess: () => void
     triggerText?: string
     variant?: "default" | "destructive" | "outline" | "secondary" | "ghost" | "link"
@@ -28,11 +29,31 @@ interface SyncNameDialogProps {
     className?: string
 }
 
-export function SyncNameDialog({ oltId, onuIndex, currentName, onSuccess, triggerText = "Sync Name", variant = "outline", size = "sm", className }: SyncNameDialogProps) {
+export function SyncNameDialog({ oltId, onuIndex, currentName, onuSn, onSuccess, triggerText = "Sync Name", variant = "outline", size = "sm", className }: SyncNameDialogProps) {
     const [open, setOpen] = useState(false)
     const [loading, setLoading] = useState(false)
-    const [name, setName] = useState(currentName)
+    const [name, setName] = useState('')
+    const [fetchingSuggestion, setFetchingSuggestion] = useState(false)
     const { toast } = useToast()
+
+    // Fetch suggested customer name from MAC when dialog opens
+    const handleOpen = async (isOpen: boolean) => {
+        if (isOpen) {
+            const current = currentName && currentName !== '-' ? currentName : ''
+            setName(current)
+            // Try to fetch suggested name from backend
+            if (onuSn) {
+                setFetchingSuggestion(true)
+                try {
+                    const res = await api.get(`/api/v1/technical-details/lookup-customer-by-mac/${encodeURIComponent(onuSn)}`)
+                    if (res.data?.success && res.data?.data?.customer_name) {
+                        setName(res.data.data.customer_name)
+                    }
+                } catch { /* ignore */ } finally { setFetchingSuggestion(false) }
+            }
+        }
+        setOpen(isOpen)
+    }
 
     const handleSync = async () => {
         setLoading(true)
@@ -60,7 +81,7 @@ export function SyncNameDialog({ oltId, onuIndex, currentName, onSuccess, trigge
     }
 
     return (
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog open={open} onOpenChange={handleOpen}>
             <DialogTrigger asChild>
                 <Button variant={variant} size={size} className={size === 'icon' ? className : `h-8 ${className}`}>
                     <RefreshCw className={size === 'icon' ? "h-4 w-4" : "mr-2 h-3 w-3"} />
@@ -95,6 +116,8 @@ export function SyncNameDialog({ oltId, onuIndex, currentName, onSuccess, trigge
                             value={name}
                             onChange={(e) => setName(e.target.value)}
                             className="col-span-3"
+                            placeholder={fetchingSuggestion ? 'Mencari nama...' : 'Nama pelanggan'}
+                            disabled={fetchingSuggestion}
                         />
                     </div>
                 </div>

@@ -429,12 +429,10 @@ class MikrotikService {
                 await db.query(`DELETE FROM radusergroup WHERE username = $1`, [username]);
                 await db.query(`INSERT INTO radusergroup (username, groupname, priority) VALUES ($1, $2, 1)`, [username, profile]);
 
-                // Disconnect user to apply new profile
-                if (profile !== 'default') { // Optional: Don't disconnect if restoring default? No, we likely want to restore service.
-                    // Actually, if we change profile (isolir -> normal), we MUST disconnect to re-auth with new profile.
-                    logger.info(`[MikrotikService] Profile changed to ${profile}. Disconnecting user ${username} to apply changes...`);
-                    this.disconnectRadiusUser(username).catch(err => logger.error(`Background disconnect failed: ${err.message}`));
-                }
+                // Disconnect user to apply new profile - ALWAYS disconnect to ensure re-auth with new group
+                // This is critical for both isolation (ISOLIR group) and restoration (package group)
+                logger.info(`[MikrotikService] Profile changed to ${profile}. Disconnecting user ${username} to apply changes...`);
+                this.disconnectRadiusUser(username).catch(err => logger.error(`Background disconnect failed: ${err.message}`));
 
                 return { success: true, message: `Updated RADIUS group to ${profile} and triggered disconnect` };
             } catch (e) {
@@ -456,8 +454,12 @@ class MikrotikService {
      */
     async disconnectRadiusUser(username) {
         try {
+            logger.info(`[MikrotikService] >>> disconnectRadiusUser called for: ${username}`);
+
             // 1. Check if user is online
             const status = await radiusService.getUserConnectionStatus(username);
+            logger.info(`[MikrotikService] >>> User status:`, JSON.stringify(status));
+
             if (!status || !status.online) {
                 logger.info(`[MikrotikService] User ${username} is already offline (skipping disconnect)`);
                 return { success: true, message: 'User already offline' };
@@ -470,7 +472,7 @@ class MikrotikService {
                 return { success: false, message: 'NAS not found' };
             }
 
-            // 3. Send Disconnect Request
+            // 3. Send RADIUS CoA Disconnect Request
             const result = await radiusDisconnect.disconnectUser({
                 username,
                 nasIp: status.nas_ip,

@@ -48,6 +48,8 @@ interface Region {
   created_at: string
   updated_at: string
   disabled_at: string | null
+  mitra_id?: string
+  mitra_name?: string
 }
 
 interface RegionModalProps {
@@ -73,13 +75,24 @@ const RegionModal = ({ isOpen, onClose }: RegionModalProps) => {
     total: 0,
     totalPages: 0
   })
+  const [mitraList, setMitraList] = useState<{ id: string; name: string }[]>([])
 
   // Fetch regions when modal opens or includeDisabled changes
   useEffect(() => {
     if (isOpen) {
       fetchRegions()
+      fetchMitra()
     }
   }, [isOpen, includeDisabled])
+
+  const fetchMitra = async () => {
+    try {
+      const res = await adminApi.get('/api/v1/mitra?limit=200')
+      if (res.data?.success) {
+        setMitraList(res.data.data || [])
+      }
+    } catch (e) { /* ignore */ }
+  }
 
   const fetchRegions = async (search = '', page = 1) => {
     setLoading(true)
@@ -120,7 +133,10 @@ const RegionModal = ({ isOpen, onClose }: RegionModalProps) => {
   }
 
   const handleEditRegion = (region: Region) => {
-    setEditingRegion(region)
+    setEditingRegion({
+      ...region,
+      mitra_id: region.mitra_id || undefined
+    } as any)
     setShowFormModal(true)
   }
 
@@ -299,7 +315,7 @@ const RegionModal = ({ isOpen, onClose }: RegionModalProps) => {
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('id-ID', {
       year: 'numeric',
-      month: 'short',
+      month: '2-digit',
       day: '2-digit'
     })
   }
@@ -424,6 +440,7 @@ const RegionModal = ({ isOpen, onClose }: RegionModalProps) => {
                       </button>
                     </TableHead>
                     <TableHead className="w-[200px] font-medium">Nama Wilayah</TableHead>
+                    <TableHead className="w-[150px] font-medium">Mitra</TableHead>
                     <TableHead className="w-[180px] font-medium">Kecamatan</TableHead>
                     <TableHead className="w-[180px] font-medium">Kabupaten/Kota</TableHead>
                     <TableHead className="w-[180px] font-medium">Provinsi</TableHead>
@@ -431,9 +448,9 @@ const RegionModal = ({ isOpen, onClose }: RegionModalProps) => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {loading ? (
+                    {loading ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center py-8">
+                      <TableCell colSpan={7} className="text-center py-8">
                         <div className="flex items-center justify-center space-x-2">
                           <Loader2 className="h-4 w-4 animate-spin" />
                           <span>Memuat data wilayah...</span>
@@ -442,7 +459,7 @@ const RegionModal = ({ isOpen, onClose }: RegionModalProps) => {
                     </TableRow>
                   ) : regions.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center py-8">
+                      <TableCell colSpan={7} className="text-center py-8">
                         <div className="text-center space-y-3">
                           <Map className="h-12 w-12 text-gray-400 mx-auto" />
                           <div>
@@ -494,6 +511,11 @@ const RegionModal = ({ isOpen, onClose }: RegionModalProps) => {
                                 )}
                               </div>
                             </div>
+                          </TableCell>
+                          <TableCell>
+                            <span className={isDisabled ? 'text-muted-foreground' : 'text-sm'}>
+                              {region.mitra_name || '-'}
+                            </span>
                           </TableCell>
                           <TableCell>
                             {region.district ? (
@@ -619,7 +641,8 @@ const RegionModal = ({ isOpen, onClose }: RegionModalProps) => {
         isOpen={showFormModal}
         onClose={() => setShowFormModal(false)}
         onSubmit={handleFormSubmit}
-        editingRegion={editingRegion}
+        editingRegion={editingRegion as any}
+        mitraList={mitraList}
         isLoading={submitting}
       />
     </>

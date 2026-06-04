@@ -82,6 +82,7 @@ export default function CustomerPortal() {
   })
   const [usageStats, setUsageStats] = useState<UsageStats | null>(null)
   const [radiusStatus, setRadiusStatus] = useState<RadiusStatus | null>(null)
+  const [connectedDevicesCount, setConnectedDevicesCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [switching, setSwitching] = useState(false)
@@ -130,11 +131,11 @@ export default function CustomerPortal() {
         throw new Error(result.message || 'API returned error')
       }
 
-      const { customer: apiCustomer, radiusStatus: apiRadius, billingStats: apiBilling, usageStats: apiUsage } = result.data
+      const { customer: apiCustomer, radiusStatus: apiRadius, billingStats: apiBilling, usageStats: apiUsage, connectedDevicesCount: apiConnectedCount } = result.data
 
       const enrichedCustomer: CustomerData = {
         ...apiCustomer,
-        registration_date: apiCustomer.install_date?.split('T')[0],
+        registration_date: apiCustomer.registration_date || (apiCustomer.install_date ? apiCustomer.install_date.split('T')[0] : null),
         package_price: parseFloat(apiCustomer.package_price) || 0,
         // Preserve accounts list from persistence if API doesn't return it
         accounts: (apiCustomer.accounts && apiCustomer.accounts.length > 0)
@@ -146,6 +147,7 @@ export default function CustomerPortal() {
       setBillingStats(apiBilling)
       setRadiusStatus(apiRadius)
       setUsageStats(apiUsage)
+      setConnectedDevicesCount(apiConnectedCount || 0)
 
       // Update available accounts and persistence if API returned new list
       if (enrichedCustomer.accounts && enrichedCustomer.accounts.length > 0) {
@@ -429,6 +431,10 @@ export default function CustomerPortal() {
                     <p className="text-xs text-muted-foreground mb-1">Uptime</p>
                     <p className="font-mono text-sm font-medium">{radiusStatus?.uptime || '-'}</p>
                   </div>
+                  <div className="p-3 rounded-lg bg-background border col-span-2">
+                    <p className="text-xs text-muted-foreground mb-1">Perangkat Terhubung (WiFi/LAN)</p>
+                    <p className="font-mono text-sm font-medium">{connectedDevicesCount} perangkat</p>
+                  </div>
                 </div>
 
               </div>
@@ -510,14 +516,54 @@ export default function CustomerPortal() {
             <CardTitle className="text-lg">Informasi Teknis</CardTitle>
           </CardHeader>
           <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <div className="space-y-1">
-              <p className="text-sm text-muted-foreground">Package ID</p>
-              <p className="font-medium">{customerData.package_name}</p>
-            </div>
-            <div className="space-y-1">
-              <p className="text-sm text-muted-foreground">PPPoE Username</p>
-              <p className="font-mono text-sm">{customerData.pppoe_username}</p>
-            </div>
+             <div className="space-y-1">
+               <p className="text-sm text-muted-foreground">Package ID</p>
+               <p className="font-medium">{customerData.package_name}</p>
+             </div>
+             <div className="space-y-1">
+               <p className="text-sm text-muted-foreground">Status Layanan</p>
+               <span className={`inline-flex px-2 py-0.5 text-xs rounded-full font-medium ${
+                 customerData.status === 'active' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+                 customerData.status === 'suspended' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
+                 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+               }`}>
+                 {customerData.status === 'active' ? 'Aktif' :
+                  customerData.status === 'suspended' ? 'Ditangguhkan' :
+                  customerData.status || '-'}
+               </span>
+             </div>
+             <div className="space-y-1">
+               <p className="text-sm text-muted-foreground">Jenis Tagihan</p>
+               <p className="font-medium">{customerData.billing_type === 'prepaid' ? 'Prabayar' : customerData.billing_type === 'postpaid' ? 'Pascabayar' : customerData.billing_type || '-'}</p>
+             </div>
+             <div className="space-y-1">
+               <p className="text-sm text-muted-foreground">PPPoE Username</p>
+               <p className="font-mono text-sm">{customerData.pppoe_username}</p>
+             </div>
+             <div className="space-y-1">
+               <p className="text-sm text-muted-foreground">Tanggal Aktif</p>
+               <p className="text-sm">
+                 {customerData.active_date
+                   ? new Date(customerData.active_date).toLocaleDateString('id-ID', { dateStyle: 'long' })
+                   : '-'}
+               </p>
+             </div>
+             <div className="space-y-1">
+               <p className="text-sm text-muted-foreground">Masa Aktif</p>
+               <p className="text-sm">
+                 {customerData.calculated_isolir_date
+                   ? `${new Date(customerData.active_date || customerData.registration_date || '').toLocaleDateString('id-ID', { month: 'short', day: 'numeric' })} — ${new Date(customerData.calculated_isolir_date).toLocaleDateString('id-ID', { dateStyle: 'long' })}`
+                   : '-'}
+               </p>
+             </div>
+             <div className="space-y-1">
+               <p className="text-sm text-muted-foreground">Jatuh Tempo Berikutnya</p>
+               <p className="text-sm">
+                 {customerData.expiry_date || customerData.calculated_isolir_date
+                   ? new Date(customerData.expiry_date || customerData.calculated_isolir_date).toLocaleDateString('id-ID', { dateStyle: 'long' })
+                   : '-'}
+               </p>
+             </div>
             <div className="space-y-1">
               <p className="text-sm text-muted-foreground">Lokasi</p>
               <div className="flex items-start gap-2">

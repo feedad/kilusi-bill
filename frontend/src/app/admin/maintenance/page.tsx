@@ -42,6 +42,7 @@ interface Maintenance {
     startTime: string
     endTime: string
     affectedAreas: string[]
+    targetMitra?: string[]
     status: 'scheduled' | 'in_progress' | 'completed' | 'cancelled'
     notifyCustomers: boolean
     notificationSent: boolean
@@ -61,6 +62,7 @@ export default function MaintenancePage() {
     const [maintenances, setMaintenances] = useState<Maintenance[]>([])
     const [showForm, setShowForm] = useState(false)
     const [regions, setRegions] = useState<{ id: string, name: string }[]>([])
+    const [mitraList, setMitraList] = useState<{ id: string, name: string }[]>([])
     const [editingId, setEditingId] = useState<string | null>(null)
 
     // Form state
@@ -70,23 +72,37 @@ export default function MaintenancePage() {
         startTime: '',
         endTime: '',
         affectedAreas: [] as string[],
+        targetMitra: [] as string[],
         status: 'scheduled' as Maintenance['status'],
         notifyCustomers: true,
     })
 
     useEffect(() => {
         fetchRegions()
+        fetchMitra()
     }, [])
 
     const fetchRegions = async () => {
         try {
-            const response = await adminApi.get('/api/v1/regions')
+            const response = await adminApi.get('/api/v1/regions?limit=200')
             if (response.data.success) {
-                setRegions(response.data.data || [])
+                setRegions(Array.isArray(response.data.data) ? response.data.data : [])
             }
         } catch (error) {
             console.error('Error fetching regions:', error)
             setRegions([])
+        }
+    }
+
+    const fetchMitra = async () => {
+        try {
+            const response = await adminApi.get('/api/v1/mitra?limit=200')
+            if (response.data.success) {
+                setMitraList(Array.isArray(response.data.data) ? response.data.data : [])
+            }
+        } catch (error) {
+            console.error('Error fetching mitra:', error)
+            setMitraList([])
         }
     }
 
@@ -142,6 +158,7 @@ export default function MaintenancePage() {
             startTime: '',
             endTime: '',
             affectedAreas: [],
+            targetMitra: [],
             status: 'scheduled',
             notifyCustomers: true,
         })
@@ -155,7 +172,8 @@ export default function MaintenancePage() {
             description: maintenance.description,
             startTime: maintenance.startTime,
             endTime: maintenance.endTime,
-            affectedAreas: maintenance.affectedAreas,
+            affectedAreas: maintenance.affectedAreas || [],
+            targetMitra: maintenance.targetMitra || [],
             status: maintenance.status,
             notifyCustomers: maintenance.notifyCustomers,
         })
@@ -174,6 +192,7 @@ export default function MaintenancePage() {
             const payload = {
                 ...form,
                 affectedAreas: form.affectedAreas,
+                targetMitra: form.targetMitra,
             }
 
             if (editingId) {
@@ -255,9 +274,9 @@ export default function MaintenancePage() {
     const formatDateTime = (dateStr: string) => {
         if (!dateStr) return '-'
         const date = new Date(dateStr)
-        return date.toLocaleString('id-ID', {
+        return date.toLocaleString('en-GB', {
             day: 'numeric',
-            month: 'short',
+            month: '2-digit',
             year: 'numeric',
             hour: '2-digit',
             minute: '2-digit',
@@ -422,6 +441,67 @@ export default function MaintenancePage() {
                             <p className="text-xs text-muted-foreground mt-1">Kosongkan jika mempengaruhi semua area</p>
                         </div>
 
+                        {/* Mitra Terdampak */}
+                        <div>
+                            <label className="text-sm font-medium mb-2 block">Mitra Terdampak</label>
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button variant="outline" className="w-full justify-between">
+                                        {form.targetMitra.length > 0
+                                            ? `${form.targetMitra.length} Mitra Dipilih`
+                                            : "Pilih Mitra..."}
+                                        <ChevronDown className="ml-2 h-4 w-4 opacity-50" />
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent className="w-full max-h-[300px] overflow-y-auto">
+                                    <DropdownMenuLabel>Daftar Mitra</DropdownMenuLabel>
+                                    <DropdownMenuSeparator />
+                                    {mitraList.length === 0 ? (
+                                        <div className="p-2 text-sm text-muted-foreground text-center">
+                                            Tidak ada data mitra
+                                        </div>
+                                    ) : (
+                                        mitraList.map((m) => (
+                                            <DropdownMenuCheckboxItem
+                                                key={m.id}
+                                                checked={form.targetMitra.includes(m.name)}
+                                                onCheckedChange={(checked) => {
+                                                    setForm(prev => ({
+                                                        ...prev,
+                                                        targetMitra: checked
+                                                            ? [...prev.targetMitra, m.name]
+                                                            : prev.targetMitra.filter(name => name !== m.name)
+                                                    }))
+                                                }}
+                                            >
+                                                {m.name}
+                                            </DropdownMenuCheckboxItem>
+                                        ))
+                                    )}
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+
+                            {form.targetMitra.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-2">
+                                    {form.targetMitra.map(m => (
+                                        <Badge key={m} variant="secondary" className="text-xs bg-blue-100 dark:bg-blue-900">
+                                            {m}
+                                            <button
+                                                onClick={() => setForm(prev => ({
+                                                    ...prev,
+                                                    targetMitra: prev.targetMitra.filter(name => name !== m)
+                                                }))}
+                                                className="ml-1 hover:text-red-500"
+                                            >
+                                                ×
+                                            </button>
+                                        </Badge>
+                                    ))}
+                                </div>
+                            )}
+                            <p className="text-xs text-muted-foreground mt-1">Kosongkan jika mempengaruhi semua mitra</p>
+                        </div>
+
                         <div>
                             <label className="text-sm font-medium mb-2 block">Status</label>
                             <select
@@ -507,6 +587,12 @@ export default function MaintenancePage() {
                                                         <div className="flex items-center gap-1 text-muted-foreground">
                                                             <Users className="h-4 w-4" />
                                                             {maintenance.affectedAreas.join(', ')}
+                                                        </div>
+                                                    )}
+                                                    {maintenance.targetMitra && maintenance.targetMitra.length > 0 && (
+                                                        <div className="flex items-center gap-1 text-blue-600">
+                                                            <Users className="h-4 w-4" />
+                                                            Mitra: {maintenance.targetMitra.join(', ')}
                                                         </div>
                                                     )}
                                                 </div>

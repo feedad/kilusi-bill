@@ -39,44 +39,60 @@ router.post('/login-with-token', async (req, res) => {
 
     const { customer } = validation;
 
-    // Generate session token for Next.js
-    const sessionToken = crypto.randomBytes(32).toString('hex');
-    const sessionExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+    // Get complete customer data with services info and PPPoE details
+    const completeCustomer = await query(
+      `SELECT c.id, c.name, c.phone, c.email, c.address,
+              p.name as package_name, p.price as package_price,
+              t.pppoe_username, t.pppoe_password, t.mac_address
+       FROM customers c
+       LEFT JOIN services s ON s.customer_id::text = c.id
+       LEFT JOIN packages p ON s.package_id = p.id
+       LEFT JOIN technical_details t ON s.id = t.service_id
+       WHERE c.id = $1`,
+      [customer.id]
+    );
 
-    // Store session data
-    const sessionData = {
-      sessionToken,
+    const customerData = completeCustomer.rows[0] || customer;
+
+    // Use magic token directly as the auth token (no sessionToken generation)
+    // This ensures token can be validated on every API call
+    const authData = {
+      sessionToken: token, // Use magic token directly
       customer: {
-        id: customer.id,
-        name: customer.name,
-        phone: customer.phone,
-        email: customer.email,
-        status: customer.status,
-        package_name: customer.package_name,
-        package_price: customer.package_price,
-        address: customer.address,
-        city: null, // Column doesn't exist in database
-        province: null, // Column doesn't exist in database
-        postal_code: customer.postal_code,
-        customer_id: customer.customer_id
+        id: customerData.id,
+        name: customerData.name,
+        phone: customerData.phone,
+        email: customerData.email,
+        status: 'active',
+        package_name: customerData.package_name,
+        package_price: customerData.package_price,
+        address: customerData.address,
+        pppoe_username: customerData.pppoe_username || null,
+        pppoe_password: customerData.pppoe_password || null,
+        mac_address: customerData.mac_address || null,
+        ssid: null,
+        customer_id: customerData.id
       },
-      expiresAt: sessionExpiry,
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from token expiry
       loginMethod: 'token'
     };
 
-    // Store session in session store
-    sessionStore.set(sessionToken, {
-      ...sessionData,
+    // Also store in sessionStore for compatibility
+    sessionStore.set(token, {
+      ...authData,
       createdAt: new Date()
     });
 
-    // Log successful login
-    console.log(`✅ Next.js token login successful: ${customer.name} (${customer.phone})`);
+    // Track portal login
+    query('UPDATE customers SET last_portal_login = NOW() WHERE id = $1', [customer.id])
+      .catch(e => console.warn('Failed to track portal login:', e.message));
+
+    console.log(`✅ Next.js token login successful: ${customerData.name} (${customerData.phone})`);
 
     res.json({
       success: true,
       message: 'Login berhasil',
-      data: sessionData
+      data: authData
     });
 
   } catch (error) {
@@ -347,7 +363,8 @@ router.get('/get-customer-data', async (req, res) => {
                 c.id as customer_primary_pk,  -- The Person ID
                 c.customer_id, -- Display Customer ID (5 digits)
                 c.name, c.phone, c.email, 
-                s.address_installation as address, s.status, s.active_date, s.isolir_date, s.period,
+                s.address_installation as address, s.status, s.active_date, s.isolir_date, s.installation_date, s.period, s.billing_type,
+                c.created_at as customer_created_at,
                 p.name as package_name, p.speed as package_speed, p.price as package_price,
                 td.pppoe_username, td.ip_address_static, td.mac_address
             FROM services s
@@ -377,7 +394,7 @@ router.get('/get-customer-data', async (req, res) => {
           SELECT c.*, 
                  s.id as service_id, 
                  s.address_installation as address,
-                 s.status as service_status,
+                 s.status, s.active_date, s.isolir_date, s.installation_date, s.billing_type,
                  p.name as package_name, 
                  p.speed as package_speed, 
                  p.price as package_price,
@@ -464,6 +481,23 @@ router.get('/get-customer-data', async (req, res) => {
       console.error('Error checking RADIUS status:', radiusError);
     }
 
+    // Get connected devices count from GenieACS (LAN hosts)
+    let connectedDevicesCount = 0;
+    try {
+      if (customerData.pppoe_username) {
+        const genieacs = require('../../../config/genieacs');
+        const devicesByUsername = await genieacs.getDevicesByUsername(customerData.pppoe_username);
+        if (devicesByUsername && devicesByUsername.length > 0) {
+          const acsDevice = devicesByUsername[0];
+          const connectedDevs = genieacs.parseConnectedDevices(acsDevice);
+          connectedDevicesCount = connectedDevs.length;
+          console.log(`📡 Dashboard GenieACS: ${connectedDevicesCount} connected devices for ${customerData.pppoe_username}`);
+        }
+      }
+    } catch (acsError) {
+      console.warn('Error fetching GenieACS connected devices for dashboard:', acsError.message);
+    }
+
     // Check monthly usage
     let usageStats = {
       total_usage: 0,
@@ -518,13 +552,12 @@ router.get('/get-customer-data', async (req, res) => {
         SELECT
           COUNT(*) as total_invoices,
           COUNT(CASE WHEN status = 'paid' THEN 1 END) as paid_invoices,
-          COUNT(CASE WHEN status = 'unpaid' THEN 1 END) as unpaid_invoices,
-          COUNT(CASE WHEN status = 'unpaid' AND due_date < CURRENT_DATE THEN 1 END) as overdue_invoices,
+          COUNT(CASE WHEN status IN ('unpaid','suspended','sent','draft','overdue') THEN 1 END) as unpaid_invoices,
+          COUNT(CASE WHEN status IN ('unpaid','suspended','sent','draft','overdue') AND due_date < CURRENT_DATE THEN 1 END) as overdue_invoices,
           COALESCE(SUM(CASE WHEN status = 'paid' THEN amount END), 0) as total_paid,
-          COALESCE(SUM(CASE WHEN status = 'unpaid' THEN amount END), 0) as total_unpaid
+          COALESCE(SUM(CASE WHEN status IN ('unpaid','suspended','sent','draft','overdue') THEN amount END), 0) as total_unpaid
         FROM invoices
         WHERE customer_id = $1
-        AND created_at >= DATE_TRUNC('month', CURRENT_DATE)
       `;
       const billingResult = await db.query(billingQuery, [customer.id]);
 
@@ -618,7 +651,8 @@ router.get('/get-customer-data', async (req, res) => {
         status: customerData.status,
         payment_status: customerData.payment_status,
         billing_type: customerData.billing_type,
-        install_date: customerData.install_date,
+        install_date: customerData.install_date || customerData.installation_date,
+        registration_date: customerData.customer_created_at || customerData.created_at,
         active_date: customerData.active_date,
         isolation_date: customerData.isolation_date,
         expiry_date: expiryDate,
@@ -644,7 +678,8 @@ router.get('/get-customer-data', async (req, res) => {
         uptime: null
       },
       billingStats: billingStats,
-      usageStats: usageStats
+      usageStats: usageStats,
+      connectedDevicesCount: connectedDevicesCount
     };
 
     res.json({
@@ -749,22 +784,61 @@ router.put('/update-profile', async (req, res) => {
 // Helper function to validate session token
 async function validateSessionToken(sessionToken) {
   try {
-    const session = sessionStore.get(sessionToken);
+    // First, try to find in sessionStore (for session tokens generated via login-with-token)
+    let session = sessionStore.get(sessionToken);
 
-    if (!session) {
-      return { valid: false, error: 'Session not found' };
+    if (session) {
+      // Check if session has expired
+      if (session.expiresAt && new Date(session.expiresAt) < new Date()) {
+        sessionStore.delete(sessionToken); // Clean up expired session
+        return { valid: false, error: 'Session expired' };
+      }
+      return {
+        valid: true,
+        customer: session.customer
+      };
     }
 
-    // Check if session has expired
-    if (session.expiresAt && new Date(session.expiresAt) < new Date()) {
-      sessionStore.delete(sessionToken); // Clean up expired session
-      return { valid: false, error: 'Session expired' };
+    // If not found in sessionStore, try as magic token (portal_access_token)
+    const tokenValidation = await CustomerTokenService.validateToken(sessionToken);
+    if (tokenValidation.valid) {
+      // Get complete customer data
+      const completeCustomer = await query(
+        `SELECT c.id, c.name, c.phone, c.email, c.address,
+                p.name as package_name, p.price as package_price,
+                t.pppoe_username, t.pppoe_password, t.mac_address
+         FROM customers c
+         LEFT JOIN services s ON s.customer_id::text = c.id
+         LEFT JOIN packages p ON s.package_id = p.id
+         LEFT JOIN technical_details t ON s.id = t.service_id
+         WHERE c.portal_access_token = $1`,
+        [sessionToken]
+      );
+
+      if (completeCustomer.rows.length > 0) {
+        const customerData = completeCustomer.rows[0];
+        return {
+          valid: true,
+          customer: {
+            id: customerData.id,
+            name: customerData.name,
+            phone: customerData.phone,
+            email: customerData.email,
+            status: 'active',
+            package_name: customerData.package_name,
+            package_price: customerData.package_price,
+            address: customerData.address,
+            pppoe_username: customerData.pppoe_username || null,
+            pppoe_password: customerData.pppoe_password || null,
+            mac_address: customerData.mac_address || null,
+            ssid: null,
+            customer_id: customerData.id
+          }
+        };
+      }
     }
 
-    return {
-      valid: true,
-      customer: session.customer
-    };
+    return { valid: false, error: 'Invalid token' };
   } catch (error) {
     console.error('Error validating session token:', error);
     return { valid: false, error: 'Session validation error' };

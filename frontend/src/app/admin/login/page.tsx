@@ -81,10 +81,10 @@ export default function LoginPage() {
 
       const user = useAuthStore.getState().user
 
-      if (user?.role === 'admin' || user?.role === 'administrator' || user?.role === 'superadmin') {
-        router.push('/admin/dashboard')
-      } else if (user?.role === 'technician') {
+      if (user?.role === 'technician') {
         router.push('/admin/technician-dashboard')
+      } else if (user?.role === 'administrator' || user?.role === 'superadmin' || user?.role === 'admin') {
+        router.push('/admin/dashboard')
       } else {
         router.push('/admin/dashboard')
       }

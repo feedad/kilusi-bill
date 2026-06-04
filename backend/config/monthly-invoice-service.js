@@ -203,6 +203,7 @@ async function generateMonthlyInvoices() {
         const invoice = await billing.createInvoice({
           customer_id: customer.id,
           package_id: customer.package_id,
+          service_number: customer.service_number || null,
           amount: customer.package_price,
           due_date: new Date(currentYear, currentMonth, parseInt(getSetting('billing_due_date', '1'))),
           status: 'unpaid',
@@ -297,6 +298,7 @@ async function generateInvoicesByInstallDate() {
         const invoice = await billing.createInvoice({
           customer_id: customer.id,
           package_id: customer.package_id,
+          service_number: customer.service_number || null,
           amount: customer.package_price,
           due_date: cycleEnd,
           status: 'unpaid',

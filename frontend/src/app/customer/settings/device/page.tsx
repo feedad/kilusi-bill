@@ -197,10 +197,13 @@ export default function DeviceSettingsPage() {
   const [connectedDevices, setConnectedDevices] = useState<ConnectedDevice[]>([])
 
   const [newSSID, setNewSSID] = useState('')
+  const [newPassword, setNewPassword] = useState('')
   const [isRebooting, setIsRebooting] = useState(false)
   const [isUpdatingSSID, setIsUpdatingSSID] = useState(false)
   const [isUpdatingPassword, setIsUpdatingPassword] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+  const [showSSIDDialog, setShowSSIDDialog] = useState(false)
+  const [showPasswordDialog, setShowPasswordDialog] = useState(false)
   const [originalPassword, setOriginalPassword] = useState('********')
   
   // Traffic graph data
@@ -349,6 +352,7 @@ export default function DeviceSettingsPage() {
         });
 
         // Update device info - use session duration from trafficStats as fallback
+        const fetchedPassword = data.deviceInfo?.wifiPassword || '********';
         setDeviceInfo({
           ipAddress: isOffline ? '-' : (data.deviceInfo?.ipAddress || '-'),
           macAddress: isOffline ? '-' : (data.deviceInfo?.macAddress || '-'),
@@ -362,6 +366,7 @@ export default function DeviceSettingsPage() {
           nasIP: isOffline ? '-' : (data.deviceInfo?.nasIP || '-'),
           sessionStartTime: isOffline ? null : data.deviceInfo?.sessionStartTime
         });
+        setOriginalPassword(fetchedPassword);
 
         // Update connected devices
         setConnectedDevices(data.connectedDevices || []);
@@ -660,69 +665,46 @@ export default function DeviceSettingsPage() {
 
     setIsUpdatingSSID(true)
     try {
-      // Use standardized customer API - token handling is done by API client
       const result = await customerAPI.updateSSID(newSSID.trim());
 
       if (result.success) {
         setDeviceInfo(prev => ({ ...prev, ssid: newSSID.trim() }));
-        toast.success('✅ SSID berhasil diperbarui!');
+        toast.success(`✅ ${result.message || 'SSID berhasil diperbarui!'}`);
+        setShowSSIDDialog(false)
       } else {
         throw new Error(result.message || 'Gagal memperbarui SSID');
       }
     } catch (error: any) {
-      console.error('Error updating SSID:', error);
-
-      // Check if it's an authentication error
-      if (error?.response?.status === 401 || error?.status === 401) {
-        console.warn('🔑 Authentication error detected, logging out...')
-        logout()
-      } else {
-        toast.error(`❌ ${error.message || 'Gagal memperbarui SSID'}`);
-      }
+      toast.error(`❌ ${error.message || 'Gagal memperbarui SSID'}`);
     } finally {
       setIsUpdatingSSID(false)
     }
   }
 
   const handlePasswordUpdate = async () => {
-    if (!deviceInfo.currentPassword.trim()) {
+    if (!newPassword.trim()) {
       toast.error('❌ Password tidak boleh kosong')
       return
     }
 
-    if (deviceInfo.currentPassword.length < 8) {
+    if (newPassword.length < 8) {
       toast.error('❌ Password minimal 8 karakter')
       return
     }
 
     setIsUpdatingPassword(true)
     try {
-      // Use standardized customer API - token handling is done by API client
-      const result = await customerAPI.updatePassword(deviceInfo.currentPassword);
+      const result = await customerAPI.updatePassword(newPassword.trim());
 
       if (result.success) {
-        // Save the new password as original and mask the display
-        const newPassword = deviceInfo.currentPassword;
-        setOriginalPassword(newPassword);
-        setDeviceInfo(prev => ({ ...prev, currentPassword: '********' }));
-
-        toast.success('✅ Password WiFi berhasil diperbarui!');
-
-        // Reset password visibility
-        setShowPassword(false);
+        toast.success(`✅ ${result.message || 'Password berhasil diperbarui!'}`);
+        setShowPasswordDialog(false)
+        setNewPassword('')
       } else {
         throw new Error(result.message || 'Gagal memperbarui password');
       }
     } catch (error: any) {
-      console.error('Error updating password:', error);
-
-      // Check if it's an authentication error
-      if (error?.response?.status === 401 || error?.status === 401) {
-        console.warn('🔑 Authentication error detected, logging out...')
-        logout()
-      } else {
-        toast.error(`❌ ${error.message || 'Gagal memperbarui password'}`);
-      }
+      toast.error(`❌ ${error.message || 'Gagal memperbarui password'}`);
     } finally {
       setIsUpdatingPassword(false)
     }
@@ -735,18 +717,16 @@ export default function DeviceSettingsPage() {
 
     setIsRebooting(true)
     try {
-      // Simulate GenieACS API call
-      await new Promise(resolve => setTimeout(resolve, 3000))
-
-      toast.success('✅ Perangkat berhasil di-reboot! Tunggu 2-3 menit untuk koneksi normal.')
-
-      // Simulate device offline during reboot
-      setDeviceInfo(prev => ({ ...prev, status: 'offline' }))
-      setTimeout(() => {
-        setDeviceInfo(prev => ({ ...prev, status: 'online' }))
-      }, 180000) // 3 minutes
-    } catch (error) {
-      toast.error('❌ Gagal me-reboot perangkat')
+      const result = await customerAPI.rebootDevice();
+      
+      if (result.success) {
+        toast.success(`✅ ${result.message || 'Perintah reboot terkirim!'}`)
+        setDeviceInfo(prev => ({ ...prev, status: 'offline' }))
+      } else {
+        throw new Error(result.message || 'Gagal me-reboot perangkat');
+      }
+    } catch (error: any) {
+      toast.error(`❌ ${error.message || 'Gagal me-reboot perangkat'}`)
     } finally {
       setIsRebooting(false)
     }
@@ -1085,19 +1065,15 @@ export default function DeviceSettingsPage() {
                         variant="ghost"
                         size="sm"
                         className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                        onClick={async () => {
+                        onClick={() => {
   if (!showPassword && deviceInfo.currentPassword === '********') {
-    // Fetch actual password when revealing for the first time
-    try {
-      // Simulate API call to get current password
-      // In real implementation, this would call the API to get the actual password
-      const actualPassword = 'MyCurrentP@ss123';
-      setDeviceInfo(prev => ({ ...prev, currentPassword: actualPassword }));
-      setOriginalPassword(actualPassword);
+    // Reveal password from stored original (already fetched on load)
+    if (originalPassword && originalPassword !== '********') {
+      setDeviceInfo(prev => ({ ...prev, currentPassword: originalPassword }));
       setShowPassword(true);
       toast.success('✅ Password saat ini ditampilkan');
-    } catch (error) {
-      toast.error('❌ Gagal menampilkan password');
+    } else {
+      toast.error('❌ Password tidak tersedia');
     }
   } else {
     setShowPassword(!showPassword);
@@ -1177,6 +1153,52 @@ export default function DeviceSettingsPage() {
           </Card>
           </div>
         </div>
+
+        {/* Connected Devices List from GenieACS */}
+        <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:shadow-lg transition-shadow duration-300 mt-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Users className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+              Perangkat Terhubung ({connectedDevices.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {connectedDevices.length === 0 ? (
+              <div className="text-center py-8">
+                <Users className="h-12 w-12 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
+                <p className="text-gray-500 dark:text-gray-400">Tidak ada perangkat terhubung</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {connectedDevices.map((device, index) => (
+                  <div
+                    key={`${device.mac}-${index}`}
+                    className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    <div className="flex items-center space-x-4">
+                      <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-full">
+                        <Smartphone className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-gray-900 dark:text-white">{device.name}</h4>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                          IP: {device.ip} • MAC: {device.mac}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Badge className="bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400">
+                        <CheckCircle className="w-3 h-3 mr-1" />
+                        Online
+                      </Badge>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
       </div>
       </div>
   )

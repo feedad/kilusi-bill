@@ -1,5 +1,6 @@
 // Load environment variables early
 require('dotenv').config();
+process.env.TZ = 'Asia/Jakarta';
 
 const express = require('express');
 const path = require('path');
@@ -13,14 +14,8 @@ const settingsManager = require('./config/settingsManager');
 const { getSetting } = settingsManager;
 const EventEmitter = require('events');
 
-// Initialize settings (async) - Fire and forget for now, or await wrapping main?
-// Since app.js is top-level sync, we call it and let it resolve in background.
-// Early requests might use fallback file settings.
-settingsManager.initialize().then(() => {
-    logger.info('✅ SettingsManager fully initialized in background');
-}).catch(err => {
-    logger.error(`❌ SettingsManager initialization failed: ${err.message}`);
-});
+// NOTE: Settings initialization is now awaited before server starts
+// See bottom of file for server startup code
 
 // Run notification migration
 try {
@@ -162,7 +157,12 @@ const { injectSettings } = require('./config/middleware');
 const { responseHandler, errorHandler: responseErrorHandler, requestId } = require('./middleware/response');
 
 // Middleware dasar dengan optimasi
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({
+    limit: '10mb',
+    verify: (req, res, buf, encoding) => {
+        req.rawBody = buf?.toString(encoding || 'utf8') || '';
+    }
+}));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // AGGRESSIVE CORS DEBUGGING
@@ -268,18 +268,28 @@ app.use(cors({
             'https://api.kilusi.id',
             'https://kilusi.id',
             'https://www.kilusi.id',
+            'http://billing.kilusi.id',
+            'http://www.billing.kilusi.id',
+            'http://portal.kilusi.id',
+            'http://www.portal.kilusi.id',
+            'http://api.kilusi.id',
+            'http://kilusi.id',
+            'http://www.kilusi.id',
             'http://localhost:3000',
-            'http://localhost:3001'
+            'http://localhost:3001',
+            'http://localhost:8080',
+            'http://172.22.10.30',
+            'http://172.22.10.30:8080'
         ];
 
         if (allowedDomains.indexOf(origin) !== -1) {
             return callback(null, true);
         }
 
-        // Allow localhost variants
-        if (origin.match(/^http:\/\/localhost/)) return callback(null, true);
-        if (origin.match(/^http:\/\/127\.0\.0\.1/)) return callback(null, true);
-        if (origin.match(/^http:\/\/172\.22\.10\.30/)) return callback(null, true);
+        // Allow localhost variants (including any port)
+        if (origin.match(/^http:\/\/localhost(:\d+)?$/)) return callback(null, true);
+        if (origin.match(/^http:\/\/127\.0\.0\.1(:\d+)?$/)) return callback(null, true);
+        if (origin.match(/^http:\/\/172\.22\.10\.30(:\d+)?$/)) return callback(null, true);
 
         // Fallback for development/debugging: if NODE_ENV is not production, allow all (with warning)
         if (process.env.NODE_ENV !== 'production') {
@@ -296,7 +306,7 @@ app.use(cors({
         return callback(new Error('Not allowed by CORS'), false);
     },
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'x-customer-phone', 'X-Customer-Phone']
 }));
 
@@ -1169,6 +1179,14 @@ function startServer(portToUse) {
             logger.warn(`⚠️ Failed to initialize log streaming: ${error.message}`);
         }
 
+        // Start RADIUS session cleanup service
+        try {
+            const radiusCleanup = require('./services/radius-cleanup');
+            radiusCleanup.start();
+        } catch (cleanupError) {
+            logger.warn(`⚠️ Failed to start RADIUS cleanup service: ${cleanupError.message}`);
+        }
+
         server.listen(port, host, () => {
             logger.info(`✅ Server berhasil berjalan pada port ${port}`);
             logger.info(`🌐 Web Portal tersedia di: http://${host === '0.0.0.0' ? '172.22.10.29' : host}:${port}`);
@@ -1195,95 +1213,107 @@ function startServer(portToUse) {
     }
 }
 
-// Mulai server setelah memastikan database siap (migrations)
-// NOTE: SQLite migration disabled - using PostgreSQL instead
+// Database readiness check helper
+async function waitForDatabase() {
+    const db = require('./config/database');
+    let connected = false;
+    let retries = 15;
+    while (!connected && retries > 0) {
+        logger.info('⏳ Checking database connection...');
+        connected = await db.isConnected();
+        if (!connected) {
+            logger.warn(`Database not ready. Retries left: ${retries}. Waiting 2 seconds...`);
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            retries--;
+        }
+    }
+    if (!connected) {
+        throw new Error('Database is not ready after several retries.');
+    }
+    logger.info('✅ Database is ready.');
+}
+
+// Mulai server setelah memastikan database siap
 (async () => {
     try {
-        // Skip SQLite migration since we're using PostgreSQL
-        // const { ensureMultiServerDatabase } = require('./config/db-init');
-        // await ensureMultiServerDatabase();
-        logger.info('SQLite migration skipped - using PostgreSQL database');
-    } catch (e) {
-        logger.warn(`Database migration step encountered an issue: ${e.message}`);
-    }
-    const port = global.appSettings.port;
-    logger.info(`Attempting to start server on configured port: ${port}`);
-    startServer(port);
-})();
+        // 1. Wait for database readiness
+        await waitForDatabase();
 
-// Tambahkan perintah untuk menambahkan nomor pelanggan ke tag GenieACS
-const { addCustomerTag } = require('./config/customerTag');
+        // 2. Initialize settingsManager
+        if (!settingsManager.isInitialized()) {
+            logger.info('⏳ Initializing settingsManager before server start...');
+            await settingsManager.initialize();
+            logger.info('✅ settingsManager initialized successfully');
+        }
 
-// Initialize billing system and other services
-(async function initializeServices() {
-    try {
-        // Initialize billing system (must be first)
+        // 3. Initialize billing system and other services
+        logger.info('⏳ Initializing services...');
         const billing = require('./config/billing');
         await billing.initializeBilling();
 
-        // Initialize isolir service
         const isolirService = require('./config/isolir-service');
         isolirService.initializeIsolirService();
 
-        // Initialize monthly invoice service - DISABLED to prevent infinite loop
-        // Use scheduler.js instead for invoice generation
-        // const monthlyInvoiceService = require('./config/monthly-invoice-service');
-        // monthlyInvoiceService.initializeMonthlyInvoiceService();
+        // Initialize scheduler (Main Cron)
+        require('./config/scheduler');
+        logger.info('✅ Scheduler initialized');
 
         // Initialize auto expense service
         const autoExpenseService = require('./config/auto-expense-service');
         logger.info('✅ Auto expense service initialized');
-    } catch (error) {
-        logger.error('❌ Failed to initialize services:', error);
-    }
-})();
 
-// Initialize backup system
-const backupSystem = require('./config/backup-system');
-backupSystem.initialize();
+        // Initialize backup system
+        const backupSystem = require('./config/backup-system');
+        backupSystem.initialize();
+        logger.info('✅ Backup system initialized');
 
-// Initialize RADIUS server
-// DISABLED: Using FreeRADIUS in Docker instead of Node.js RADIUS server
-// const radiusServer = require('./config/radius-server');
-const radiusSync = require('./config/radius-sync');
+        // Initialize RADIUS sync
+        try {
+            logger.info('⏭️  Node.js RADIUS server disabled - using FreeRADIUS in Docker');
+            const radiusEnabled = getSetting('radius_server_enabled', 'true');
+            if (radiusEnabled === 'true') {
+                const autoSyncOnStartup = getSetting('radius_auto_sync_on_startup', 'true');
+                if (autoSyncOnStartup === 'true') {
+                    logger.info('🔄 Syncing customers to FreeRADIUS...');
+                    await radiusSync.syncCustomersToRadius();
 
-(async function initializeRadius() {
-    try {
-        // Node.js RADIUS server disabled - using FreeRADIUS in Docker
-        logger.info('⏭️  Node.js RADIUS server disabled - using FreeRADIUS in Docker');
-
-        // Keep sync functionality for FreeRADIUS integration
-        const radiusEnabled = getSetting('radius_server_enabled', 'true');
-        if (radiusEnabled === 'true') {
-            // Auto sync customers and packages on startup
-            const autoSyncOnStartup = getSetting('radius_auto_sync_on_startup', 'true');
-            if (autoSyncOnStartup === 'true') {
-                logger.info('🔄 Syncing customers to FreeRADIUS...');
-                await radiusSync.syncCustomersToRadius();
-
-                logger.info('🔄 Syncing packages to FreeRADIUS...');
-                await radiusSync.syncPackagesToRadius();
-            }
-
-            // Setup periodic sync
-            const syncInterval = parseInt(getSetting('radius_sync_interval_minutes', '60'));
-            if (syncInterval > 0) {
-                setInterval(async () => {
-                    logger.info('🔄 Running scheduled customer sync...');
-                    await radiusSync.autoSync();
-
-                    logger.info('🔄 Running scheduled packages sync...');
+                    logger.info('🔄 Syncing packages to FreeRADIUS...');
                     await radiusSync.syncPackagesToRadius();
-                }, syncInterval * 60 * 1000);
-                logger.info(`✅ FreeRADIUS auto-sync configured: every ${syncInterval} minutes`);
+                }
+
+                const syncInterval = parseInt(getSetting('radius_sync_interval_minutes', '60'));
+                if (syncInterval > 0) {
+                    setInterval(async () => {
+                        logger.info('🔄 Running scheduled customer sync...');
+                        await radiusSync.autoSync();
+
+                        logger.info('🔄 Running scheduled packages sync...');
+                        await radiusSync.syncPackagesToRadius();
+                    }, syncInterval * 60 * 1000);
+                    logger.info(`✅ FreeRADIUS auto-sync configured: every ${syncInterval} minutes`);
+                }
+            } else {
+                logger.info('⏭️  FreeRADIUS sync disabled in settings');
             }
-        } else {
-            logger.info('⏭️  FreeRADIUS sync disabled in settings');
+        } catch (radiusErr) {
+            logger.error(`❌ Failed to initialize RADIUS sync: ${radiusErr.message}`);
         }
+
+        // 4. Start HTTP Server
+        const port = global.appSettings.port;
+        logger.info(`Attempting to start server on configured port: ${port}`);
+        startServer(port);
+
     } catch (error) {
-        logger.error(`❌ Failed to initialize RADIUS sync: ${error.message}`);
+        logger.error(`❌ Terjadi kesalahan saat memulai server:`, error);
+        if (error.stack) logger.error(error.stack);
+        process.exit(1);
     }
 })();
+
+// Tambahkan perintah untuk menambahkan nomor pelanggan ke tag GenieACS
+const { addCustomerTag } = require('./config/customerTag');
+const radiusSync = require('./config/radius-sync');
 
 // Handle graceful shutdown
 process.on('SIGINT', async () => {

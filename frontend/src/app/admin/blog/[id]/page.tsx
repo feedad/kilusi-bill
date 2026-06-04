@@ -7,11 +7,31 @@ import { toast } from 'react-hot-toast';
 import Link from 'next/link';
 import { ArrowLeftIcon } from '@heroicons/react/24/outline';
 
-export default function BlogPostEditor({ params }) {
+interface BlogPostFormData {
+    title: string;
+    slug: string;
+    excerpt: string;
+    content: string;
+    cover_image: string;
+    is_published: boolean;
+    slug_dirty?: boolean;
+}
+
+interface BlogPost {
+    id: string;
+    title: string;
+    slug: string;
+    excerpt: string;
+    content: string;
+    cover_image: string;
+    is_published: boolean;
+}
+
+export default function BlogPostEditor({ params }: { params: { id: string } }) {
     const router = useRouter();
     const isNew = params.id === 'new';
 
-    const [formData, setFormData] = useState({
+    const [formData, setFormData] = useState<BlogPostFormData>({
         title: '',
         slug: '',
         excerpt: '',
@@ -27,23 +47,23 @@ export default function BlogPostEditor({ params }) {
             // Load existing post
             // Note: We use the admin backend endpoint if available or public single fetch
             // Let's use the public fetch by slug logic or find by ID if we added an ID endpoint.
-            // Oh wait, my backend plan only had GET /posts/:slug. 
-            // I should use GET /admin/posts/:id ideally? Or filter the admin list. 
+            // Oh wait, my backend plan only had GET /posts/:slug.
+            // I should use GET /admin/posts/:id ideally? Or filter the admin list.
             // In the backend I implemented PUT /admin/posts/:id but didn't implement GET /admin/posts/:id explicitly,
             // but usually I can just reuse the public one if I have the slug, OR iterate the list.
             // Let's iterate the admin list for now as a quick hack or implement GET /admin/posts/:id if needed.
 
-            // Actually I'll implement a quick helper in client to find it from the list if I want 
+            // Actually I'll implement a quick helper in client to find it from the list if I want
             // OR simpler: just assume I can look it up.
-            // Let's add GET /blog/admin/posts/:id to backend quickly? 
-            // Or just use the filtering on client side if list is small? 
-            // Better: update backend to support GET /admin/posts/:id. 
-            // Wait, I can't update backend easily without restart. 
+            // Let's add GET /blog/admin/posts/:id to backend quickly?
+            // Or just use the filtering on client side if list is small?
+            // Better: update backend to support GET /admin/posts/:id.
+            // Wait, I can't update backend easily without restart.
             // I'll assume I can fetch the full list and find it for now to save time.
 
             api.get('/api/v1/blog/admin/posts')
                 .then(res => {
-                    const post = res.data.data.find(p => p.id == params.id);
+                    const post = res.data.data.find((p: BlogPost) => p.id == params.id);
                     if (post) {
                         setFormData(post);
                     } else {
@@ -59,8 +79,9 @@ export default function BlogPostEditor({ params }) {
         }
     }, [isNew, params.id, router]);
 
-    const handleChange = (e) => {
-        const { name, value, type, checked } = e.target;
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+        const target = e.target as HTMLInputElement;
+        const { name, value, type, checked } = target;
         setFormData(prev => ({
             ...prev,
             [name]: type === 'checkbox' ? checked : value
@@ -76,7 +97,7 @@ export default function BlogPostEditor({ params }) {
         }
     };
 
-    const handleSubmit = async (e) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setSaving(true);
         try {
@@ -88,7 +109,7 @@ export default function BlogPostEditor({ params }) {
                 await api.put(`/api/v1/blog/admin/posts/${params.id}`, formData);
                 toast.success('Post updated successfully!');
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error(error);
             toast.error(error.response?.data?.message || 'Failed to save post');
         } finally {

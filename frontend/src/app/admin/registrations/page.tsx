@@ -57,7 +57,7 @@ interface Customer {
   package_name?: string
   package_price?: number
   package_speed?: string
-  status: 'active' | 'inactive' | 'suspended' | 'no_service' | 'pending'
+  status: 'active' | 'inactive' | 'suspended' | 'no_service' | 'waiting' | 'pending'
   package_id?: string
   pppoe_username?: string
   pppoe_password?: string
@@ -117,31 +117,6 @@ interface Router {
   snmp_status?: string
 }
 
-interface FormData {
-  customer_id: string
-  name: string
-  phone: string
-  nik: string
-  address: string // Billing Address (alamat tagihan)
-  installation_address: string // Installation Address (alamat instalasi)
-  latitude?: number
-  longitude?: number
-  package_id: string
-  pppoe_username: string
-  pppoe_password: string
-  billing_type: string
-  siklus: string
-  router: string
-  status: string
-  region: string
-  // status field removed - customer status will be determined automatically by billing cycle
-  odp_id?: string
-  odp_name?: string
-  odp_address?: string
-  odp_port?: string
-  cable_length?: number // Panjang Kabel (meters)
-  service_number?: string
-}
 
 
 interface CustomerStats {
@@ -162,7 +137,6 @@ export default function RegistrationsPage() {
   const [stats, setStats] = useState<CustomerStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [identityError, setIdentityError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('') // The actual query sent to API
   const [searchInput, setSearchInput] = useState('') // The input field value
 
@@ -174,26 +148,13 @@ export default function RegistrationsPage() {
     return () => clearTimeout(timer)
   }, [searchInput])
 
-  // Search state for modal
-  const [modalSearchResults, setModalSearchResults] = useState<Customer[]>([])
-  const [isModalSearching, setIsModalSearching] = useState(false)
-  const [modalSearchQuery, setModalSearchQuery] = useState('')
-
-  // New state for modal mode and identity editing
-  const [searchModalMode, setSearchModalMode] = useState<'view' | 'select'>('view')
-  const [isIdentityEditing, setIsIdentityEditing] = useState(false)
-  const [editingIdentityId, setEditingIdentityId] = useState<string | null>(null)
-  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive' | 'suspended' | 'pending'>('all')
+  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive' | 'suspended' | 'waiting' | 'pending'>('waiting')
   const [filterPackage, setFilterPackage] = useState('all')
   const [filterRouter, setFilterRouter] = useState('all')
   const [filterRegion, setFilterRegion] = useState('all')
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
   const [showDetailModal, setShowDetailModal] = useState(false)
-  const [showCreateModal, setShowCreateModal] = useState(false)
-  const [isEditing, setIsEditing] = useState(false)
-  const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null)
-  const editingCustomerData = useRef<Customer | null>(null)
   const [showRegionModal, setShowRegionModal] = useState(false)
   const [regions, setRegions] = useState<any[]>([])
   const [odps, setODPs] = useState<any[]>([])
@@ -207,109 +168,17 @@ export default function RegistrationsPage() {
   const [showBulkActions, setShowBulkActions] = useState(false)
   const [bulkAction, setBulkAction] = useState<'delete' | 'changeRouter' | 'changeStatus' | 'changeRegion' | 'changeCycle' | null>(null)
   const [submittingBulk, setSubmittingBulk] = useState(false)
-  const [formData, setFormData] = useState<FormData>({
-    customer_id: '',
-    name: '',
-    phone: '',
-    nik: '',
-    address: '',
-    installation_address: '',
-    latitude: undefined,
-    longitude: undefined,
-    package_id: '',
-    pppoe_username: '',
-    pppoe_password: '',
-    billing_type: 'postpaid',
-    siklus: 'profile',
+  const [bulkFormData, setBulkFormData] = useState({
     router: 'all',
-    status: 'active', // Default status for bulk operations
+    status: 'active',
     region: '',
-    // status field removed - customer status will be determined automatically by billing cycle
-    odp_id: '',
-    odp_name: '',
-    odp_address: '',
-    odp_port: '',
-    cable_length: undefined
+    siklus: 'profile',
   })
-  const [submitting, setSubmitting] = useState(false)
   const [fetchingStatus, setFetchingStatus] = useState<string | null>(null)
   const [lastStatusRefresh, setLastStatusRefresh] = useState<Date | null>(null)
 
-  // Multi-Service Constants removed - Reverting to single modal
-
-  // Customer defaults hook
-
-  // Customer defaults hook
   const { defaults, getDefaultValue } = useCustomerDefaults()
   const [showSettingsModal, setShowSettingsModal] = useState(false)
-  const [showIdentityModal, setShowIdentityModal] = useState(false)
-  const [identityFormData, setIdentityFormData] = useState({
-    customer_id: '',
-    name: '',
-    phone: '',
-    nik: '',
-    address: ''
-  })
-  const [showSearchCustomerModal, setShowSearchCustomerModal] = useState(false)
-
-  const handleSelectCustomerFromSearch = (customer: Customer) => {
-    // Service Number Calculation Logic: YYMM + CustomerID (5 digits) + Index (2 digits)
-    const today = new Date();
-    const yy = today.getFullYear().toString().slice(-2);
-    const mm = (today.getMonth() + 1).toString().padStart(2, '0');
-
-    // CustID is normalized 5 digits
-    const custId = customer.customer_id || customer.id || '00000';
-
-    // Calculate index: Count existing services for this specific customer ID
-    // Note: 'customers' only has current page. Ideally, we should ask backend for count.
-    // For now, using length of filter on loaded customers might be inaccurate if pagination is used.
-    // Optimization: We will perform a specific check or default to '01' if first, 
-    // but the user requirement implies a sequential service number.
-    // Let's assume '01' for now as the basic requirement unless we fetch service count.
-
-    // BETTER APPROACH: Use the count of services returned by the backend in search results if available?
-    // Or just default to '01' since "Add Service" typically implies adding a new one.
-    // If the user has existing services, we'd need to know how many.
-    // Assuming 01 for the first service if we can't easily count.
-    // If `customers` state has all customers, filtering works. If paginated, it doesn't.
-    // We will simulate '01' for this step as per user example `25120000101`.
-    const nextIndex = '01';
-
-    const serviceNumber = `${yy}${mm}${custId}${nextIndex}`;
-    const suffix = getDefaultValue('pppoe_suffix', 'isp');
-    const pppoeUsername = `${serviceNumber}@${suffix}`;
-
-    console.log('🔢 Generated Service Number:', serviceNumber);
-    console.log('👤 Generated PPPoE Username:', pppoeUsername);
-
-    setFormData(prev => ({
-      ...prev,
-      customer_id: custId,
-      name: customer.name,
-      phone: customer.phone,
-      nik: customer.nik || '',
-      address: customer.address || '',
-      region: customer.region_id?.toString() || '',
-      service_number: serviceNumber, // Storing for display
-      pppoe_username: pppoeUsername // Auto-set PPPoE
-    }))
-    setShowSearchCustomerModal(false)
-  }
-
-  // Handle Edit Identity from Search Modal (View Mode)
-  const handleEditIdentity = (customer: Customer) => {
-    setIdentityFormData({
-      customer_id: customer.customer_id || '',
-      name: customer.name,
-      phone: customer.phone,
-      nik: customer.nik || '',
-      address: customer.billing_address || customer.address || ''
-    })
-    setIsIdentityEditing(true)
-    setEditingIdentityId(customer.id)
-    setShowIdentityModal(true)
-  }
 
   useEffect(() => {
     fetchDashboardStats()
@@ -323,47 +192,7 @@ export default function RegistrationsPage() {
     fetchInstallationFee('postpaid')
   }, [currentPage, pageSize, searchQuery, filterStatus, filterPackage, filterRouter, filterRegion, sortField, sortDirection])
 
-  // Auto-generate PPPoE username when customer_id changes or when suffix changes in settings
-  useEffect(() => {
-    if (formData.customer_id && defaults.pppoe_suffix && !isEditing) {
-      // Only auto-generate if username is empty or customer_id has changed (only in create mode)
-      if (!formData.pppoe_username || (formData.customer_id && !formData.pppoe_username.includes(formData.customer_id))) {
-        const suffix = getDefaultValue('pppoe_suffix', 'isp')
-        const generatedUsername = `${formData.customer_id}@${suffix}`
-        setFormData(prev => ({
-          ...prev,
-          pppoe_username: generatedUsername
-        }))
-      }
-    }
-  }, [formData.customer_id, defaults.pppoe_suffix, getDefaultValue, isEditing])
 
-
-  // Monitor ALL form data changes to catch unexpected resets
-  useEffect(() => {
-    console.log('📊 FORM DATA CHANGED:', {
-      isEditing,
-      showCreateModal,
-      package_id: formData.package_id,
-      latitude: formData.latitude,
-      longitude: formData.longitude,
-      odp_id: formData.odp_id,
-      odp_port: formData.odp_port,
-      customer_id: formData.customer_id,
-      pppoe_username: formData.pppoe_username
-    })
-  }, [formData, isEditing, showCreateModal]) // Monitor all form changes
-
-  // Auto-generate customer ID when create modal opens
-  useEffect(() => {
-    const generateID = async () => {
-      if (showCreateModal && !formData.customer_id && !isEditing) {
-        await generateCustomerID()
-      }
-    }
-
-    generateID()
-  }, [showCreateModal, isEditing, formData.customer_id])
 
   // Auto refresh connection status every 30 seconds
   useEffect(() => {
@@ -425,7 +254,7 @@ export default function RegistrationsPage() {
         limit: pageSize.toString(),
         search: searchQuery,
         sort_direction: sortDirection,
-        status: 'pending', // Only fetch pending registrations
+        status: 'waiting', // Only fetch waiting registrations (public pending review)
       })
 
       const response = await adminApi.get(`/api/v1/customers?${params}`)
@@ -478,7 +307,7 @@ export default function RegistrationsPage() {
         customersWithUsername.map(async (customer) => {
           try {
             // Use the correct endpoint path
-            const statusResponse = await adminApi.get(`/api/v1/radius/connection-status/${customer.pppoe_username}`)
+            const statusResponse = await adminApi.get(`/api/v1/radius/connection-status/${encodeURIComponent(customer.pppoe_username)}`)
 
             const connectionStatus = statusResponse.data?.data?.connectionStatus || statusResponse.data?.connectionStatus || { online: false, status: 'offline' }
 
@@ -614,52 +443,6 @@ export default function RegistrationsPage() {
   const [modalTotalItems, setModalTotalItems] = useState(0)
 
   // Server-side search for modal
-  const handleModalSearch = async (query: string, page: number = 1) => {
-    // Only update query state if it's a new query (page 1) or we keep it consistent
-    if (page === 1) setModalSearchQuery(query)
-
-    try {
-      setIsModalSearching(true)
-      const params = new URLSearchParams({
-        page: page.toString(),
-        limit: '10', // Show 10 items
-        search: query,
-        exclude_status: 'pending', // Exclude pending customers from main list lookup
-        // Do not pass has_service to show ALL customers (including those without services)
-      })
-
-      const response = await adminApi.get(`/api/v1/customers?${params}`)
-      if (response.data.success) {
-        // Fix: API returns data as array directly
-        const rawData = response.data.data
-        setModalSearchResults(Array.isArray(rawData) ? rawData : (rawData?.customers || []))
-
-        const pagination = response.data.pagination || {}
-        setModalTotalItems(pagination.total || 0)
-        setModalCurrentPage(page)
-      }
-    } catch (error) {
-      console.error('Error searching customers for modal:', error)
-    } finally {
-      setIsModalSearching(false)
-    }
-  }
-
-  // Debounce the modal search
-  useEffect(() => {
-    // Immediate search if empty (to show defaults), otherwise wait for debounce
-    const query = modalSearchQuery;
-
-    // We only trigger if query changes (page reset to 1)
-    // Page changes are handled by page buttons directly calling handleModalSearch
-
-    const timer = setTimeout(() => {
-      handleModalSearch(query, 1)
-    }, 500)
-    return () => clearTimeout(timer)
-  }, [modalSearchQuery])
-
-
   const fetchODPs = async () => {
     try {
       setFetchingODPs(true)
@@ -679,215 +462,16 @@ export default function RegistrationsPage() {
     }
   }
 
-  const handleCreateCustomer = async () => {
-    if (!formData.name || !formData.phone) {
-      setError('Nama dan nomor telepon wajib diisi')
-      return
-    }
-
-    setSubmitting(true)
-    setError(null)
-
-    try {
-      console.log('🚀 SUBMIT DEBUG - Form data before API call:', {
-        isEditing,
-        editingCustomerId,
-        customer_id: formData.customer_id,
-        name: formData.name,
-        latitude: formData.latitude,
-        longitude: formData.longitude,
-        latitude_type: typeof formData.latitude,
-        longitude_type: typeof formData.longitude,
-        package_id: formData.package_id,
-        package_id_type: typeof formData.package_id,
-        odp_id: formData.odp_id,
-        odp_id_type: typeof formData.odp_id,
-        odp_port: formData.odp_port,
-        odp_port_type: typeof formData.odp_port
-      })
-
-      const customerData = {
-        customer_id: formData.customer_id || null,
-        name: formData.name,
-        phone: formData.phone,
-        nik: formData.nik || null,
-        address: formData.address || null, // Billing address
-        installation_address: formData.installation_address || formData.address || null, // Installation address, fallback to billing
-        latitude: formData.latitude || null,
-        longitude: formData.longitude || null,
-        package_id: formData.package_id || null,
-        pppoe_username: formData.pppoe_username || null,
-        pppoe_password: formData.pppoe_password || null,
-        billing_type: formData.billing_type || 'postpaid',
-        siklus: formData.siklus || 'profile',
-        router: formData.router || 'all',
-        region_id: formData.region || null,
-        // status field removed - customer status will be determined automatically by billing cycle
-        odp_id: formData.odp_id || null,
-        odp_name: formData.odp_name || null,
-        odp_address: formData.odp_address || null,
-        odp_port: formData.odp_port || null,
-        cable_length: formData.cable_length || null // Cable length in meters
-      }
-
-      console.log('📤 SUBMIT DEBUG - customerData sent to API:', customerData)
-
-      let response
-      if (isEditing && editingCustomerId) {
-        // Update existing customer (Unified Update)
-        response = await adminApi.put(`/api/v1/customers/${editingCustomerId}`, customerData)
-      } else if (formData.customer_id) {
-        // Adding Service to EXISTING customer
-        response = await adminApi.post(`/api/v1/customers/${formData.customer_id}/services`, customerData)
-      } else {
-        // Create new customer (Identity Only)
-        response = await adminApi.post('/api/v1/customers/identity', customerData)
-      }
-
-      if (response.data.success) {
-        setShowCreateModal(false)
-        resetForm()
-        fetchCustomers()
-        // Reset editing state
-        setIsEditing(false)
-        setEditingCustomerId(null)
-        // Show success message
-        // Show success message
-        alert(isEditing ? 'Pelanggan berhasil diupdate!' : 'Layanan berhasil ditambahkan ke Pelanggan!')
-      } else {
-        setError(response.data.message || `Gagal ${isEditing ? 'mengupdate' : 'menambahkan'} pelanggan`)
-      }
-    } catch (err: any) {
-      console.error('Error creating customer:', err)
-      setError(err.response?.data?.message || err.message || 'Gagal menambahkan pelanggan')
-    } finally {
-      setSubmitting(false)
-    }
-  }
 
 
 
-  const generatePPPoEUsername = () => {
-    if (formData.customer_id) {
-      const suffix = getDefaultValue('pppoe_suffix', 'isp')
-      const generatedUsername = `${formData.customer_id}@${suffix}`
-      setFormData(prev => ({
-        ...prev,
-        pppoe_username: generatedUsername
-      }))
-    }
-  }
-
-  const generateCustomerID = async () => {
-    try {
-      // Get next sequence from API
-      const response = await adminApi.get('/api/v1/customers/next-sequence')
-
-      if (response.data.success) {
-        // API returns camelCase 'customerId'
-        const generatedCustomerID = response.data.data.customerId || response.data.data.customer_id
-
-        setFormData(prev => ({
-          ...prev,
-          customer_id: generatedCustomerID,
-          pppoe_username: `${generatedCustomerID}@${getDefaultValue('pppoe_suffix', 'isp')}`
-        }))
-      }
-    } catch (error) {
-      console.error('Error generating customer ID:', error)
-      // Fallback to local generation
-      const today = new Date()
-      const dateStr = today.getFullYear().toString().slice(-2) +  // YY
-        (today.getMonth() + 1).toString().padStart(2, '0') +  // MM
-        today.getDate().toString().padStart(2, '0')  // DD
-      const fallbackSequence = Math.floor(Math.random() * 100000) // Random fallback
-      const generatedCustomerID = dateStr + fallbackSequence.toString().padStart(5, '0')
-
-      setFormData(prev => ({
-        ...prev,
-        customer_id: generatedCustomerID,
-        pppoe_username: `${generatedCustomerID}@${getDefaultValue('pppoe_suffix', 'isp')}`
-      }))
-    }
-  }
-
-  const handleEditCustomer = (customer: Customer) => {
-    console.log('🔧 handleEditCustomer called with customer data:', {
-      customer_id: customer.customer_id,
-      name: customer.name,
-      package_id: customer.package_id,
-      latitude: customer.latitude,
-      longitude: customer.longitude,
-      latitude_type: typeof customer.latitude,
-      longitude_type: typeof customer.longitude,
-      odp_id: customer.odp_id,
-      odp_name: customer.odp_name,
-      odp_address: customer.odp_address,
-      odp_port: customer.odp_port
-    })
-
-    // Log if coordinates seem wrong (match default values)
-    if (customer.latitude === -6.563234 && customer.longitude === 107.741418) {
-      console.log('⚠️ WARNING: Using default coordinate values! API returned default coordinates instead of saved ones!')
-      console.log('This suggests either:')
-      console.log('1. API query not returning the correct coordinates')
-      console.log('2. Database not saving coordinates properly')
-      console.log('3. Coordinates were reset somewhere in the backend')
-    }
-
-    // Store customer data in ref for persistence
-    editingCustomerData.current = customer
-
-    // Fetch ODPs to ensure they're loaded for the dropdown
-    fetchODPs()
-    fetchRegions() // Also fetch regions for region dropdown
-
-    // Set editing state FIRST
-    setIsEditing(true)
-    setEditingCustomerId(customer.id)
-
-    // Close detail modal and open create modal for editing
-    setShowDetailModal(false)
-    setShowCreateModal(true)
-
-    // Set form data immediately after state changes - handle undefined properly
-    const formDataToSet = {
-      customer_id: customer.customer_id || '',
-      name: customer.name,
-      phone: customer.phone,
-      nik: customer.nik || '',
-      address: customer.address || '',
-      installation_address: customer.installation_address || '',
-      latitude: customer.latitude,
-      longitude: customer.longitude,
-      package_id: customer.package_id ? customer.package_id.toString() : '',
-      pppoe_username: customer.pppoe_username || '',
-      pppoe_password: customer.pppoe_password || '',
-      billing_type: customer.billing_type || 'postpaid',
-      siklus: customer.siklus || 'profile',
-      router: customer.router || 'all',
-      region: customer.region_id || '',
-      status: customer.status || 'inactive',
-      odp_id: customer.odp_id ? customer.odp_id.toString() : '',
-      odp_name: customer.odp_name || '',
-      odp_address: customer.odp_address || '',
-      odp_port: customer.odp_port ? customer.odp_port.toString() : '',
-      cable_length: customer.cable_length,
-      service_number: customer.service_number
-    }
-
-    console.log('📝 Setting form data to:', formDataToSet)
-    setFormData(formDataToSet)
-    console.log('✅ handleEditCustomer completed')
-  }
 
   const handleDeleteCustomer = async (customerId: string) => {
-    if (!window.confirm('Apakah Anda yakin ingin menghapus pelanggan ini?')) {
+    if (!window.confirm('Apakah Anda yakin ingin menolak pendaftaran ini?')) {
       return
     }
 
     try {
-      setSubmitting(true)
       setError(null)
 
       const response = await adminApi.delete(`/api/v1/customers/${customerId}`)
@@ -896,13 +480,36 @@ export default function RegistrationsPage() {
         setShowDetailModal(false)
         fetchCustomers() // Refresh customer list
       } else {
-        setError(response.data.message || 'Gagal menghapus pelanggan')
+        setError(response.data.message || 'Gagal menolak pendaftaran')
       }
     } catch (err: any) {
       console.error('Error deleting customer:', err)
-      setError(err.response?.data?.message || err.message || 'Gagal menghapus pelanggan')
+      setError(err.response?.data?.message || err.message || 'Gagal menolak pendaftaran')
+    }
+  }
+
+  const handleProcessCustomer = async (customerId: string) => {
+    if (!window.confirm('Setujui pendaftaran ini? Pelanggan akan muncul di halaman Pelanggan.')) {
+      return
+    }
+
+    try {
+      setSubmittingBulk(true)
+      setError(null)
+
+      const response = await adminApi.post(`/api/v1/customers/${customerId}/process`)
+
+      if (response.data.success) {
+        setShowDetailModal(false)
+        fetchCustomers() // Refresh customer list
+      } else {
+        setError(response.data.message || 'Gagal memproses pendaftaran')
+      }
+    } catch (err: any) {
+      console.error('Error processing customer:', err)
+      setError(err.response?.data?.message || err.message || 'Gagal memproses pendaftaran')
     } finally {
-      setSubmitting(false)
+      setSubmittingBulk(false)
     }
   }
 
@@ -1237,31 +844,6 @@ export default function RegistrationsPage() {
   }
 
   // Sync version of calculateTotalBilling for immediate display (uses cached values)
-  const calculateTotalBillingSync = (packagePrice?: number, packageId?: string, billingType?: string): number => {
-    if (!billingType) return packagePrice || 0
-
-    // Get cached installation fee or default
-    const cacheKey = `${billingType}-${packageId || 'default'}`
-    const installationFee = installationFeeCache[cacheKey] ?? (billingType === 'prepaid' ? 0 : 50000)
-
-    if (!packagePrice) return installationFee
-
-    switch (billingType) {
-      case 'prepaid':
-        return packagePrice + installationFee // Prabayar: bayar paket + instalasi
-      case 'postpaid':
-        return installationFee // Pascabayar: hanya bayar instalasi awal
-      default:
-        return installationFee
-    }
-  }
-
-  // Function to get selected package info
-  const getSelectedPackage = () => {
-    if (!formData.package_id) return null
-    return packages.find(p => p.id.toString() === formData.package_id) || null
-  }
-
   const getConnectionStatus = (customer: Customer) => {
     // Priority 1: Check if customer is suspended (from billing or status)
     if (customer.status === 'suspended' || customer.status === 'inactive' || customer.billing_status === 'overdue') {
@@ -1300,6 +882,10 @@ export default function RegistrationsPage() {
         return 'text-error bg-error/10'
       case 'suspended':
         return 'text-warning bg-warning/10'
+      case 'waiting':
+        return 'text-orange-600 bg-orange-100'
+      case 'pending':
+        return 'text-yellow-600 bg-yellow-100'
       case 'no_service':
         return 'text-blue-600 bg-blue-100'
       default:
@@ -1315,44 +901,15 @@ export default function RegistrationsPage() {
         return 'Tidak Aktif'
       case 'suspended':
         return 'Ditangguh'
+      case 'waiting':
+        return 'Menunggu Review'
+      case 'pending':
+        return 'Menunggu Instalasi'
       case 'no_service':
         return 'Belum Ada Layanan'
       default:
         return status
     }
-  }
-
-  const resetForm = () => {
-    // Use default values from settings
-    setFormData({
-      customer_id: '',
-      name: '',
-      phone: '',
-      nik: '',
-      address: '',
-      installation_address: '',
-      latitude: undefined,
-      longitude: undefined,
-      package_id: getDefaultValue('package_id', ''),
-      pppoe_username: '',
-      pppoe_password: getDefaultValue('pppoe_password', '1234567'),
-      billing_type: getDefaultValue('billing_type', 'postpaid'),
-      siklus: getDefaultValue('billing_cycle', 'profile'),
-      router: 'all',
-      region: '',
-      status: 'inactive',
-      odp_id: '',
-      odp_name: '',
-      odp_address: '',
-      odp_port: '',
-      cable_length: undefined
-    })
-    setSelectedCustomer(null)
-
-    // Reset editing state
-    setIsEditing(false)
-    setEditingCustomerId(null)
-    editingCustomerData.current = null
   }
 
   if (loading) {
@@ -1597,10 +1154,11 @@ export default function RegistrationsPage() {
                 className="rounded-md border border-input bg-background px-3 py-2 text-sm"
               >
                 <option value="all">Semua Status</option>
+                <option value="waiting">Menunggu Review</option>
+                <option value="pending">Menunggu Instalasi</option>
                 <option value="active">Aktif</option>
                 <option value="inactive">Tidak Aktif</option>
                 <option value="suspended">Ditangguh</option>
-                <option value="pending">Menunggu (Pending)</option>
               </select>
               <Button
                 variant="outline"
@@ -1746,8 +1304,8 @@ export default function RegistrationsPage() {
               <h4 className="font-medium mb-3">Pilih Router Baru</h4>
               <div className="flex items-center gap-3">
                 <select
-                  value={formData.router || ''}
-                  onChange={(e) => setFormData(prev => ({ ...prev, router: e.target.value }))}
+                  value={bulkFormData.router || ''}
+                  onChange={(e) => setBulkFormData(prev => ({ ...prev, router: e.target.value }))}
                   className="px-3 py-2 border rounded-md bg-background"
                   disabled={submittingBulk}
                 >
@@ -1760,8 +1318,8 @@ export default function RegistrationsPage() {
                 </select>
                 <Button
                   size="sm"
-                  onClick={() => handleBulkChangeRouter(formData.router || '')}
-                  disabled={submittingBulk || !formData.router}
+                  onClick={() => handleBulkChangeRouter(bulkFormData.router || '')}
+                  disabled={submittingBulk || !bulkFormData.router}
                 >
                   {submittingBulk ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
                   Terapkan
@@ -1783,8 +1341,8 @@ export default function RegistrationsPage() {
               <h4 className="font-medium mb-3">Ubah Status Pelanggan</h4>
               <div className="flex items-center gap-3">
                 <select
-                  value={formData.status || ''}
-                  onChange={(e) => setFormData(prev => ({ ...prev, status: e.target.value }))}
+                  value={bulkFormData.status || ''}
+                  onChange={(e) => setBulkFormData(prev => ({ ...prev, status: e.target.value }))}
                   className="px-3 py-2 border rounded-md bg-background"
                   disabled={submittingBulk}
                 >
@@ -1795,8 +1353,8 @@ export default function RegistrationsPage() {
                 </select>
                 <Button
                   size="sm"
-                  onClick={() => handleBulkChangeStatus(formData.status || '')}
-                  disabled={submittingBulk || !formData.status}
+                  onClick={() => handleBulkChangeStatus(bulkFormData.status || '')}
+                  disabled={submittingBulk || !bulkFormData.status}
                 >
                   {submittingBulk ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
                   Terapkan
@@ -1818,8 +1376,8 @@ export default function RegistrationsPage() {
               <h4 className="font-medium mb-3">Pilih Wilayah Baru</h4>
               <div className="flex items-center gap-3">
                 <select
-                  value={formData.region || ''}
-                  onChange={(e) => setFormData(prev => ({ ...prev, region: e.target.value }))}
+                  value={bulkFormData.region || ''}
+                  onChange={(e) => setBulkFormData(prev => ({ ...prev, region: e.target.value }))}
                   className="px-3 py-2 border rounded-md bg-background"
                   disabled={submittingBulk}
                 >
@@ -1832,8 +1390,8 @@ export default function RegistrationsPage() {
                 </select>
                 <Button
                   size="sm"
-                  onClick={() => handleBulkChangeRegion(formData.region || '')}
-                  disabled={submittingBulk || !formData.region}
+                  onClick={() => handleBulkChangeRegion(bulkFormData.region || '')}
+                  disabled={submittingBulk || !bulkFormData.region}
                 >
                   {submittingBulk ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
                   Terapkan
@@ -1855,8 +1413,8 @@ export default function RegistrationsPage() {
               <h4 className="font-medium mb-3">Pilih Siklus Tagihan Baru</h4>
               <div className="flex items-center gap-3">
                 <select
-                  value={formData.siklus || ''}
-                  onChange={(e) => setFormData(prev => ({ ...prev, siklus: e.target.value }))}
+                  value={bulkFormData.siklus || ''}
+                  onChange={(e) => setBulkFormData(prev => ({ ...prev, siklus: e.target.value }))}
                   className="px-3 py-2 border rounded-md bg-background"
                   disabled={submittingBulk}
                 >
@@ -1867,8 +1425,8 @@ export default function RegistrationsPage() {
                 </select>
                 <Button
                   size="sm"
-                  onClick={() => handleBulkChangeCycle(formData.siklus || '')}
-                  disabled={submittingBulk || !formData.siklus}
+                  onClick={() => handleBulkChangeCycle(bulkFormData.siklus || '')}
+                  disabled={submittingBulk || !bulkFormData.siklus}
                 >
                   {submittingBulk ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
                   Terapkan
@@ -2031,12 +1589,10 @@ export default function RegistrationsPage() {
               <div>
                 <h3 className="text-lg font-semibold text-foreground mb-4">Informasi Dasar</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {selectedCustomer.status !== 'pending' && (
-                    <div>
-                      <p className="text-sm text-muted-foreground">ID Pelanggan</p>
-                      <p className="font-medium text-foreground font-mono mt-1">{selectedCustomer.customer_id || '-'}</p>
-                    </div>
-                  )}
+                  <div>
+                    <p className="text-sm text-muted-foreground">ID Pelanggan</p>
+                    <p className="font-medium text-foreground font-mono mt-1">{selectedCustomer.customer_id || '-'}</p>
+                  </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Nama Lengkap</p>
                     <p className="font-medium text-foreground">{selectedCustomer.name}</p>
@@ -2082,12 +1638,10 @@ export default function RegistrationsPage() {
               <div>
                 <h3 className="text-lg font-semibold text-foreground mb-4">Informasi Layanan</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {selectedCustomer.status !== 'pending' && (
-                    <div>
-                      <p className="text-sm text-muted-foreground">Nomor Layanan</p>
-                      <p className="font-medium text-foreground font-mono text-blue-600 mt-1">{selectedCustomer.service_number || '-'}</p>
-                    </div>
-                  )}
+                  <div>
+                    <p className="text-sm text-muted-foreground">Nomor Layanan</p>
+                    <p className="font-medium text-foreground font-mono text-blue-600 mt-1">{selectedCustomer.service_number || '-'}</p>
+                  </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Paket</p>
                     <p className="font-medium text-foreground mt-1">{selectedCustomer.package_name || '-'}</p>
@@ -2096,18 +1650,14 @@ export default function RegistrationsPage() {
                     <p className="text-sm text-muted-foreground">Router</p>
                     <p className="font-medium text-foreground">{getRouterText(selectedCustomer.router, routers)}</p>
                   </div>
-                  {selectedCustomer.status !== 'pending' && (
-                    <>
-                      <div>
-                        <p className="text-sm text-muted-foreground">Username PPPoE</p>
-                        <p className="font-medium text-foreground font-mono text-sm">{selectedCustomer.pppoe_username || '-'}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-muted-foreground">Password PPPoE</p>
-                        <p className="font-medium text-foreground font-mono text-sm">{selectedCustomer.pppoe_password || '-'}</p>
-                      </div>
-                    </>
-                  )}
+                  <div>
+                    <p className="text-sm text-muted-foreground">Username PPPoE</p>
+                    <p className="font-medium text-foreground font-mono text-sm">{selectedCustomer.pppoe_username || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Password PPPoE</p>
+                    <p className="font-medium text-foreground font-mono text-sm">{selectedCustomer.pppoe_password || '-'}</p>
+                  </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Panjang Kabel</p>
                     <p className="font-medium text-foreground">{selectedCustomer.cable_length ? `${selectedCustomer.cable_length} Meter` : '-'}</p>
@@ -2209,44 +1759,24 @@ export default function RegistrationsPage() {
                 <Button
                   variant="destructive"
                   onClick={() => selectedCustomer && handleDeleteCustomer(selectedCustomer.id)}
-                  disabled={submitting}
+                  disabled={submittingBulk}
                   className="flex items-center gap-2"
                 >
                   <Trash2 className="h-4 w-4" />
-                  Hapus
+                  Tolak
                 </Button>
               </div>
               <div className="flex gap-2">
-                {selectedCustomer.status === 'pending' ? (
-                  <>
-                    <Button
-                      variant="outline"
-                      onClick={() => handleBulkChangeStatus('waiting_list')} // Need to check if single update works
-                      disabled={submitting}
-                      className="flex items-center gap-2 text-yellow-600 border-yellow-200 hover:bg-yellow-50 dark:hover:bg-yellow-900/20"
-                    >
-                      Daftar Tunggu
-                    </Button>
-                    <Button
-                      onClick={() => selectedCustomer && handleEditCustomer(selectedCustomer)} // This will open the edit/process form
-                      disabled={submitting}
-                      className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white"
-                    >
-                      <Check className="h-4 w-4" />
-                      Setujui (Proses)
-                    </Button>
-                  </>
-                ) : (
+                {selectedCustomer.status === 'waiting' ? (
                   <Button
-                    variant="outline"
-                    onClick={() => selectedCustomer && handleEditCustomer(selectedCustomer)}
-                    disabled={submitting}
-                    className="flex items-center gap-2"
+                    onClick={() => selectedCustomer && handleProcessCustomer(selectedCustomer.id)}
+                    disabled={submittingBulk}
+                    className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white"
                   >
-                    <Edit className="h-4 w-4" />
-                    Edit
+                    <Check className="h-4 w-4" />
+                    Setujui (Proses)
                   </Button>
-                )}
+                ) : null}
                 <Button variant="outline" onClick={() => setShowDetailModal(false)}>
                   Tutup
                 </Button>
@@ -2256,690 +1786,7 @@ export default function RegistrationsPage() {
         </Dialog>
       )}
 
-      {/* Create Customer Modal */}
-      {showCreateModal && (
-        <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>{isEditing ? 'Edit Pelanggan' : 'Tambah Pelanggan Baru'}</DialogTitle>
-            </DialogHeader>
-
-            {/* Error Display */}
-            {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
-                {error}
-              </div>
-            )}
-
-            <div className="space-y-8 p-1">
-              {/* SECTION: Identity */}
-              <div className="bg-gray-50 dark:bg-gray-800/50 p-6 rounded-lg border border-gray-100 dark:border-gray-800">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center mb-6 border-b pb-4">
-                  <Users className="w-5 h-5 mr-3 text-blue-500" />
-                  Informasi Pelanggan
-                </h3>
-
-                {/* ID & Basic Info */}
-                <div className="space-y-6">
-                  {/* ID & Basic Info Banner */}
-                  {/* Service Number Banner */}
-                  <div className="mb-6">
-                    <div className="text-center bg-green-50 dark:bg-green-900/10 p-4 rounded-lg border border-green-100 dark:border-green-800/20">
-                      <div className="text-[10px] uppercase font-bold text-green-500 mb-1">Nomor Layanan</div>
-                      <div className="text-xl font-bold text-gray-900 dark:text-gray-100 font-mono tracking-wider">
-                        {(formData as any).service_number || '----------'}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Search Trigger for Name */}
-                  <div className="space-y-2">
-                    <Label htmlFor="create-name" className="text-base">Nama Lengkap *</Label>
-                    <div className="relative group">
-                      <Input
-                        id="create-name"
-                        value={formData.name}
-                        readOnly
-                        placeholder="Klik untuk mencari pelanggan..."
-                        className="h-11 text-lg bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700 cursor-pointer pr-10 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                        onClick={() => {
-                          if (!isEditing) {
-                            setSearchModalMode('select') // Select Mode for Service Form
-                            setShowSearchCustomerModal(true)
-                          }
-                        }}
-                      />
-                      {!isEditing && (
-                        <Search className="absolute right-3 top-3 h-5 w-5 text-gray-400 group-hover:text-blue-500 transition-colors pointer-events-none" />
-                      )}
-                    </div>
-                    {!isEditing && <p className="text-xs text-muted-foreground">Klik input diatas atau icon pencarian untuk memilih pelanggan.</p>}
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                      <Label htmlFor="create-phone" className="text-base">Nomor Telepon *</Label>
-                      <Input
-                        id="create-phone"
-                        value={formData.phone}
-                        readOnly
-                        placeholder="Auto-filled"
-                        className="h-11 text-lg bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 focus:bg-white transition-colors"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="create-nik" className="text-base">NIK</Label>
-                      <Input
-                        id="create-nik"
-                        value={formData.nik}
-                        readOnly
-                        placeholder="Auto-filled"
-                        className="h-11 text-lg bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 focus:bg-white transition-colors"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-              {/* SECTION: Location & Map (Read-Only Address) */}
-              <div className="bg-gray-50 dark:bg-gray-800/50 p-6 rounded-lg border border-gray-100 dark:border-gray-800">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center mb-6 border-b pb-4">
-                  <MapPin className="w-5 h-5 mr-3 text-red-500" />
-                  Lokasi & Peta
-                </h3>
-
-                <div className="space-y-6">
-                  <div className="space-y-2">
-                    <Label htmlFor="create-address" className="text-base">Alamat Tagihan (Billing)</Label>
-                    <Textarea
-                      id="create-address"
-                      value={formData.address}
-                      onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                      placeholder="Alamat untuk pengiriman tagihan"
-                      rows={2}
-                      className="text-base resize-y bg-white dark:bg-gray-950 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="create-installation-address" className="text-base">Alamat Instalasi (Pemasangan)</Label>
-                    <Textarea
-                      id="create-installation-address"
-                      value={formData.installation_address}
-                      onChange={(e) => setFormData({ ...formData, installation_address: e.target.value })}
-                      placeholder="Alamat lokasi pemasangan layanan (biarkan kosong jika sama dengan alamat tagihan)"
-                      rows={2}
-                      className="text-base resize-y bg-white dark:bg-gray-950 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100"
-                    />
-                    <p className="text-xs text-muted-foreground">* Kosongkan jika sama dengan alamat tagihan</p>
-                  </div>
-
-
-                  <div className="space-y-2">
-                    <Label className="text-base mb-2 block">Titik Koordinat (Map)</Label>
-                    <div className="h-[400px] w-full rounded-lg overflow-hidden border-2 border-gray-200 dark:border-gray-700 shadow-sm">
-                      <CoordinateMap
-                        latitude={formData.latitude}
-                        longitude={formData.longitude}
-                        address={formData.address}
-                        onCoordinatesChange={(lat, lng) => {
-                          console.log('🗺️ CoordinateMap onChange:', { lat, lng, latType: typeof lat, lngType: typeof lng })
-                          setFormData(prev => ({ ...prev, latitude: lat, longitude: lng }))
-                        }}
-                      />
-                    </div>
-                    <p className="text-sm text-muted-foreground mt-2">
-                      * Geser pin merah pada peta untuk menentukan lokasi yang lebih akurat.
-                    </p>
-
-                    <div className="grid grid-cols-2 gap-4 mt-4">
-                      <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">Latitude</Label>
-                        <Input
-                          value={formData.latitude || ''}
-                          readOnly
-                          className="bg-gray-50 dark:bg-gray-800/50 font-mono text-xs h-9"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">Longitude</Label>
-                        <Input
-                          value={formData.longitude || ''}
-                          readOnly
-                          className="bg-gray-50 dark:bg-gray-800/50 font-mono text-xs h-9"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-
-              {/* SECTION: Technical (ODP) */}
-              <div className="bg-gray-50 dark:bg-gray-800/50 p-6 rounded-lg border border-gray-100 dark:border-gray-800">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center mb-6 border-b pb-4">
-                  <Settings className="w-5 h-5 mr-3 text-orange-500" />
-                  Data Teknis (ODP)
-                </h3>
-
-                <div className="grid grid-cols-1 gap-6">
-                  <div className="space-y-2">
-                    <Label htmlFor="create-odp" className="text-base">Optical Distribution Point (ODP)</Label>
-                    <select
-                      id="create-odp"
-                      value={formData.odp_id || ''}
-                      onChange={(e) => {
-                        const selectedODP = odps.find(odp => odp.id.toString() === e.target.value)
-                        setFormData({
-                          ...formData,
-                          odp_id: e.target.value,
-                          odp_name: selectedODP?.name || '',
-                          odp_address: selectedODP?.address || ''
-                        })
-                      }}
-                      className="block w-full px-3 py-3 h-12 border border-gray-300 dark:border-gray-600 rounded-md text-base bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      disabled={fetchingODPs}
-                    >
-                      <option value="">-- Pilih ODP --</option>
-                      {Array.isArray(odps) && odps.map((odp) => (
-                        <option key={odp.id} value={odp.id}>
-                          {odp.name} ({odp.available_ports} ports) - {odp.address}
-                        </option>
-                      ))}
-                    </select>
-                    {!fetchingODPs && odps.length === 0 && (
-                      <span className="text-sm text-red-500">Tidak ada ODP tersedia. Tambah ODP terlebih dahulu!</span>
-                    )}
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="create-cable-length" className="text-base">Panjang Kabel (Meter)</Label>
-                    <Input
-                      id="create-cable-length"
-                      type="number"
-                      value={formData.cable_length || ''}
-                      onChange={(e) => setFormData({ ...formData, cable_length: e.target.value ? parseInt(e.target.value) : undefined })}
-                      placeholder="Contoh: 150"
-                      className="h-11 text-lg"
-                    />
-                    <p className="text-xs text-muted-foreground">* Panjang kabel dari ODP ke lokasi pelanggan</p>
-                  </div>
-
-                  {formData.odp_id && (
-                    <div className="space-y-2">
-                      <Label htmlFor="create-odp-port" className="text-base">Port ODP</Label>
-                      <Input
-                        id="create-odp-port"
-                        value={formData.odp_port || ''}
-                        onChange={(e) => setFormData({ ...formData, odp_port: e.target.value })}
-                        placeholder="Contoh: 1"
-                        className="h-11 text-lg"
-                      />
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* SECTION: Services */}
-              <div className="bg-gray-50 dark:bg-gray-800/50 p-6 rounded-lg border border-gray-100 dark:border-gray-800">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center mb-6 border-b pb-4">
-                  <Cable className="w-5 h-5 mr-3 text-green-500" />
-                  Layanan & Perangkat
-                </h3>
-
-                <div className="space-y-6">
-                  <div className="space-y-2">
-                    <Label htmlFor="create-region" className="text-base font-semibold text-orange-600 dark:text-orange-400">Wilayah / Area Layanan *</Label>
-                    <select
-                      id="create-region"
-                      value={formData.region}
-                      onChange={(e) => setFormData({ ...formData, region: e.target.value })}
-                      className="block w-full px-3 py-3 h-12 border-2 border-orange-200 dark:border-orange-900/30 rounded-md text-base bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                    >
-                      <option value="">-- Pilih Wilayah Layanan --</option>
-                      {Array.isArray(regions) && regions.map((region) => (
-                        <option key={region.id} value={region.id}>
-                          {region.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                      <Label htmlFor="create-package" className="text-base">Paket Internet</Label>
-                      <select
-                        id="create-package"
-                        value={formData.package_id}
-                        onChange={(e) => setFormData({ ...formData, package_id: e.target.value })}
-                        className="block w-full px-3 py-3 h-12 border border-gray-300 dark:border-gray-600 rounded-md text-base bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      >
-                        <option value="">-- Pilih Paket --</option>
-                        {Array.isArray(packages) && packages.filter(pkg => pkg.isActive).map((pkg) => (
-                          <option key={pkg.id} value={pkg.id}>
-                            {pkg.name} ({pkg.speed})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="create-router" className="text-base">Router (NAS)</Label>
-                      <select
-                        id="create-router"
-                        value={formData.router}
-                        onChange={(e) => setFormData({ ...formData, router: e.target.value })}
-                        className="block w-full px-3 py-3 h-12 border border-gray-300 dark:border-gray-600 rounded-md text-base bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      >
-                        <option value="all">All Router (Bebas)</option>
-                        {Array.isArray(routers) && routers.filter(r => r.id !== 'all').map((router) => (
-                          <option key={router.id} value={router.shortname}>
-                            {router.shortname}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                      <Label htmlFor="create-pppoe-user" className="text-base">PPPoE Username</Label>
-                      <Input
-                        id="create-pppoe-user"
-                        value={formData.pppoe_username}
-                        onChange={(e) => setFormData(prev => ({ ...prev, pppoe_username: e.target.value }))}
-                        placeholder="Kosong = Auto (Service Number)"
-                        className="h-11 font-mono text-base bg-white dark:bg-gray-950 dark:text-gray-100 dark:border-gray-700"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="create-pppoe-pass" className="text-base">PPPoE Password</Label>
-                      <Input
-                        id="create-pppoe-pass"
-                        value={formData.pppoe_password}
-                        onChange={(e) => setFormData(prev => ({ ...prev, pppoe_password: e.target.value }))}
-                        placeholder="Password"
-                        className="h-11 font-mono text-base bg-white dark:bg-gray-950 dark:text-gray-100 dark:border-gray-700"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* SECTION: Billing */}
-              <div className="bg-gray-50 dark:bg-gray-800/50 p-6 rounded-lg border border-gray-100 dark:border-gray-800">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center mb-6 border-b pb-4">
-                  <CreditCard className="w-5 h-5 mr-3 text-purple-500" />
-                  Tagihan
-                </h3>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                  <div className="space-y-2">
-                    <Label className="text-base">Jenis Tagihan</Label>
-                    <select
-                      value={formData.billing_type}
-                      onChange={(e) => setFormData({ ...formData, billing_type: e.target.value })}
-                      className="block w-full px-3 py-3 h-12 border border-gray-300 dark:border-gray-600 rounded-md text-base bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    >
-                      <option value="prepaid">Prabayar</option>
-                      <option value="postpaid">Pascabayar</option>
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-base">Siklus Billing</Label>
-                    <select
-                      value={formData.siklus}
-                      onChange={(e) => setFormData({ ...formData, siklus: e.target.value })}
-                      className="block w-full px-3 py-3 h-12 border border-gray-300 dark:border-gray-600 rounded-md text-base bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    >
-                      <option value="profile">Profile (Sesuai Masa Aktif)</option>
-                      <option value="tetap">Tetap (Tanggal Sama Tiap Bulan)</option>
-                      <option value="bulan">Bulanan (Jatuh Tempo Tgl 20)</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* Compact Billing Summary */}
-                {getSelectedPackage() && (
-                  <div className={`p-4 rounded-md border ${formData.billing_type === 'prepaid'
-                    ? 'bg-blue-50 border-blue-100 text-blue-700 dark:bg-blue-900/30 dark:border-blue-800 dark:text-blue-200'
-                    : 'bg-green-50 border-green-100 text-green-700 dark:bg-green-900/30 dark:border-green-800 dark:text-green-200'
-                    }`}>
-                    <div className="flex justify-between items-center text-lg font-bold mb-2">
-                      <span>Total Tagihan Awal:</span>
-                      <span>Rp {calculateTotalBillingSync(getSelectedPackage()?.price, getSelectedPackage()?.id?.toString(), formData.billing_type).toLocaleString('id-ID')}</span>
-                    </div>
-                    <div className="flex justify-between items-center text-sm opacity-80">
-                      <span>Harga Paket Bulanan:</span>
-                      <span>Rp {getSelectedPackage()?.price?.toLocaleString('id-ID')}</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowCreateModal(false)}>
-                Batal
-              </Button>
-              <Button
-                disabled={submitting}
-                onClick={handleCreateCustomer}
-              >
-                {submitting ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Menyimpan...
-                  </>
-                ) : (
-                  <>
-                    <Save className="mr-2 h-4 w-4" />
-                    Simpan
-                  </>
-                )}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
-
-      {/* Service Modal */}
-
-
-
-
       {/* Region Management Modal */}
-
-      {/* Search Customer Modal (Table View) */}
-      <Dialog open={showSearchCustomerModal} onOpenChange={setShowSearchCustomerModal}>
-        <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden flex flex-col">
-          <DialogHeader>
-            <div className="flex justify-between items-center pr-8">
-              <DialogTitle>
-                {searchModalMode === 'view' ? 'Data Pelanggan Utama' : 'Pilih Pelanggan untuk Layanan'}
-              </DialogTitle>
-              {searchModalMode === 'view' && (
-                <Button
-                  size="sm"
-                  className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2"
-                  onClick={() => {
-                    setIdentityFormData({ customer_id: '', name: '', phone: '', nik: '', address: '' })
-                    setIsIdentityEditing(false)
-                    setEditingIdentityId(null)
-                    setShowIdentityModal(true)
-                  }}
-                >
-                  <Plus className="h-4 w-4" /> Tambah Pelanggan
-                </Button>
-              )}
-            </div>
-          </DialogHeader>
-
-          <div className="bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200 border-l-4 border-blue-500 dark:border-blue-500 p-4 mb-4 text-sm flex justify-between items-center">
-            <span>Untuk mencari data pelanggan yang sudah ada silahkan ketik nama atau nomor hp pelanggan di kolom pencarian</span>
-            {searchModalMode === 'select' && (
-              <Button
-                size="sm"
-                className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2"
-                onClick={() => {
-                  setIdentityFormData({ customer_id: '', name: '', phone: '', nik: '', address: '' })
-                  setIsIdentityEditing(false)
-                  setEditingIdentityId(null)
-                  setShowIdentityModal(true)
-                }}
-              >
-                <Plus className="h-4 w-4" /> Tambah Pelanggan Baru
-              </Button>
-            )}
-          </div>
-
-          <div className="flex justify-between items-center mb-4">
-            <div className="text-sm font-medium text-muted-foreground italic">
-              * Pilih pelanggan dari daftar di bawah untuk melanjutkan penugasan layanan.
-            </div>
-            <div className="relative w-72">
-              <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search: ID, Nama, Phone"
-                className="pl-9 h-9"
-                value={modalSearchQuery}
-                onChange={(e) => setModalSearchQuery(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div className="flex-1 border rounded-md overflow-hidden">
-            <div className="overflow-x-scroll" style={{ maxWidth: '100%' }}>
-              <table className="text-sm text-left" style={{ minWidth: '1000px', width: '100%' }}>
-                <thead className="bg-gray-100 dark:bg-gray-800 text-xs uppercase font-semibold text-gray-700 dark:text-gray-300">
-                  <tr>
-                    {searchModalMode === 'select' && <th className="px-4 py-3">Pilih</th>}
-                    <th className="px-4 py-3">ID Pel</th>
-                    <th className="px-4 py-3">Pelanggan</th>
-                    <th className="px-4 py-3">Phone</th>
-                    <th className="px-4 py-3">No. Identitas</th>
-                    <th className="px-4 py-3">Alamat</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                  {isModalSearching ? (
-                    <tr>
-                      <td colSpan={searchModalMode === 'select' ? 6 : 5} className="px-4 py-8 text-center text-muted-foreground">
-                        <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
-                        Mencari data...
-                      </td>
-                    </tr>
-                  ) : modalSearchResults.length > 0 ? (
-                    modalSearchResults.map((customer) => (
-                      <tr
-                        key={customer.id}
-                        className={`hover:bg-gray-50 dark:hover:bg-gray-800/50 ${searchModalMode === 'view' ? 'cursor-pointer' : ''}`}
-                        onClick={() => {
-                          if (searchModalMode === 'view') {
-                            handleEditIdentity(customer)
-                          }
-                        }}
-                      >
-                        {searchModalMode === 'select' && (
-                          <td className="px-4 py-3">
-                            <Button
-                              size="sm"
-                              className="bg-red-500 hover:bg-red-600 text-white text-xs h-7"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleSelectCustomerFromSearch(customer)
-                              }}
-                            >
-                              » Pilih
-                            </Button>
-                          </td>
-                        )}
-                        <td className="px-4 py-3 font-mono">{customer.customer_id}</td>
-                        <td className="px-4 py-3 font-medium">
-                          {customer.name}
-                          {searchModalMode === 'view' && <Edit className="inline ml-2 h-3 w-3 text-gray-400" />}
-                        </td>
-                        <td className="px-4 py-3">{customer.phone}</td>
-                        <td className="px-4 py-3">{customer.nik || '-'}</td>
-                        <td className="px-4 py-3 max-w-[200px] truncate" title={customer.billing_address || customer.address || '-'}>{customer.billing_address || customer.address || '-'}</td>
-                      </tr>
-                    ))
-                  ) : modalSearchQuery ? (
-                    <tr>
-                      <td colSpan={searchModalMode === 'select' ? 6 : 5} className="px-4 py-8 text-center text-muted-foreground">
-                        Tidak ada pelanggan yang cocok dengan "{modalSearchQuery}"
-                      </td>
-                    </tr>
-                  ) : (
-                    // Show some default customers if no search query (e.g. recent ones from main list)
-                    // Or just instructions
-                    <tr>
-                      <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground italic">
-                        Ketik ID, Nama, atau Nomor HP untuk mencari...
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Modal Pagination */}
-          <div className="flex items-center justify-between mt-4 px-1 pb-4">
-            <div className="text-xs text-muted-foreground">
-              Total: {modalTotalItems} data
-            </div>
-            <div className="flex items-center border rounded-lg overflow-hidden border-gray-200 dark:border-gray-700">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => handleModalSearch(modalSearchQuery, modalCurrentPage - 1)}
-                disabled={modalCurrentPage === 1}
-                className="rounded-none border-r border-gray-200 dark:border-gray-700 h-8 px-3 text-xs hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
-              >
-                Previous
-              </Button>
-              <div className="h-8 px-3 flex items-center justify-center bg-gray-50 dark:bg-gray-800 text-xs font-medium border-r border-gray-200 dark:border-gray-700">
-                Page {modalCurrentPage}
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => handleModalSearch(modalSearchQuery, modalCurrentPage + 1)}
-                disabled={modalCurrentPage >= Math.ceil(modalTotalItems / 10)}
-                className="rounded-none h-8 px-3 text-xs hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
-              >
-                Next
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={showIdentityModal} onOpenChange={setShowIdentityModal}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>{isIdentityEditing ? 'Edit Data Pelanggan' : 'Tambah Data Pelanggan'}</DialogTitle>
-          </DialogHeader>
-
-          {identityError && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded text-sm">
-              {identityError}
-            </div>
-          )}
-
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="ident-id">ID Pelanggan (Optional)</Label>
-              <Input
-                id="ident-id"
-                value={identityFormData.customer_id}
-                onChange={(e) => setIdentityFormData({ ...identityFormData, customer_id: e.target.value })}
-                placeholder="Opsional: 5 digit (cth: 00001) atau kosongkan untuk Auto"
-                className="font-mono bg-white dark:bg-gray-950"
-              />
-              <p className="text-[10px] text-muted-foreground">Biarkan kosong untuk generate ID otomatis (urutan 5 digit).</p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="ident-name">Nama Lengkap *</Label>
-              <Input
-                id="ident-name"
-                value={identityFormData.name}
-                onChange={(e) => setIdentityFormData({ ...identityFormData, name: e.target.value })}
-                placeholder="Nama Lengkap"
-                className="bg-white dark:bg-gray-950"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="ident-address">Alamat Tagihan (Billing) *</Label>
-              <Textarea
-                id="ident-address"
-                value={identityFormData.address}
-                onChange={(e) => setIdentityFormData({ ...identityFormData, address: e.target.value })}
-                placeholder="Alamat penagihan atau alamat domisili pelanggan"
-                className="bg-white dark:bg-gray-950 min-h-[80px]"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="ident-phone">Nomor HP *</Label>
-                <Input
-                  id="ident-phone"
-                  value={identityFormData.phone}
-                  onChange={(e) => setIdentityFormData({ ...identityFormData, phone: e.target.value })}
-                  placeholder="08..."
-                  className="bg-white dark:bg-gray-950"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="ident-nik">NIK</Label>
-                <Input
-                  id="ident-nik"
-                  value={identityFormData.nik}
-                  onChange={(e) => setIdentityFormData({ ...identityFormData, nik: e.target.value })}
-                  placeholder="NIK (Optional)"
-                  className="bg-white dark:bg-gray-950"
-                />
-              </div>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowIdentityModal(false)}>Batal</Button>
-            <Button
-              className="bg-red-600 hover:bg-red-700 text-white"
-              disabled={submitting}
-              onClick={async () => {
-                if (!identityFormData.name || !identityFormData.phone) {
-                  setIdentityError('Nama dan Nomor HP wajib diisi!')
-                  return
-                }
-
-                setSubmitting(true)
-                setIdentityError(null)
-                try {
-                  // Auto-generate ID if empty: 5 random digits 10000-99999
-                  const finalId = identityFormData.customer_id.trim() || Math.floor(10000 + Math.random() * 90000).toString()
-
-                  const payload = {
-                    ...identityFormData,
-                    customer_id: finalId
-                  }
-
-                  if (isIdentityEditing && editingIdentityId) {
-                    await adminApi.put(`/api/v1/customers/${editingIdentityId}`, payload)
-                  } else {
-                    await adminApi.post('/api/v1/customers/identity', payload)
-                  }
-
-                  // Success
-                  setIdentityFormData({ customer_id: '', name: '', phone: '', nik: '', address: '' })
-                  setShowIdentityModal(false)
-                  fetchCustomers() // Refresh list
-
-                } catch (err: any) {
-                  console.error('Error creating identity:', err);
-                  console.log('Error Response Data:', err.response?.data);
-                  const errorMessage = err.response?.data?.error?.message || err.response?.data?.message || 'Gagal membuat data pelanggan';
-                  setIdentityError(errorMessage)
-                } finally {
-                  setSubmitting(false)
-                }
-              }}
-            >
-              {submitting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Menyimpan...
-                </>
-              ) : (
-                isIdentityEditing ? 'Update Pelanggan' : 'Simpan Pelanggan'
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Region Management Modal */}
       <RegionModal

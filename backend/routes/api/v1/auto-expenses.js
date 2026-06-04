@@ -34,25 +34,19 @@ router.get('/settings', async (req, res) => {
   }
 })
 
-// PUT /api/v1/auto-expenses/settings/:key - Update auto expense setting
+// PUT /api/v1/auto-expenses/settings/:key - Upsert auto expense setting
 router.put('/settings/:key', async (req, res) => {
   try {
     const { key } = req.params
     const { value, isActive } = req.body
 
     const result = await query(`
-      UPDATE auto_expense_settings
-      SET setting_value = $1, is_active = $2, updated_at = CURRENT_TIMESTAMP
-      WHERE setting_key = $3
+      INSERT INTO auto_expense_settings (setting_key, setting_value, is_active, updated_at)
+      VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+      ON CONFLICT (setting_key)
+      DO UPDATE SET setting_value = $2, is_active = $3, updated_at = CURRENT_TIMESTAMP
       RETURNING *
-    `, [value, isActive !== undefined ? isActive : true, key])
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Setting not found'
-      })
-    }
+    `, [key, value || '', isActive !== undefined ? isActive : true])
 
     res.json({
       success: true,
@@ -76,6 +70,7 @@ router.get('/recurring', async (req, res) => {
         re.id,
         re.name,
         re.amount,
+        re.category_id,
         re.frequency,
         re.next_date,
         re.is_active,

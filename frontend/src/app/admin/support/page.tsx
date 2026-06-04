@@ -5,7 +5,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import {
   MessageSquare,
   Search,
@@ -20,7 +23,10 @@ import {
   Tag,
   TrendingUp,
   Users,
-  HeadsetIcon
+  HeadsetIcon,
+  Loader2,
+  Phone,
+  Mail
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { adminApi, handleApiError } from '@/lib/api-clients'
@@ -37,6 +43,9 @@ interface SupportTicket {
   priority: 'low' | 'medium' | 'high' | 'urgent'
   status: 'open' | 'in_progress' | 'pending' | 'resolved' | 'closed'
   assigned_agent?: string
+  assigned_to?: number
+  assigned_to_user?: number
+  technician_name?: string
   created_at: string
   updated_at: string
   last_message?: string
@@ -67,6 +76,20 @@ export default function AdminSupportPage() {
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [refreshKey, setRefreshKey] = useState(0)
 
+  // Create ticket modal states
+  const [showCreateTicketModal, setShowCreateTicketModal] = useState(false)
+  const [creatingTicket, setCreatingTicket] = useState(false)
+  const [newTicket, setNewTicket] = useState({
+    customer_name: '',
+    customer_phone: '',
+    customer_email: '',
+    subject: '',
+    description: '',
+    category: 'general' as 'technical' | 'billing' | 'general' | 'complaint',
+    priority: 'medium' as 'low' | 'medium' | 'high' | 'urgent',
+    initial_message: ''
+  })
+
   useEffect(() => {
     fetchTickets()
     fetchStats()
@@ -96,6 +119,51 @@ export default function AdminSupportPage() {
       setCategories(response.data.data.categories)
     } catch (error: any) {
       console.error('Error fetching stats:', error)
+    }
+  }
+
+  const createTicket = async () => {
+    if (!newTicket.subject || !newTicket.description) {
+      toast.error('❌ Subject dan deskripsi wajib diisi')
+      return
+    }
+
+    setCreatingTicket(true)
+    try {
+      const payload: any = {
+        subject: newTicket.subject,
+        description: newTicket.description,
+        category: newTicket.category,
+        priority: newTicket.priority,
+        initial_message: newTicket.initial_message || newTicket.description
+      }
+
+      if (newTicket.customer_name) payload.customer_name = newTicket.customer_name
+      if (newTicket.customer_phone) payload.customer_phone = newTicket.customer_phone
+      if (newTicket.customer_email) payload.customer_email = newTicket.customer_email
+      if (newTicket.assigned_to) payload.assigned_to_user = parseInt(newTicket.assigned_to)
+
+      const response = await adminApi.post('/api/v1/support/tickets', payload)
+      if (response.data.success) {
+        toast.success('✅ Tiket berhasil dibuat')
+        setShowCreateTicketModal(false)
+        setNewTicket({
+          customer_name: '',
+          customer_phone: '',
+          customer_email: '',
+          subject: '',
+          description: '',
+          category: 'general',
+          priority: 'medium',
+          initial_message: ''
+        })
+        setRefreshKey(prev => prev + 1)
+      }
+    } catch (error: any) {
+      console.error('Error creating ticket:', error)
+      toast.error('❌ ' + handleApiError(error, 'Gagal membuat tiket'))
+    } finally {
+      setCreatingTicket(false)
     }
   }
 
@@ -150,7 +218,7 @@ export default function AdminSupportPage() {
     const date = new Date(dateString)
     return date.toLocaleDateString('id-ID', {
       year: 'numeric',
-      month: 'short',
+      month: '2-digit',
       day: 'numeric',
       hour: '2-digit',
       minute: '2-digit'
@@ -196,12 +264,21 @@ export default function AdminSupportPage() {
           <h1 className="text-3xl font-bold">Support Tiket</h1>
           <p className="text-gray-600">Kelola semua tiket bantuan pelanggan</p>
         </div>
-        <Button
-          onClick={() => setRefreshKey(prev => prev + 1)}
-          variant="outline"
-        >
-          Refresh
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            onClick={() => setShowCreateTicketModal(true)}
+            className="bg-blue-600 hover:bg-blue-700"
+          >
+            <MessageSquare className="h-4 w-4 mr-2" />
+            Buat Tiket Manual
+          </Button>
+          <Button
+            onClick={() => setRefreshKey(prev => prev + 1)}
+            variant="outline"
+          >
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Stats Cards */}
@@ -359,6 +436,11 @@ export default function AdminSupportPage() {
                         </span>
                         <span>{formatDate(ticket.created_at)}</span>
                         {getCategoryBadge(ticket.category)}
+                        {ticket.assigned_to_user && (
+                          <Badge variant="outline" className="text-purple-600 dark:text-purple-400">
+                            👤 {ticket.technician_name || 'Teknisi'}
+                          </Badge>
+                        )}
                       </div>
 
                       {ticket.last_message && (
@@ -411,6 +493,161 @@ export default function AdminSupportPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Create Ticket Modal */}
+      <Dialog open={showCreateTicketModal} onOpenChange={setShowCreateTicketModal}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Buat Tiket Manual</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            {/* Customer Info */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="customerName">Nama Pelanggan</Label>
+                <Input
+                  id="customerName"
+                  placeholder="Nama pelanggan"
+                  value={newTicket.customer_name}
+                  onChange={(e) => setNewTicket({ ...newTicket, customer_name: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="customerPhone">
+                  <Phone className="h-3 w-3 inline mr-1" />
+                  No. Telepon
+                </Label>
+                <Input
+                  id="customerPhone"
+                  placeholder="08xxxxxxxxxx"
+                  value={newTicket.customer_phone}
+                  onChange={(e) => setNewTicket({ ...newTicket, customer_phone: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="customerEmail">
+                <Mail className="h-3 w-3 inline mr-1" />
+                Email (Opsional)
+              </Label>
+              <Input
+                id="customerEmail"
+                type="email"
+                placeholder="email@example.com"
+                value={newTicket.customer_email}
+                onChange={(e) => setNewTicket({ ...newTicket, customer_email: e.target.value })}
+              />
+            </div>
+
+            <div className="border-t pt-4"></div>
+
+            {/* Ticket Details */}
+            <div className="space-y-2">
+              <Label htmlFor="subject">Subject *</Label>
+              <Input
+                id="subject"
+                placeholder="Masalah yang dilaporkan"
+                value={newTicket.subject}
+                onChange={(e) => setNewTicket({ ...newTicket, subject: e.target.value })}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="category">Kategori</Label>
+                <Select value={newTicket.category} onValueChange={(value: any) => setNewTicket({ ...newTicket, category: value })}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="general">Umum</SelectItem>
+                    <SelectItem value="technical">Teknis</SelectItem>
+                    <SelectItem value="billing">Tagihan</SelectItem>
+                    <SelectItem value="complaint">Keluhan</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="priority">Prioritas</Label>
+                <Select value={newTicket.priority} onValueChange={(value: any) => setNewTicket({ ...newTicket, priority: value })}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="low">Rendah</SelectItem>
+                    <SelectItem value="medium">Sedang</SelectItem>
+                    <SelectItem value="high">Tinggi</SelectItem>
+                    <SelectItem value="urgent">Urgent</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="description">Deskripsi *</Label>
+              <Textarea
+                id="description"
+                placeholder="Jelaskan detail masalah..."
+                value={newTicket.description}
+                onChange={(e) => setNewTicket({ ...newTicket, description: e.target.value })}
+                rows={4}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="initialMessage">Pesan Awal</Label>
+              <Textarea
+                id="initialMessage"
+                placeholder="Pesan yang akan dikirim ke pelanggan (opsional)"
+                value={newTicket.initial_message}
+                onChange={(e) => setNewTicket({ ...newTicket, initial_message: e.target.value })}
+                rows={2}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowCreateTicketModal(false)
+                setNewTicket({
+                  customer_name: '',
+                  customer_phone: '',
+                  customer_email: '',
+                  subject: '',
+                  description: '',
+                  category: 'general',
+                  priority: 'medium',
+                  initial_message: ''
+                })
+              }}
+              disabled={creatingTicket}
+            >
+              Batal
+            </Button>
+            <Button
+              onClick={createTicket}
+              disabled={creatingTicket || !newTicket.subject || !newTicket.description}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              {creatingTicket ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Membuat...
+                </>
+              ) : (
+                <>
+                  <MessageSquare className="mr-2 h-4 w-4" />
+                  Buat Tiket
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

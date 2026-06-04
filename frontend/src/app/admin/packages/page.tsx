@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Plus, Edit2, Trash2, Search, Users, DollarSign, Package, Loader2, Settings, Wifi, Zap, Clock, TrendingUp } from 'lucide-react'
 import { adminApi } from '@/lib/api-clients'
 import InstallationFeesDialog from '@/components/InstallationFeesDialog'
+import { useDebounceSearch } from '@/hooks/useDebounceSearch'
 
 interface ServicePackage {
   id: string
@@ -37,7 +38,9 @@ interface ServicePackage {
 export default function PackagesPage() {
   const [packages, setPackages] = useState<ServicePackage[]>([])
   const [loading, setLoading] = useState(true)
-  const [searchTerm, setSearchTerm] = useState('')
+  const { searchQuery: searchTerm, searchInput, setSearchInput, clearSearch, isSearching } = useDebounceSearch({
+    delay: 500,
+  })
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [showEditDialog, setShowEditDialog] = useState(false)
   const [showInstallationFeesDialog, setShowInstallationFeesDialog] = useState(false)
@@ -285,10 +288,13 @@ export default function PackagesPage() {
             <Search className="h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Cari paket..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
               className="max-w-sm"
             />
+            {isSearching && (
+              <Loader2 className="h-4 w-4 text-muted-foreground animate-spin" />
+            )}
           </div>
 
           {loading ? (

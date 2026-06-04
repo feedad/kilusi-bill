@@ -120,8 +120,8 @@ export default function CustomerDefaultSettingsModal({ open, onClose }: Customer
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-card rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="bg-card rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="p-6 border-b">
           <div className="flex items-center justify-between">
@@ -244,17 +244,45 @@ export default function CustomerDefaultSettingsModal({ open, onClose }: Customer
 
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-2">
-                      Hari Invoice Sebelum Suspend
+                      Grace Period (Tenggat Hari Sebelum Suspend)
                     </label>
                     <Input
                       type="number"
-                      value={formData.invoice_days_before_suspend || 3}
-                      onChange={(e) => handleInputChange('invoice_days_before_suspend', parseInt(e.target.value) || 3)}
-                      min={1}
+                      value={formData.grace_period_days ?? 0}
+                      onChange={(e) => handleInputChange('grace_period_days', parseInt(e.target.value) || 0)}
+                      min={0}
                       max={30}
                     />
                     <p className="text-xs text-muted-foreground mt-1">
-                      Invoice terbit X hari sebelum suspend (berlaku untuk semua siklus)
+                      Hari setelah jatuh tempo sebelum pelanggan di-suspend (0 = langsung di hari H jam 23:59)
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      Jam Generate Invoice
+                    </label>
+                    <Input
+                      type="time"
+                      value={formData.invoice_time || '07:00'}
+                      onChange={(e) => handleInputChange('invoice_time', e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Waktu generate invoice otomatis setiap hari
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      Jam Notifikasi Jatuh Tempo
+                    </label>
+                    <Input
+                      type="time"
+                      value={formData.reminder_time || '09:00'}
+                      onChange={(e) => handleInputChange('reminder_time', e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Waktu kirim notifikasi WhatsApp H-1 jatuh tempo
                     </p>
                   </div>
                 </div>
@@ -292,14 +320,14 @@ export default function CustomerDefaultSettingsModal({ open, onClose }: Customer
 
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-2">
-                      Jam Isolir
+                      Jam Suspensi (Isolir)
                     </label>
                     <Input
+                      type="time"
                       value={formData.isolate_time || '23:59'}
                       onChange={(e) => handleInputChange('isolate_time', e.target.value)}
-                      placeholder="23:59"
                     />
-                    <p className="text-xs text-muted-foreground mt-1">Jam otomatis isolir pelanggan</p>
+                    <p className="text-xs text-muted-foreground mt-1">Jam otomatis suspend pelanggan setiap hari</p>
                   </div>
                 </div>
               </TabsContent>

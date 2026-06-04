@@ -241,9 +241,9 @@ export function BroadcastMessageAdmin() {
   }
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString('id-ID', {
+    return new Date(dateString).toLocaleString('en-GB', {
       year: 'numeric',
-      month: 'short',
+      month: '2-digit',
       day: 'numeric',
       hour: '2-digit',
       minute: '2-digit'

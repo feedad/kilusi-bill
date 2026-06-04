@@ -20,7 +20,7 @@ router.post('/login', asyncHandler(async (req, res) => {
 
     // Validation
     if (!username || !password) {
-        return res.sendBadRequest('Username dan password harus diisi', [
+        return res.sendValidationErrors([
             { field: 'username', message: 'Username is required' },
             { field: 'password', message: 'Password is required' }
         ]);
@@ -60,7 +60,7 @@ router.post('/login', asyncHandler(async (req, res) => {
                 { expiresIn: '24h' }
             );
 
-            return res.sendSuccess({
+            const responseData = {
                 user: {
                     id: user.id,
                     username: user.username,
@@ -68,7 +68,10 @@ router.post('/login', asyncHandler(async (req, res) => {
                     role: user.role
                 },
                 token: token
-            }, { action: 'user_login' });
+            };
+            console.log('✅ Login successful for user:', user.username, 'role:', user.role);
+            console.log('✅ Sending response:', JSON.stringify(responseData));
+            return res.sendSuccess(responseData, { action: 'user_login' });
         }
     } catch (dbError) {
         console.log('users table check failed:', dbError.message);
@@ -91,7 +94,7 @@ router.post('/login', asyncHandler(async (req, res) => {
             { expiresIn: '24h' }
         );
 
-        return res.sendSuccess({
+        const responseData = {
             user: {
                 id: 'admin-env',
                 username: username,
@@ -99,7 +102,10 @@ router.post('/login', asyncHandler(async (req, res) => {
                 role: 'superadmin'
             },
             token: token
-        }, { action: 'admin_login' });
+        };
+        console.log('✅ ENV login successful for user:', username, 'role: superadmin');
+        console.log('✅ Sending response:', JSON.stringify(responseData));
+        return res.sendSuccess(responseData, { action: 'admin_login' });
     }
 
     // No valid credentials found
