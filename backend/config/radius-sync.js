@@ -30,12 +30,9 @@ async function syncCustomersToRadius() {
         if (customer.status === 'suspended') {
           // Suspended customer masuk group ISOLIR
           groupName = 'ISOLIR';
-        } else if (!customer.status || customer.status === 'pending' || customer.status === 'waiting') {
-          // No status, pending, waiting → should NOT have active RADIUS
-          groupName = 'ISOLIR';
         } else {
-          // Active customer gunakan package group
-          groupName = customer.package_group || 'default';
+          // Gunakan package group (active, pending, waiting, trial — semua dapet paket)
+          groupName = customer.package_group || 'UPTO-10M';
         }
 
         // Upsert user ke RADIUS dengan group yang sesuai
@@ -175,11 +172,8 @@ async function syncCustomerToRadius(customerData) {
     let groupName;
     if (customerData.status === 'suspended') {
       groupName = 'ISOLIR';
-    } else if (!customerData.status || customerData.status === 'pending' || customerData.status === 'waiting') {
-      // No status, pending or waiting → should NOT have active RADIUS access
-      groupName = 'ISOLIR';
     } else {
-      // Gunakan package_group atau default ke UPTO-10M
+      // Gunakan package_group (active, pending, waiting, trial — semua dapet paket)
       groupName = customerData.package_group || 'UPTO-10M';
     }
 

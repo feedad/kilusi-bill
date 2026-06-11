@@ -76,7 +76,7 @@ services:
       - ./freeradius/config/clients.conf:/opt/etc/raddb/clients.conf:ro
       - freeradius_logs:/var/log/freeradius
     network_mode: host
-    command: freeradius -f -l stdout -X
+    command: freeradius -f -l stdout
     healthcheck:
       test: [ "CMD", "pgrep", "radiusd" ]
       interval: 30s
