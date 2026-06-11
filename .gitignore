@@ -361,3 +361,4 @@ backend/TEST_RESULTS.md
 backend/*.md
 docs/
 docker-compose.cloudflared.yml
+frontend-dev/
