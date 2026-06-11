@@ -4,7 +4,7 @@
   "description": "Kilusi Bill Frontend - Next.js Application",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 8080",
+    "dev": "next dev -p 8081 -H 0.0.0.0",
     "build": "next build",
     "start": "next start -p 8080",
     "lint": "next lint",
