@@ -57,16 +57,17 @@ class InvoiceScheduler {
         }, { scheduled: true, timezone: "Asia/Jakarta" });
         logger.info('RADIUS orphan cleanup scheduler initialized - runs daily at 03:00');
 
-        // 4b. RADIUS stale session cleanup every 1 hour
+        // 4b. RADIUS session recovery every 1 hour
+        // Reopens sessions stopped by FreeRADIUS restart (no CoA, no disconnect)
         cron.schedule('0 * * * *', async () => {
             try {
                 const radiusSync = require('./radius-sync');
-                await radiusSync.cleanupStaleSessions();
+                await radiusSync.reopenStoppedSessions();
             } catch (error) {
-                logger.error('Error in RADIUS stale session cleanup:', error);
+                logger.error('Error in RADIUS session recovery:', error);
             }
         }, { scheduled: true, timezone: "Asia/Jakarta" });
-        logger.info('RADIUS stale session cleanup scheduler initialized - runs every hour');
+        logger.info('RADIUS session recovery scheduler initialized - runs every hour');
 
         // 5. Voucher usage check every 1 minute
         cron.schedule('* * * * *', async () => {

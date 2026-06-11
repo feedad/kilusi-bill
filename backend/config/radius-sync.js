@@ -630,28 +630,51 @@ async function createVoucherRadiusEntries(voucher) {
 }
 
 /**
- * Cleanup stale RADIUS accounting sessions
- * Closes sessions that haven't received an interim update in 30+ minutes.
- * This happens after FreeRADIUS restart — NAS keeps sending updates but
- * they fail to UPDATE radacct (0 rows matched), causing stale entries.
- * Closing them allows the next NAS update to create a fresh session.
+ * Reopen RADIUS accounting sessions that were stopped due to FreeRADIUS restart.
+ * When FreeRADIUS restarts, NAS devices send Accounting-Stop for all active sessions.
+ * But the actual PPPoE sessions on the NAS remain active. The NAS never sends
+ * a new Accounting-Start for the same PPPoE session, so customers appear offline
+ * in radacct even though they're still connected on MikroTik.
+ *
+ * This function reopens the LAST stopped session per customer (within 2 days),
+ * setting acctstoptime = NULL so the NAS's incoming interim updates can once
+ * again match and update the row.
+ *
+ * SAFETY: Only reopens sessions stopped recently (<2 days) for customers with
+ *         active service status and no existing active radacct entry.
  */
-async function cleanupStaleSessions() {
+async function reopenStoppedSessions() {
   const { query } = require('./database');
   try {
     const result = await query(`
-      UPDATE radacct
-      SET acctstoptime = NOW(),
-          acctterminatecause = 'Stale-Session-Cleared'
-      WHERE acctstoptime IS NULL
-        AND acctupdatetime < NOW() - INTERVAL '30 minutes'
+      UPDATE radacct r
+      SET acctstoptime = NULL,
+          acctupdatetime = NOW(),
+          acctterminatecause = 'Reopened-After-Restart'
+      FROM (
+        SELECT DISTINCT ON (r2.username)
+          r2.radacctid
+        FROM radacct r2
+        JOIN technical_details td ON td.pppoe_username = r2.username
+        JOIN services s ON s.id = td.service_id
+        WHERE s.status = 'active'
+          AND r2.acctstoptime IS NOT NULL
+          AND r2.acctstoptime > NOW() - INTERVAL '2 days'
+          AND NOT EXISTS (
+            SELECT 1 FROM radacct r3
+            WHERE r3.username = r2.username
+              AND r3.acctstoptime IS NULL
+          )
+        ORDER BY r2.username, r2.acctstarttime DESC
+      ) latest
+      WHERE r.radacctid = latest.radacctid
     `);
     const count = result?.rowCount || 0;
-    logger.info(`🧹 Cleaned ${count} stale RADIUS session(s)`);
-    return { success: true, cleaned: count };
+    logger.info(`🔄 Reopened ${count} RADIUS session(s) stopped by restart`);
+    return { success: true, reopened: count };
   } catch (error) {
-    logger.error(`❌ Failed to clean stale RADIUS sessions: ${error.message}`);
-    return { success: false, cleaned: 0, error: error.message };
+    logger.error(`❌ Failed to reopen RADIUS sessions: ${error.message}`);
+    return { success: false, reopened: 0, error: error.message };
   }
 }
 
@@ -665,7 +688,7 @@ module.exports = {
   syncPackagesToRadius,
   syncPackageToRadius,
   removePackageFromRadius,
-  cleanupStaleSessions,
+  reopenStoppedSessions,
   // Voucher support
   addVoucherRadCheck,
   addVoucherRadReply,

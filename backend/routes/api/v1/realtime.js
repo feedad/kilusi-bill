@@ -385,7 +385,6 @@ router.get('/online-customers', async (req, res) => {
                     acctupdatetime as last_update
                 FROM radacct
                 WHERE acctstoptime IS NULL
-                  AND acctupdatetime > NOW() - INTERVAL '30 minutes'
                 ORDER BY username, acctstarttime DESC
             `;
 
@@ -1390,22 +1389,22 @@ router.get('/online-status', asyncHandler(async (req, res) => {
     }
 }));
 
-// POST /api/v1/realtime/radius-sync - Cleanup stale RADIUS sessions
+// POST /api/v1/realtime/radius-sync - Reopen RADIUS sessions stopped by restart
 router.post('/radius-sync', async (req, res) => {
     try {
         const radiusSync = require('../../../config/radius-sync');
-        const result = await radiusSync.cleanupStaleSessions();
+        const result = await radiusSync.reopenStoppedSessions();
 
         res.json({
             success: result.success,
-            cleaned: result.cleaned,
+            reopened: result.reopened,
             message: result.success
-                ? `${result.cleaned} stale session(s) cleaned`
-                : `Cleanup failed: ${result.error}`,
+                ? `${result.reopened} session(s) reopened`
+                : `Reopen failed: ${result.error}`,
             timestamp: new Date()
         });
     } catch (error) {
-        logger.error('Error in RADIUS sync cleanup:', error);
+        logger.error('Error in RADIUS sync reopen:', error);
         res.status(500).json({
             success: false,
             message: `Terjadi kesalahan: ${error.message}`
