@@ -398,6 +398,7 @@ router.use('/support', jwtAuth, require('./support'));
 router.use('/customer-support', require('./customer-support'));
 router.use('/customer-radius', require('./customer-radius'));
 router.use('/customer-traffic', require('./customer-traffic'));
+router.use('/customer-usage', require('./customer-usage'));
 router.use('/simple-customer', require('./simple-customer'));
 router.use('/broadcast', jwtAuth, require('./broadcast')); // Broadcast messages management (admin)
 router.use('/broadcasts', jwtAuth, require('./broadcasts-dynamic')); // Dynamic WhatsApp broadcast with personalized messages

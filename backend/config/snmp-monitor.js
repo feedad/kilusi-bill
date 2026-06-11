@@ -314,6 +314,8 @@ async function getInterfaceTraffic({ host, community, version, port, interfaceNa
       interface: interfaceName,
       in_bps: inComp.rate * 8, // convert to bits per second to match Mikrotik monitor-traffic
       out_bps: outComp.rate * 8,
+      total_in_bytes: Number(res[inOid]) || 0,
+      total_out_bytes: Number(res[outOid]) || 0,
       timestamp: new Date().toISOString(),
     };
 

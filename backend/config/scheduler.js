@@ -69,6 +69,17 @@ class InvoiceScheduler {
         }, { scheduled: true, timezone: "Asia/Jakarta" });
         logger.info('RADIUS session recovery scheduler initialized - runs every hour');
 
+        // 4c. Customer usage poller every 1 minute
+        cron.schedule('* * * * *', async () => {
+            try {
+                const poller = require('./customer-usage-poller');
+                await poller.pollCustomerUsage();
+            } catch (error) {
+                logger.error('Error in customer usage poller:', error);
+            }
+        }, { scheduled: true, timezone: "Asia/Jakarta" });
+        logger.info('Customer usage poller scheduler initialized - runs every minute');
+
         // 5. Voucher usage check every 1 minute
         cron.schedule('* * * * *', async () => {
             try { await this.checkVoucherUsage(); } 
