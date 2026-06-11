@@ -731,7 +731,7 @@ class KilusiOmnichatClient {
      * @param {object} templateData - Template data
      * @returns {Promise<object>} Submit result
      */
-    async sendTemplate(templateData) {
+    async submitTemplate(templateData) {
         const { name, category, language, components } = templateData;
 
         try {

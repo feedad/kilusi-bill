@@ -15,9 +15,52 @@ const parameterPaths = {
     rxPower: [
         'VirtualParameters.RXPower',
         'VirtualParameters.redaman',
-        'InternetGatewayDevice.WANDevice.1.WANPONInterfaceConfig.RXPower'
+        'InternetGatewayDevice.WANDevice.1.WANPONInterfaceConfig.RXPower',
+        'InternetGatewayDevice.WANDevice.1.X_CMCC_EponInterfaceConfig.RXPower',
+        'InternetGatewayDevice.WANDevice.1.X_CMCC_GponInterfaceConfig.RXPower',
+        'InternetGatewayDevice.WANDevice.1.X_CT-COM_EponInterfaceConfig.RXPower',
+        'InternetGatewayDevice.WANDevice.1.X_CT-COM_GponInterfaceConfig.RXPower',
+        'InternetGatewayDevice.WANDevice.1.X_ZTE-COM_WANPONInterfaceConfig.RXPower',
+        'InternetGatewayDevice.WANDevice.1.X_GponInterafceConfig.RXPower',
+        'InternetGatewayDevice.WANDevice.1.X_FH_GponInterfaceConfig.RXPower',
+        'InternetGatewayDevice.WANDevice.1.X_CU_WANEPONInterfaceConfig.OpticalTransceiver.RXPower',
+        'InternetGatewayDevice.X_ALU_OntOpticalParam.RXPower'
+    ],
+    ssid: [
+        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
+        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.SSID'
+    ],
+    password: [
+        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase',
+        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase',
+        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.PreSharedKey.1.KeyPassphrase',
+        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.KeyPassphrase'
+    ],
+    userKonek: [
+        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.TotalAssociations',
+        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.TotalAssociations',
+        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.TotalAssociations'
     ]
 };
+
+// Search parameter tree for a given field name (breadth-first, skips empty)
+function searchParam(obj, targetName, maxDepth = 12) {
+    if (!obj || typeof obj !== 'object') return undefined;
+    const queue = [[obj, 0]];
+    while (queue.length > 0) {
+        const [current, depth] = queue.shift();
+        if (depth > maxDepth) continue;
+        for (const [key, val] of Object.entries(current)) {
+            if (key === targetName && val && typeof val === 'object' && val._value !== undefined && val._value !== '') {
+                return String(val._value);
+            }
+            if (typeof val === 'object' && val !== null && !key.startsWith('_')) {
+                queue.push([val, depth + 1]);
+            }
+        }
+    }
+    return undefined;
+}
 
 function getParameterWithPaths(device, paths) {
     for (const path of paths) {
@@ -26,13 +69,14 @@ function getParameterWithPaths(device, paths) {
         for (const part of parts) {
             if (value && typeof value === 'object' && part in value) {
                 value = value[part];
-                if (value && value._value !== undefined) value = value._value;
+                if (value && typeof value === 'object' && value._value !== undefined) value = value._value;
+                if (value && typeof value === 'object' && value._object !== undefined) { value = undefined; break; }
             } else {
                 value = undefined;
                 break;
             }
         }
-        if (value !== undefined && value !== null && value !== '') return value;
+        if (value !== undefined && value !== null && value !== '' && typeof value === 'string') return value;
     }
     return '-';
 }
@@ -81,17 +125,38 @@ router.get('/devices', asyncHandler(async (req, res) => {
         const model = device.DeviceID?.ProductClass || device.InternetGatewayDevice?.DeviceInfo?.ModelName?._value || '-';
         const lastInform = device._lastInform ? new Date(device._lastInform).toISOString() : new Date().toISOString();
 
-        // Extract PPPoE username
-        const pppoeUsername = getParameterWithPaths(device, parameterPaths.pppUsername);
+        // Extract PPPoE username (try paths, then search tree, then default)
+        const pppoeUsername = (() => {
+            const v = getParameterWithPaths(device, parameterPaths.pppUsername);
+            if (v !== '-') return v;
+            return searchParam(device, 'Username') || '-';
+        })();
 
-        // Extract WiFi info
-        const ssid = device.InternetGatewayDevice?.LANDevice?.['1']?.WLANConfiguration?.['1']?.SSID?._value ||
-            device.VirtualParameters?.SSID || '-';
-        const password = device.InternetGatewayDevice?.LANDevice?.['1']?.WLANConfiguration?.['1']?.KeyPassphrase?._value || '-';
-        const userKonek = device.InternetGatewayDevice?.LANDevice?.['1']?.WLANConfiguration?.['1']?.TotalAssociations?._value || '-';
+        // Extract WiFi info (try paths, then search tree, then default)
+        const ssid = (() => {
+            const v = getParameterWithPaths(device, parameterPaths.ssid);
+            if (v !== '-') return v;
+            return searchParam(device, 'SSID') || '-';
+        })();
+        const password = (() => {
+            const v = getParameterWithPaths(device, parameterPaths.password);
+            if (v !== '-') return v;
+            return searchParam(device, 'KeyPassphrase') || '-';
+        })();
+        const userKonek = (() => {
+            const v = getParameterWithPaths(device, parameterPaths.userKonek);
+            if (v !== '-') return v;
+            const found = searchParam(device, 'TotalAssociations');
+            return found !== undefined ? found : '-';
+        })();
 
-        // Extract RX Power
-        const rxPower = getParameterWithPaths(device, parameterPaths.rxPower);
+        // Extract RX Power (try paths, then search tree, then default)
+        const rxPower = (() => {
+            const v = getParameterWithPaths(device, parameterPaths.rxPower);
+            if (v !== '-') return v;
+            const found = searchParam(device, 'RXPower');
+            return found !== undefined ? found : '-';
+        })();
 
         // Extract tags/nomor pelanggan
         const tags = device._tags || device.Tags || [];
@@ -248,11 +313,11 @@ router.post('/action', asyncHandler(async (req, res) => {
         });
     }
 
-    const validActions = ['reboot', 'resync', 'factoryReset', 'configure'];
+    const validActions = ['reboot', 'resync', 'factoryReset', 'configure', 'diagnostics'];
     if (action && !validActions.includes(action)) {
         validationErrors.push({
             field: 'action',
-            message: 'Invalid action. Valid actions: reboot, resync, factoryReset, configure',
+            message: 'Invalid action. Valid actions: reboot, resync, factoryReset, configure, diagnostics',
             value: action,
             valid_options: validActions
         });
@@ -281,6 +346,37 @@ router.post('/action', asyncHandler(async (req, res) => {
                 // For WiFi configuration updates
                 result = await genieacs.setParameterValues(deviceId, parameters);
                 break;
+            case 'diagnostics': {
+                const deviceInfo = await genieacs.getDevice(deviceId);
+                const lastInform = new Date(deviceInfo.lastInform || Date.now());
+                const now = new Date();
+                const minutesSinceLastInform = Math.round((now - lastInform) / 60000);
+                const isOnline = minutesSinceLastInform < 10;
+                const paramCount = deviceInfo.parameters
+                    ? Object.keys(deviceInfo.parameters).length
+                    : 0;
+
+                let healthScore = 100;
+                if (!isOnline) healthScore -= 30;
+                if (minutesSinceLastInform > 5) healthScore -= 10;
+                if (paramCount < 50) healthScore -= 15;
+                healthScore = Math.max(0, healthScore);
+
+                result = {
+                    status: deviceInfo.connectionState || 'unknown',
+                    isOnline,
+                    lastInform: deviceInfo.lastInform,
+                    minutesSinceLastInform,
+                    parameterCount: paramCount,
+                    manufacturer: deviceInfo.manufacturer || '-',
+                    productClass: deviceInfo.productClass || '-',
+                    serialNumber: deviceInfo.serialNumber || '-',
+                    softwareVersion: deviceInfo.softwareVersion || '-',
+                    hardwareVersion: deviceInfo.hardwareVersion || '-',
+                    healthScore
+                };
+                break;
+            }
         }
 
         const meta = {

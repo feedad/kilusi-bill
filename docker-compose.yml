@@ -104,8 +104,8 @@ services:
       - ./genieacs/genieacs.env
     ports:
       - "7547:7547"
-    volumes:
-      - /root/kilusi-bill/genieacs/cwmp.auth:/opt/genieacs/ext/cwmp.auth:ro
+    # volumes:
+    #   - /root/kilusi-bill/genieacs/cwmp.auth:/opt/genieacs/ext/cwmp.auth:ro
     depends_on:
       - mongo
     networks:

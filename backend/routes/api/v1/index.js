@@ -442,6 +442,9 @@ router.get('/health', (req, res) => {
     });
 });
 
+// Cron catch-up — local network only (MikroTik watchdog)
+router.use('/cron-catchup', require('./cron-catchup'));
+
 // Public Settings Route
 const publicSettingsRouter = require('./public-settings');
 router.use('/public', publicSettingsRouter);

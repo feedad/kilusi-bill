@@ -1951,16 +1951,16 @@ export default function CustomersPage() {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full">
+                <table className="w-full uppercase">
                   <thead>
                     <tr className="border-b text-left">
-                      <th className="px-4 py-3 text-xs font-medium text-muted-foreground uppercase">ID Pelanggan</th>
-                      <th className="px-4 py-3 text-xs font-medium text-muted-foreground uppercase">Nama</th>
-                      <th className="px-4 py-3 text-xs font-medium text-muted-foreground uppercase">No. HP</th>
-                      <th className="px-4 py-3 text-xs font-medium text-muted-foreground uppercase">NIK</th>
-                      <th className="px-4 py-3 text-xs font-medium text-muted-foreground uppercase">Alamat</th>
-                      <th className="px-4 py-3 text-xs font-medium text-muted-foreground uppercase">Tgl Daftar</th>
-                      <th className="px-4 py-3 text-xs font-medium text-muted-foreground uppercase">Aksi</th>
+                      <th className="p-3 font-semibold">Nama</th>
+                      <th className="p-3 font-semibold">Telepon</th>
+                      <th className="p-3 font-semibold">Email</th>
+                      <th className="p-3 font-semibold">Alamat</th>
+                      <th className="p-3 font-semibold">NIK</th>
+                      <th className="p-3 font-semibold">Status</th>
+                      <th className="p-3 font-semibold"></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2282,10 +2282,10 @@ export default function CustomersPage() {
           )}
 
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse">
+            <table className="w-full border-collapse uppercase">
               <thead>
                 <tr className="border-b bg-muted/50">
-                  <th className="text-center p-3 font-semibold text-foreground whitespace-nowrap w-12">
+                  <th className="w-12 p-3 text-left">
                     <input
                       type="checkbox"
                       checked={selectedCustomers.size === customers.length && customers.length > 0}
@@ -2475,7 +2475,7 @@ export default function CustomersPage() {
                           {customer.mitra_name || '-'}
                         </span>
                       </td>
-                      <td className="p-3">
+                      <td className="p-3 normal-case">
                         <span className="text-sm text-foreground font-mono">
                           {customer.pppoe_username || '-'}
                         </span>

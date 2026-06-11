@@ -188,16 +188,33 @@ class ReferralService {
 
         const newTransaction = transactionResult.rows[0]
 
-        // Create accounting transaction for referred customer discount (installation or service)
-        await this.createReferralAccountingTransaction({
-          type: 'installation_discount',
-          amount: 25000, // Fixed installation discount for referred customer
-          description: `Diskon instalasi referral untuk pelanggan ${referredCustomerId}`,
-          referenceType: 'referral_transaction',
-          referenceId: newTransaction.id,
-          customerId: referredCustomerId,
-          referrerId: referral.customer_id
-        })
+        // Create accounting transaction for referred customer discount (installation)
+        const diskonInstalasi = parseFloat(settings.referred_installation_discount_fixed || '0');
+        if (diskonInstalasi > 0) {
+          await this.createReferralAccountingTransaction({
+            type: 'installation_discount',
+            amount: diskonInstalasi,
+            description: `Diskon instalasi referral untuk pelanggan ${referredCustomerId}`,
+            referenceType: 'referral_transaction',
+            referenceId: newTransaction.id,
+            customerId: referredCustomerId,
+            referrerId: referral.customer_id
+          });
+        }
+
+        // Create accounting transaction for referred customer discount (service)
+        const diskonLayanan = parseFloat(settings.referred_service_discount_fixed || '0');
+        if (diskonLayanan > 0) {
+          await this.createReferralAccountingTransaction({
+            type: 'service_discount',
+            amount: diskonLayanan,
+            description: `Diskon layanan referral untuk pelanggan ${referredCustomerId}`,
+            referenceType: 'referral_transaction',
+            referenceId: newTransaction.id,
+            customerId: referredCustomerId,
+            referrerId: referral.customer_id
+          });
+        }
 
         await query('COMMIT')
 
@@ -520,6 +537,8 @@ class ReferralService {
         categoryName = 'Fee Marketing Referral'
       } else if (type === 'installation_discount') {
         categoryName = 'Diskon Instalasi Referral'
+      } else if (type === 'service_discount') {
+        categoryName = 'Diskon Layanan Referral'
       } else {
         logger.warn('Unknown referral transaction type:', type)
         return null

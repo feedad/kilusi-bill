@@ -149,7 +149,7 @@ router.post('/', async (req, res) => {
       `INSERT INTO regions (name, district, regency, province, mitra_id, disabled_at)
        VALUES ($1, $2, $3, $4, $5, NULL)
        RETURNING id, name, district, regency, province, mitra_id, created_at, updated_at, disabled_at`,
-      [name.trim(), district?.trim() || null, regency?.trim() || null, province?.trim() || null, mitra_id || null]
+      [name.trim().toUpperCase(), district?.trim().toUpperCase() || null, regency?.trim().toUpperCase() || null, province?.trim().toUpperCase() || null, mitra_id || null]
     );
 
     res.status(201).json({
@@ -209,7 +209,7 @@ router.put('/:id', async (req, res) => {
        SET name = $1, district = $2, regency = $3, province = $4, mitra_id = $5, updated_at = CURRENT_TIMESTAMP
        WHERE id = $6
        RETURNING id, name, district, regency, province, mitra_id, created_at, updated_at, disabled_at`,
-      [name.trim(), district?.trim() || null, regency?.trim() || null, province?.trim() || null, mitra_id || null, id]
+      [name.trim().toUpperCase(), district?.trim().toUpperCase() || null, regency?.trim().toUpperCase() || null, province?.trim().toUpperCase() || null, mitra_id || null, id]
     );
 
     res.json({

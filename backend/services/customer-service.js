@@ -9,6 +9,17 @@ const MikrotikService = require('./mikrotik-service');
 
 class CustomerService {
     /**
+     * Normalize phone to 62 format
+     */
+    static normalizePhone(phone) {
+        if (!phone) return '';
+        const cleaned = String(phone).replace(/\D/g, '');
+        if (cleaned.startsWith('0')) return '62' + cleaned.slice(1);
+        if (!cleaned.startsWith('62')) return '62' + cleaned;
+        return cleaned;
+    }
+
+    /**
      * Generate customer ID string (YYMMDD + 5-digit id)
      * @param {string|number} customerId 
      * @returns {string}
@@ -54,7 +65,7 @@ class CustomerService {
         let queryParams = [];
 
         if (search) {
-            whereClause += ` AND (c.name ILIKE $${queryParams.length + 1} OR c.phone ILIKE $${queryParams.length + 1} OR c.email ILIKE $${queryParams.length + 1} OR c.pppoe_username ILIKE $${queryParams.length + 1} OR c.id ILIKE $${queryParams.length + 1})`;
+            whereClause += ` AND (c.name ILIKE $${queryParams.length + 1} OR c.phone ILIKE $${queryParams.length + 1} OR c.email ILIKE $${queryParams.length + 1} OR c.pppoe_username ILIKE $${queryParams.length + 1} OR c.service_number ILIKE $${queryParams.length + 1} OR c.nik ILIKE $${queryParams.length + 1} OR c.id ILIKE $${queryParams.length + 1})`;
             queryParams.push(`%${search}%`);
         }
 
@@ -217,7 +228,7 @@ class CustomerService {
         const customerQuery = `
             SELECT
                 c.*, c.id as customer_id, c.device_model as router, c.cable_length_meters as cable_length,
-                p.name as package_name, p.price as package_price, p.speed as package_speed, p.description as package_description,
+                p.name as package_name, p.price as package_price, p.speed as package_speed, p.description as package_description, p.group as package_group,
                 
                 -- ODP Details
                 o.id as odp_id,
@@ -299,20 +310,25 @@ class CustomerService {
      */
     static async createIdentity(data, client = null) {
         const {
-            id, name, phone, email, address, area, region, region_id
+            id, name: rawName, phone, email, address: rawAddress, area: rawArea, region, region_id
         } = data;
 
+        const name = rawName?.toUpperCase() || null;
+        const address = rawAddress?.toUpperCase() || null;
+        const normalizedPhone = this.normalizePhone(phone);
+
         // Validation - Check duplicates (Phone)
-        if (phone) {
-            const existingPhone = await query('SELECT id FROM customers WHERE phone = $1', [phone]);
+        if (normalizedPhone) {
+            const existingPhone = await query('SELECT id FROM customers WHERE phone = $1', [normalizedPhone]);
             if (existingPhone.rows.length > 0) {
                 throw { code: 'RESOURCE_CONFLICT', message: 'Nomor telepon sudah terdaftar', field: 'phone' };
             }
         }
 
         // Validation - Check duplicates (NIK)
-        if (data.nik) {
-            const existingNik = await query('SELECT id FROM customers WHERE nik = $1', [data.nik]);
+        const normalizedNik = data.nik?.toUpperCase() || null;
+        if (normalizedNik) {
+            const existingNik = await query('SELECT id FROM customers WHERE nik = $1', [normalizedNik]);
             if (existingNik.rows.length > 0) {
                 throw { code: 'RESOURCE_CONFLICT', message: 'NIK sudah terdaftar', field: 'nik' };
             }
@@ -334,7 +350,7 @@ class CustomerService {
         }
 
         const finalRegionId = region_id || null;
-        const finalArea = area || region || null;
+        const finalArea = (rawArea || region || null)?.toUpperCase() || null;
 
         const executeInsert = async (dbClient) => {
             const insertCustomerQuery = `
@@ -342,7 +358,7 @@ class CustomerService {
                 VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 RETURNING *
             `;
-            const custRes = await dbClient.query(insertCustomerQuery, [customerId, name, phone, email, address, data.nik || null]);
+            const custRes = await dbClient.query(insertCustomerQuery, [customerId, name, normalizedPhone, email, address, normalizedNik]);
             return custRes.rows[0];
         };
 
@@ -374,13 +390,13 @@ class CustomerService {
             active_date = new Date(), isolir_date, siklus,
             odp_id, odp_port, cable_type, cable_length,
             address, installation_address, latitude, longitude,
-            region_id, area, region, router
+            region_id, area, region, router, pppoe_suffix
         } = data;
 
         // Map 'installation_address' to 'address_installation' for DB, fallback to 'address'
-        const address_installation = installation_address || address || data.address_installation || null;
+        const address_installation = (installation_address || address || data.address_installation || null)?.toUpperCase() || null;
         const finalRegionId = region_id || null;
-        const finalArea = area || region || null;
+        const finalArea = (area || region || null)?.toUpperCase() || null;
         const nasId = router || 'all';
 
         const executeServiceInsert = async (dbClient) => {
@@ -400,6 +416,9 @@ class CustomerService {
             // Auto-generate PPPoE Username if empty
             if (!pppoe_username) {
                 pppoe_username = serviceNumber;
+                if (pppoe_suffix) {
+                    pppoe_username += '@' + pppoe_suffix;
+                }
             }
 
             // Validation - PPPoE Uniqueness check inside execution context
@@ -549,22 +568,28 @@ class CustomerService {
         const current = currentRes.rows[0];
 
         const {
-            name, phone, email, address, installation_address, nik,
+            name: rawName, phone, email, address: rawAddress, installation_address: rawInstAddr, nik: rawNik,
             package_id, pppoe_username, pppoe_password,
-            status, region_id, area, region, router,
+            status, region_id, area: rawArea, region, router,
             active_date, isolir_date, siklus, billing_type,
             odp_code, odp_port, cable_type, cable_length,
             latitude, longitude
         } = data;
 
+        const name = rawName?.toUpperCase() || null;
+        const address = rawAddress?.toUpperCase() || null;
+        const installation_address = rawInstAddr?.toUpperCase() || null;
+        const nik = rawNik?.toUpperCase() || null;
+        const normalizedPhone = this.normalizePhone(phone);
+
         logger.info(`[UpdateCustomer] ID: ${id}, Payload Lat/Long: ${latitude}/${longitude}, Type: ${typeof latitude}/${typeof longitude}`);
 
-        const address_installation = installation_address || address || current.address_installation;
+        const address_installation = installation_address || address || current.address_installation?.toUpperCase();
         const nasId = router || null;
 
         // Validation - duplicate checks
-        if (phone && phone !== current.phone) {
-            const exist = await query('SELECT id FROM customers WHERE phone = $1 AND id != $2', [phone, id]);
+        if (normalizedPhone && normalizedPhone !== current.phone) {
+            const exist = await query('SELECT id FROM customers WHERE phone = $1 AND id != $2', [normalizedPhone, id]);
             if (exist.rows.length > 0) throw { code: 'RESOURCE_CONFLICT', message: 'Nomor telepon sudah terdaftar', field: 'phone' };
         }
         if (pppoe_username && pppoe_username !== current.pppoe_username) {
@@ -573,7 +598,7 @@ class CustomerService {
         }
 
         const finalRegionId = region_id || null;
-        const finalArea = area || region || null;
+        const finalArea = (rawArea || region || null)?.toUpperCase() || null;
 
         const client = await require('../config/database').getPool().connect();
         let updatedCustomer = {};
@@ -591,7 +616,7 @@ class CustomerService {
                     address = COALESCE($5, address),
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = $6
-            `, [name, phone, email, nik, address, id]);
+            `, [name, normalizedPhone, email, nik, address, id]);
             // Note: latitude and longitude are stored in services table, not customers table
 
             // 2. Update Service & Technical
@@ -652,6 +677,27 @@ class CustomerService {
             client.release();
         }
 
+        // RADIUS cleanup + sync when PPPoE username changes
+        const pppoeChanged = pppoe_username && pppoe_password && pppoe_username !== current.pppoe_username;
+        if (pppoeChanged) {
+            try {
+                // 1. Hapus username lama dari RADIUS
+                if (current.pppoe_username) {
+                    await radiusDb.deleteRadiusUser(current.pppoe_username);
+                    await MikrotikService.disconnectRadiusUser(current.pppoe_username);
+                    logger.info(`✅ Old PPPoE removed from RADIUS: ${current.pppoe_username}`);
+                }
+
+                // 2. Sync username baru ke RADIUS
+                const pkgRes = await query('SELECT "group" FROM packages WHERE id = $1', [package_id || current.package_id]);
+                const packageGroup = pkgRes.rows[0]?.group || 'UPTO-10M';
+                await radiusDb.upsertRadiusUser(pppoe_username, pppoe_password, packageGroup);
+                logger.info(`✅ New PPPoE synced to RADIUS: ${pppoe_username} (group: ${packageGroup})`);
+            } catch (err) {
+                logger.error(`❌ RADIUS sync failed on PPPoE change: ${err.message}`);
+            }
+        }
+
         // Radius Comment
         let radiusCommentUpdated = false;
         if (updatedCustomer.pppoe_username && updatedCustomer.name) {
@@ -696,7 +742,8 @@ class CustomerService {
                         const blockingCheck = await query(`
                             SELECT MAX(due_date) as max_due FROM invoices
                             WHERE customer_id = $1 AND status = 'paid' AND due_date > CURRENT_DATE
-                        `, [id]);
+                              AND service_number = $2
+                        `, [id, updatedCustomer.service_number]);
                         const maxDue = blockingCheck.rows[0]?.max_due;
 
                         if (maxDue) {
@@ -710,7 +757,8 @@ class CustomerService {
                                 amount = $1, total_amount = $1,
                                 package_id = $2, updated_at = NOW()
                             WHERE customer_id = $3 AND status IN ('unpaid', 'sent', 'draft')
-                        `, [newPackage.price, package_id, id]);
+                              AND service_number = $4
+                        `, [newPackage.price, package_id, id, updatedCustomer.service_number]);
 
                         invoiceUpdated = updResult.rowCount > 0;
                     }
@@ -746,12 +794,18 @@ class CustomerService {
                         await query(`DELETE FROM radusergroup WHERE username = $1`, [radiusUsername]);
                         await query(`INSERT INTO radusergroup (username, groupname, priority) VALUES ($1, $2, 1)`, [radiusUsername, newPackage.group]);
 
-                        // Update MikroTik profile and kick user
+                        // Kick user via CoA — user reconnects with new RADIUS group
                         const MikrotikService = require('../services/mikrotik-service');
-                        await MikrotikService.setPPPoESecretProfile(radiusUsername, newPackage.pppoe_profile, `Package change to ${newPackage.group}`);
+                        const coaResult = await MikrotikService.disconnectRadiusUser(radiusUsername);
+                        if (coaResult.success) {
+                            logger.info(`Mikrotik: CoA ${coaResult.message} for ${radiusUsername} after package change`);
+                        } else {
+                            logger.warn(`Mikrotik: CoA disconnect failed for ${radiusUsername} after package change: ${coaResult.message}`);
+                            await MikrotikService.removeActiveSession(radiusUsername);
+                        }
 
                         packageUpdated = true;
-                        logger.info(`✅ Package updated for ${radiusUsername}: group=${newPackage.group}, profile=${newPackage.pppoe_profile}, user kicked`);
+                        logger.info(`✅ Package updated for ${radiusUsername}: group=${newPackage.group}, user kicked`);
 
                         // Send WhatsApp notification for package change
                         await this.sendPackageChangeNotification(updatedCustomer, oldPackage, newPackage, billingType, invoiceUpdated);

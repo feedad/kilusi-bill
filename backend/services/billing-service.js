@@ -143,7 +143,7 @@ class BillingService {
     // ==================
     // CUSTOMER INVOICE (Installation / First Invoice)
     // ==================
-    async createCustomerInvoice(customerId, packageId, billingType) {
+    async createCustomerInvoice(customerId, packageId, billingType, serviceNumber) {
         try {
             const pkg = await getOne('SELECT * FROM packages WHERE id = $1', [packageId]);
             if (!pkg) {
@@ -151,9 +151,13 @@ class BillingService {
                 return null;
             }
 
-            const service = await getOne(`
-                SELECT * FROM services WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1
-            `, [customerId]);
+            let svcNum = serviceNumber;
+            if (!svcNum) {
+                const service = await getOne(`
+                    SELECT service_number FROM services WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1
+                `, [customerId]);
+                svcNum = service?.service_number || null;
+            }
 
             // Get installation fee (package-specific first, then billing-type default)
             let installationFee = 0;
@@ -198,7 +202,7 @@ class BillingService {
             `;
             const result = await query(sql, [
                 customerId, packageId, invoiceNumber, amount, amount,
-                dueDate, notes, service?.service_number || null
+                dueDate, notes, svcNum
             ]);
 
             logger.info(`Created installation invoice ${invoiceNumber} for customer ${customerId} (${billingType}, amount=${amount})`);

@@ -73,7 +73,7 @@ export default function UnpaidBillingPage() {
   const [showRapel, setShowRapel] = useState(false)
   const [showPayModal, setShowPayModal] = useState(false)
   const [showDetail, setShowDetail] = useState(false)
-  const [selectedRecord, setSelectedRecord] = useState<BillingRecord | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [payForm, setPayForm] = useState(() => {
     const d = new Date(); const pad = (n: number) => String(n).padStart(2, '0')
@@ -130,19 +130,20 @@ export default function UnpaidBillingPage() {
   }
 
   const handlePay = async () => {
-    if (!selectedRecord) return
+    const sel = records.find(r => r.id === selectedId)
+    if (!sel) return
     setPaying(true)
     try {
       const res = await adminApi.post(`${endpoints.admin.billing}/payments`, {
-        invoice_id: selectedRecord.id,
-        amount: payForm.amount || selectedRecord.amount,
+        invoice_id: sel.id,
+        amount: payForm.amount || sel.amount,
         payment_method: payForm.payment_method,
         payment_date: payForm.payment_date,
         notes: payForm.notes
       })
       if (res.data?.success) {
         toast.success('Pembayaran berhasil dicatat')
-        setShowPayModal(false); setSelectedRecord(null)
+        setShowPayModal(false); setSelectedId(null)
         fetchRecords()
       } else { toast.error(res.data?.message || 'Gagal') }
     } catch (e: any) { toast.error(e.response?.data?.message || 'Gagal') }
@@ -237,7 +238,13 @@ export default function UnpaidBillingPage() {
       <Card>
         <CardContent className="pt-4">
           <div className="flex items-center gap-2 flex-wrap">
-            <Button size="sm" variant="outline" onClick={() => { records.length > 0 && openPayModal(records[0]) }}>
+            <Button size="sm" variant="outline" onClick={() => {
+              if (selectedIds.size === 0) { toast.error('Pilih invoice dulu'); return }
+              if (selectedIds.size > 1) { toast.error('Pilih 1 invoice saja'); return }
+              const id = [...selectedIds][0]; const r = records.find(x => x.id === id)
+              if (!r) return; setSelectedId(id); const d = new Date(); const pad = (n) => String(n).padStart(2, '0')
+              setPayForm({ amount: r.total || r.amount, payment_method: '', payment_date: `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`, notes: '' }); setShowPayModal(true)
+            }}>
               <Wallet className="h-4 w-4 mr-1" />BAYAR
             </Button>
             <Button size="sm" variant="outline" onClick={() => window.print()}>
@@ -298,6 +305,7 @@ export default function UnpaidBillingPage() {
                 <tr><td colSpan={17} className="p-8 text-center text-muted-foreground">Tidak ada invoice</td></tr>
               ) : records.map(record => {
                 const sc = STATUS_CONFIG[record.status] || STATUS_CONFIG.unpaid
+                const isSent = record.sent_at != null
                 return (
                   <tr key={record.id} className="border-b hover:bg-muted/50">
                     <td className="p-3"><input type="checkbox" checked={selectedIds.has(record.id)} onChange={() => toggleSelect(record.id)} /></td>
@@ -316,14 +324,14 @@ export default function UnpaidBillingPage() {
                     <td className="p-3 text-right font-medium text-xs">{formatCurrency(record.amount_with_code || record.total || record.amount)}</td>
                     <td className="p-3 text-xs max-w-[120px] truncate" title={record.notes}>{record.notes?.slice(0, 30) || '-'}</td>
                     <td className="p-3 text-center">
-                      <button onClick={() => handleSendWA(record.id)} className="hover:text-green-500" title="Kirim WA">
-                        <Send className="h-4 w-4 mx-auto" />
+                      <button onClick={() => handleSendWA(record.id)} className={`p-1.5 rounded-md transition-colors ${isSent ? 'text-green-500 hover:bg-green-50' : 'text-gray-400 hover:bg-gray-50'}`} title={isSent ? 'Notifikasi sudah dikirim' : 'Kirim ulang notifikasi'}>
+                        <Send className="h-3.5 w-3.5" />
                       </button>
                     </td>
                     <td className="p-3">
                       <div className="flex gap-1 justify-center">
-                        <Button size="sm" variant="ghost" onClick={() => { setSelectedRecord(record); setShowDetail(true) }}><Eye className="h-4 w-4" /></Button>
-                        <Button size="sm" variant="ghost" onClick={() => { setSelectedRecord(record); const d = new Date(); const pad = (n: number) => String(n).padStart(2, '0'); setPayForm({ amount: record.total || record.amount, payment_method: '', payment_date: `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`, notes: '' }); setShowPayModal(true) }}><Wallet className="h-4 w-4" /></Button>
+                        <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setSelectedId(record.id); setShowDetail(true) }}><Eye className="h-4 w-4" /></Button>
+                        <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setSelectedId(record.id); const d = new Date(); const pad = (n: number) => String(n).padStart(2, '0'); setPayForm({ amount: record.total || record.amount, payment_method: '', payment_date: `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`, notes: '' }); setShowPayModal(true) }}><Wallet className="h-4 w-4" /></Button>
                       </div>
                     </td>
                   </tr>
@@ -344,17 +352,20 @@ export default function UnpaidBillingPage() {
       </Card>
 
       {/* Pay Modal */}
-      {showPayModal && selectedRecord && (
+      {showPayModal && selectedId && (() => {
+        const sel = records.find(r => r.id === selectedId)
+        if (!sel) return null
+        return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowPayModal(false)}>
           <div className="bg-card border rounded-xl shadow-xl w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-6 pb-0"><h2 className="text-lg font-semibold">BAYAR</h2><Button variant="ghost" size="icon" onClick={() => setShowPayModal(false)}><span className="text-xl">&times;</span></Button></div>
             <div className="p-6 space-y-4">
               <div className="bg-muted/50 rounded-lg p-3 space-y-2 text-sm">
-                <div className="flex justify-between"><span className="text-muted-foreground">Invoice:</span><span className="font-medium">{selectedRecord.invoice_number}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">No. Layanan:</span><span className="font-mono">{selectedRecord.service_number || '-'}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Pelanggan:</span><span>{selectedRecord.customer_name}</span></div>
-                {selectedRecord.unique_code != null && (
-                  <div className="flex justify-between"><span className="text-muted-foreground">Kode Unik:</span><span className="font-mono text-blue-600">{String(selectedRecord.unique_code).padStart(3, '0')}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Invoice:</span><span className="font-medium">{sel.invoice_number}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">No. Layanan:</span><span className="font-mono">{sel.service_number || '-'}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Pelanggan:</span><span>{sel.customer_name}</span></div>
+                {sel.unique_code != null && (
+                  <div className="flex justify-between"><span className="text-muted-foreground">Kode Unik:</span><span className="font-mono text-blue-600">{String(sel.unique_code).padStart(3, '0')}</span></div>
                 )}
                 <div className="flex justify-between font-bold"><span>Jumlah:</span><span>{formatCurrency(payForm.amount)}</span></div>
               </div>
@@ -364,37 +375,42 @@ export default function UnpaidBillingPage() {
             </div>
           </div>
         </div>
-      )}
+        )
+      })()}
 
       {/* Detail Modal */}
-      {showDetail && selectedRecord && (
+      {showDetail && selectedId && (() => {
+        const sel = records.find(r => r.id === selectedId)
+        if (!sel) return null
+        return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowDetail(false)}>
           <div className="bg-card border rounded-xl shadow-xl w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-6 pb-0"><h2 className="text-lg font-semibold">Detail Invoice</h2><Button variant="ghost" size="icon" onClick={() => setShowDetail(false)}><span className="text-xl">&times;</span></Button></div>
             <div className="p-6 space-y-2 text-sm">
               {[
-                {k:'Invoice',v:selectedRecord.invoice_number},
-                {k:'Tanggal Terbit',v:formatDate(selectedRecord.created_at)},
-                {k:'No. Layanan',v:selectedRecord.service_number||'-'},
-                {k:'Pelanggan',v:selectedRecord.customer_name},
-                {k:'Telepon',v:selectedRecord.customer_phone},
-                {k:'Profile',v:selectedRecord.package_name},
-                {k:'Mitra',v:selectedRecord.mitra||'-'},
-                {k:'Kategori',v:selectedRecord.kategori||'OTOMATIS'},
-                {k:'Subtotal',v:formatCurrency(selectedRecord.amount)},
-                {k:'Diskon',v:selectedRecord.diskon>0?formatCurrency(selectedRecord.diskon):'0'},
-                ...(selectedRecord.unique_code != null ? [
-                  {k:'Kode Unik',v:<span className="font-mono text-blue-600">{String(selectedRecord.unique_code).padStart(3, '0')}</span>},
-                  {k:'Total Transfer',v:<span className="font-mono font-bold">{formatCurrency(selectedRecord.amount_with_code || selectedRecord.amount)}</span>}
+                {k:'Invoice',v:sel.invoice_number},
+                {k:'Tanggal Terbit',v:formatDate(sel.created_at)},
+                {k:'No. Layanan',v:sel.service_number||'-'},
+                {k:'Pelanggan',v:sel.customer_name},
+                {k:'Telepon',v:sel.customer_phone},
+                {k:'Profile',v:sel.package_name},
+                {k:'Mitra',v:sel.mitra||'-'},
+                {k:'Kategori',v:sel.kategori||'OTOMATIS'},
+                {k:'Subtotal',v:formatCurrency(sel.amount)},
+                {k:'Diskon',v:sel.diskon>0?formatCurrency(sel.diskon):'0'},
+                ...(sel.unique_code != null ? [
+                  {k:'Kode Unik',v:<span className="font-mono text-blue-600">{String(sel.unique_code).padStart(3, '0')}</span>},
+                  {k:'Total Transfer',v:<span className="font-mono font-bold">{formatCurrency(sel.amount_with_code || sel.amount)}</span>}
                 ] : []),
-                {k:'Total',v:formatCurrency(selectedRecord.amount_with_code||selectedRecord.total||selectedRecord.amount)},
-                {k:'Jatuh Tempo',v:formatDate(selectedRecord.due_date)},
-                {k:'Note',v:selectedRecord.notes||'-'}
+                {k:'Total',v:formatCurrency(sel.amount_with_code||sel.total||sel.amount)},
+                {k:'Jatuh Tempo',v:formatDate(sel.due_date)},
+                {k:'Note',v:sel.notes||'-'}
               ].map(row=>(<div key={row.k} className="flex justify-between"><span className="text-muted-foreground">{row.k}:</span><span className="font-medium">{row.v}</span></div>))}
             </div>
           </div>
         </div>
-      )}
+        )
+      })()}
       <RapelModal isOpen={showRapel} onClose={() => setShowRapel(false)} onSuccess={fetchRecords} />
     </div>
   )

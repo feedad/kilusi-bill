@@ -63,7 +63,6 @@ export default function BroadcastPage() {
     const [broadcasts, setBroadcasts] = useState<Broadcast[]>([])
     const [regions, setRegions] = useState<{ id: string, name: string }[]>([])
     const [mitraList, setMitraList] = useState<{ id: string, name: string }[]>([])
-    const [whatsappTemplates, setWhatsappTemplates] = useState<any[]>([])
     const [showForm, setShowForm] = useState(false)
     const [editingId, setEditingId] = useState<string | null>(null)
 
@@ -80,14 +79,13 @@ export default function BroadcastPage() {
         target_areas: [] as string[],
         target_mitra: [] as string[],
         sendWhatsAppNotification: false,
-        whatsappTemplateId: 'custom',
+        infoTambahan: '',
     })
 
     useEffect(() => {
         fetchBroadcasts()
         fetchRegions()
         fetchMitra()
-        fetchWhatsappTemplates()
     }, [])
 
     const fetchRegions = async () => {
@@ -111,22 +109,6 @@ export default function BroadcastPage() {
         } catch (error) {
             console.error('Error fetching mitra:', error)
             setMitraList([])
-        }
-    }
-
-    const fetchWhatsappTemplates = async () => {
-        try {
-            const response = await adminApi.get('/api/v1/whatsapp-templates')
-            if (response.data.success && response.data.data) {
-                // Filter only enabled templates with APPROVED status
-                const templates = response.data.data.templates.filter((t: any) =>
-                    t.enabled && (t.meta_status === 'APPROVED' || t.meta_status === 'approved')
-                )
-                setWhatsappTemplates(templates)
-            }
-        } catch (error) {
-            console.error('Error fetching WhatsApp templates:', error)
-            setWhatsappTemplates([])
         }
     }
 
@@ -182,7 +164,7 @@ export default function BroadcastPage() {
             target_areas: [],
             target_mitra: [],
             sendWhatsAppNotification: false,
-            whatsappTemplateId: 'custom',
+            infoTambahan: '',
         })
         setEditingId(null)
         setShowForm(false)
@@ -213,7 +195,7 @@ export default function BroadcastPage() {
                         : [])
                 : [],
             sendWhatsAppNotification: false,
-            whatsappTemplateId: 'custom',
+            infoTambahan: '',
         })
         setEditingId(broadcast.id)
         setShowForm(true)
@@ -233,7 +215,8 @@ export default function BroadcastPage() {
                 target_mitra: form.target_all ? [] : form.target_mitra,
                 // Map camelCase to snake_case for backend
                 send_whatsapp_notification: form.sendWhatsAppNotification,
-                whatsapp_template_id: form.whatsappTemplateId
+                whatsapp_template_id: 'broadcast_notification',
+                info_tambahan: form.infoTambahan
             }
 
             if (editingId) {
@@ -249,7 +232,7 @@ export default function BroadcastPage() {
                 const response = await adminApi.post('/api/v1/broadcast', payload)
                 if (response.data.success) {
                     const waMsg = form.sendWhatsAppNotification
-                        ? ` dan WhatsApp ${form.whatsappTemplateId === 'custom' ? '(custom)' : '(template)'} terkirim ke`
+                        ? ' dan WhatsApp (template) terkirim ke'
                         : ''
                     toast.success('Broadcast berhasil dibuat' + waMsg)
                     fetchBroadcasts()
@@ -599,57 +582,16 @@ export default function BroadcastPage() {
                                     <div className="ml-6 space-y-3">
                                         <div>
                                             <label className="text-sm font-medium mb-1 block">
-                                                Pilih Format Pesan:
+                                                Info Tambahan (opsional)
                                             </label>
-                                            <div className="flex gap-2">
-                                                <button
-                                                    onClick={() => setForm({ ...form, whatsappTemplateId: 'custom' })}
-                                                    className={`px-3 py-2 text-sm rounded-lg border transition-colors ${
-                                                        form.whatsappTemplateId === 'custom'
-                                                            ? 'bg-blue-500 text-white border-blue-500'
-                                                            : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 hover:bg-gray-50'
-                                                    }`}
-                                                >
-                                                    Custom Message
-                                                </button>
-                                                <button
-                                                    onClick={() => setForm({ ...form, whatsappTemplateId: 'template' })}
-                                                    className={`px-3 py-2 text-sm rounded-lg border transition-colors ${
-                                                        form.whatsappTemplateId === 'template'
-                                                            ? 'bg-green-500 text-white border-green-500'
-                                                            : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 hover:bg-gray-50'
-                                                    }`}
-                                                    disabled={whatsappTemplates.length === 0}
-                                                >
-                                                    Template WhatsApp {whatsappTemplates.length > 0 ? `(${whatsappTemplates.length})` : '(Belum ada template approved)'}
-                                                </button>
-                                            </div>
-                                            <p className="text-xs text-muted-foreground">
-                                                {form.whatsappTemplateId === 'custom'
-                                                    ? 'Pesan custom akan dikirim satu per satu (mungkin terkena rate limit)'
-                                                    : 'Gunakan template yang sudah disetujui Meta untuk broadcast bulk'}
-                                            </p>
+                                            <input
+                                                type="text"
+                                                value={form.infoTambahan}
+                                                onChange={(e) => setForm({ ...form, infoTambahan: e.target.value })}
+                                                placeholder="Contoh: estimasi pengerjaan 2 jam"
+                                                className="w-full px-3 py-2 text-sm border rounded-lg bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600"
+                                            />
                                         </div>
-
-                                        {form.whatsappTemplateId === 'template' && whatsappTemplates.length > 0 && (
-                                            <div>
-                                                <label className="text-sm font-medium mb-1 block">
-                                                    Pilih Template:
-                                                </label>
-                                                <select
-                                                    value={form.whatsappTemplateId}
-                                                    onChange={(e) => setForm({ ...form, whatsappTemplateId: e.target.value })}
-                                                    className="w-full px-3 py-2 text-sm border rounded-lg bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600"
-                                                >
-                                                    <option value="template">-- Pilih Template --</option>
-                                                    {whatsappTemplates.map(t => (
-                                                        <option key={t.id} value={t.template_id}>
-                                                            {t.name} ({t.category})
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            </div>
-                                        )}
                                     </div>
                                 )}
                             </div>

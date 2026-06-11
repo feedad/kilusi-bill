@@ -313,7 +313,9 @@ router.post('/:id/notify', async (req, res) => {
         type: maintenance.type,
         target_all: maintenance.target_all,
         target_areas: maintenance.target_areas,
-        whatsapp_template_id: maintenance.whatsapp_template_id
+        whatsapp_template_id: maintenance.whatsapp_template_id,
+        scheduled_start_time: maintenance.scheduled_start_time,
+        scheduled_end_time: maintenance.scheduled_end_time
       });
 
       logger.info(`📱 Manual WhatsApp notification sent: ${result.sent} sent, ${result.failed} failed`);

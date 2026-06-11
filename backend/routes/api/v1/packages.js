@@ -327,12 +327,12 @@ router.post('/', async (req, res) => {
             'RETURNING *';
 
         const result = await query(insertQuery, [
-            name,
+            name?.toUpperCase(),
             speed,
             parseFloat(price),
-            description || null,
+            description?.toUpperCase() || null,
             parseFloat(installation_fee || 50000),
-            installation_description || 'Standard installation',
+            installation_description?.toUpperCase() || 'STANDARD INSTALLATION',
             group || null,
             group || 'default', // Sync pppoe_profile to group, default fallback
             rate_limit || null,
@@ -403,12 +403,12 @@ router.put('/:id', async (req, res) => {
             'RETURNING *';
 
         const result = await query(updateQuery, [
-            name,
+            name?.toUpperCase(),
             speed,
             parseFloat(price),
-            description || null,
+            description?.toUpperCase() || null,
             parseFloat(installation_fee || 50000),
-            installation_description || 'Standard installation',
+            installation_description?.toUpperCase() || 'STANDARD INSTALLATION',
             group || null,
             group || 'default', // Sync pppoe_profile to group
             rate_limit || null,

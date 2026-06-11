@@ -1,4 +1,5 @@
 const logger = require('./logger');
+const { transaction } = require('./database');
 const billingManager = require('./billing');
 //const { getMikrotikConnection } = require('./mikrotik');
 const MikrotikService = require('../services/mikrotik-service');
@@ -152,7 +153,7 @@ class ServiceSuspensionManager {
                 try {
                     if (customer.id) {
                         logger.info(`[SUSPEND] Updating billing status by id=${customer.id} to 'suspended' (username=${customer.username || customer.pppoe_username || '-'})`);
-                        await billingManager.setCustomerStatusById(customer.id, 'suspended');
+                        await billingManager.setCustomerStatusById(customer.id, 'suspended', customer.service_id);
                     } else {
                         // Resolve by username first, then phone, to obtain reliable id
                         let resolved = null;
@@ -167,7 +168,7 @@ class ServiceSuspensionManager {
                         }
                         if (resolved && resolved.id) {
                             logger.info(`[SUSPEND] Resolved customer id=${resolved.id} (username=${resolved.pppoe_username || resolved.username || '-'}) → set 'suspended'`);
-                            await billingManager.setCustomerStatusById(resolved.id, 'suspended');
+                            await billingManager.setCustomerStatusById(resolved.id, 'suspended', customer.service_id);
                         } else if (customer.phone) {
                             logger.warn(`[SUSPEND] Falling back to update by phone=${customer.phone} (no id resolved)`);
                             await billingManager.updateCustomer(customer.phone, { ...customer, status: 'suspended' });
@@ -192,8 +193,8 @@ class ServiceSuspensionManager {
                         const whatsappNotifications = require('./whatsapp-notifications');
                         await whatsappNotifications.sendServiceSuspensionNotification(customer, reason);
                         await query(
-                            'UPDATE services SET suspension_notified_at = NOW() WHERE customer_id = $1',
-                            [customer.id]
+                            'UPDATE services SET suspension_notified_at = NOW() WHERE service_number = $1',
+                            [customer.service_number]
                         );
                         logger.info(`WhatsApp suspension notification sent to ${customer.username}`);
                     }
@@ -225,14 +226,8 @@ class ServiceSuspensionManager {
 
             logger.info(`Restoring service for: ${serviceData.name} (${reason})`);
 
-            // Find the actual RADIUS username via service_number prefix match
-            const radiusUsernameResult = await query(`
-                SELECT username FROM radcheck
-                WHERE LOWER(username) LIKE LOWER($1 || '%')
-                LIMIT 1
-            `, [serviceData.service_number]);
-
-            const radiusUsername = radiusUsernameResult.rows[0]?.username;
+            // Find the actual RADIUS username via technical_details → radcheck mapping
+            const radiusUsername = await findRadiusUsername(serviceId, serviceData.service_number);
 
             if (!radiusUsername) {
                 logger.warn(`No RADIUS user found for service_number ${serviceData.service_number}`);
@@ -241,9 +236,8 @@ class ServiceSuspensionManager {
 
             // Get the package group for RADIUS
             const packageGroup = serviceData.package_group || 'UPTO-10M';
-            const pppoeProfile = serviceData.pppoe_profile || 'default';
 
-            logger.info(`RADIUS username: ${radiusUsername}, Package group: ${packageGroup}, PPPoE profile: ${pppoeProfile}`);
+            logger.info(`RADIUS username: ${radiusUsername}, Package group: ${packageGroup}`);
 
             // Get billing settings and current service data for reconnection
             const settings = await BillingCycleService.getBillingSettings();
@@ -255,7 +249,7 @@ class ServiceSuspensionManager {
             const invoiceData = await query(`
                 SELECT due_date, payment_date
                 FROM invoices
-                WHERE customer_id = (SELECT customer_id FROM services WHERE id = $1)
+                WHERE service_number = (SELECT service_number FROM services WHERE id = $1)
                   AND status = 'paid'
                 ORDER BY payment_date DESC
                 LIMIT 1
@@ -341,31 +335,32 @@ class ServiceSuspensionManager {
                 logger.info(`[RESTORE] Reconnection method is 'isolate_date'. Keeping existing dates.`);
             }
 
-            // 1. Update service status and dates
-            const setClause = Object.keys(updateFields).map((key, idx) => `${key} = $${idx + 2}`).join(', ');
-            await query(`
-                UPDATE services
-                SET ${setClause}, updated_at = CURRENT_TIMESTAMP
-                WHERE id = $1
-            `, [serviceId, ...Object.values(updateFields)]);
+            // Wrap status + radgroup in transaction (atomic restore)
+            await transaction(async (client) => {
+                // 1. Update service status and dates
+                const setClause = Object.keys(updateFields).map((key, idx) => `${key} = $${idx + 2}`).join(', ');
+                await client.query(`
+                    UPDATE services
+                    SET ${setClause}, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = $1
+                `, [serviceId, ...Object.values(updateFields)]);
 
-            // 2. Update RADIUS group to package group (clean ALL entries for this user)
-            const baseUsername = radiusUsername.split('@')[0];
-            await query(`DELETE FROM radusergroup WHERE username LIKE $1`, [`${baseUsername}%`]);
-            await query(`
-                INSERT INTO radusergroup (username, groupname, priority)
-                VALUES ($1, $2, 1)
-            `, [radiusUsername, packageGroup]);
-            logger.info(`RADIUS: Updated ${radiusUsername} to ${packageGroup} group`);
+                // 2. Update RADIUS group to package group (clean ALL entries for this user)
+                const baseUsername = radiusUsername.split('@')[0];
+                await client.query(`DELETE FROM radusergroup WHERE username = $1 OR username = $2`, [radiusUsername, baseUsername]);
+                await client.query(`
+                    INSERT INTO radusergroup (username, groupname, priority)
+                    VALUES ($1, $2, 1)
+                `, [radiusUsername, packageGroup]);
+                logger.info(`RADIUS: Updated ${radiusUsername} to ${packageGroup} group`);
+            });
 
-            // 3. Update MikroTik PPPoE profile dan kick user via CoA
-            try {
-                // Force CoA disconnect — ensures user reconnects with active profile
-                await MikrotikService.disconnectRadiusUser(radiusUsername);
-                logger.info(`Mikrotik: Disconnected session via CoA for ${radiusUsername} after restoration`);
-            } catch (coaErr) {
-                logger.warn(`Mikrotik: CoA disconnect failed for ${radiusUsername}, falling back to session removal: ${coaErr.message}`);
-                // Fallback: remove active session from MikroTik tracking
+            // 3. Kick user via CoA — user reconnects and gets new RADIUS group
+            const coaResult = await MikrotikService.disconnectRadiusUser(radiusUsername);
+            if (coaResult.success) {
+                logger.info(`Mikrotik: CoA ${coaResult.message} for ${radiusUsername} after restoration`);
+            } else {
+                logger.warn(`Mikrotik: CoA disconnect failed for ${radiusUsername}: ${coaResult.message}`);
                 await MikrotikService.removeActiveSession(radiusUsername);
             }
 
@@ -623,7 +618,9 @@ class ServiceSuspensionManager {
                     s.service_number,
                     s.service_identifier,
                     s.isolir_date,
+                    s.active_date,
                     s.siklus,
+                    s.billing_type,
                     s.enable_isolir,
                     p.pppoe_profile,
                     p.id as package_id,
@@ -634,6 +631,7 @@ class ServiceSuspensionManager {
                 WHERE s.status = 'active'
                     AND s.isolir_date IS NOT NULL
                     AND s.suspension_notified_at IS NULL
+                    AND s.trial_active = false
                     AND DATE(s.isolir_date) <= CURRENT_DATE
                 ORDER BY s.isolir_date
             `);
@@ -655,12 +653,15 @@ class ServiceSuspensionManager {
 
                     // Safety check: fixed/tetap cycle — pastikan isolir_date ≈ active_date + 1 bulan
                     // Skip jika selisih > 3 hari (kemungkinan data bug, jangan suspend salah)
+                    // Kecuali: prepaid same-day (isolir = active, trial handle suspension)
                     if ((customer.siklus === 'fixed' || customer.siklus === 'TETAP') && customer.active_date) {
                         const expectedIsolir = new Date(customer.active_date);
                         expectedIsolir.setMonth(expectedIsolir.getMonth() + 1);
                         const actualIsolirDate = isolirDate || new Date(0);
                         const diffDays = Math.abs(Math.round((actualIsolirDate - expectedIsolir) / (1000 * 60 * 60 * 24)));
-                        if (diffDays > 3) {
+                        const isPrepaidSameDay = customer.billing_type === 'prepaid' &&
+                            Math.abs(Math.round((actualIsolirDate - new Date(customer.active_date)) / (1000 * 60 * 60 * 24))) < 1;
+                        if (diffDays > 3 && !isPrepaidSameDay) {
                             logger.warn(`[SAFETY] ${customer.name}: isolir=${customer.isolir_date?.toISOString?.()?.split('T')[0] || 'null'} expected≈${expectedIsolir.toISOString().split('T')[0]} diff=${diffDays}d — SKIPPING suspension (possible data bug)`);
                             continue;
                         }
@@ -668,55 +669,43 @@ class ServiceSuspensionManager {
 
                     logger.info(`Suspending ${customer.name} (isolir: ${isolirDate?.toISOString().split('T')[0]}, ${daysOverdue} days overdue)`);
 
-                    // Find the actual RADIUS username via service_number prefix match
-                    const radiusUsernameResult = await query(`
-                        SELECT username FROM radcheck
-                        WHERE LOWER(username) LIKE LOWER($1 || '%')
-                        LIMIT 1
-                    `, [customer.service_number]);
-
-                    const radiusUsername = radiusUsernameResult.rows[0]?.username;
+                    // Find the actual RADIUS username via technical_details → radcheck mapping
+                    const radiusUsername = await findRadiusUsername(customer.service_id, customer.service_number);
                     const baseUsername = radiusUsername ? radiusUsername.split('@')[0] : customer.service_number;
 
                     if (!radiusUsername) {
-                        logger.warn(`No RADIUS user found for ${customer.name} (tried: ${customer.name}, ${customer.service_number}, ${customer.service_identifier})`);
-                        // Continue with MikroTik suspension even if RADIUS user not found
+                        logger.warn(`No RADIUS user found for ${customer.name} (service_id=${customer.service_id})`);
                     }
 
-                    // 1. Update service status to suspended
-                    await query(`
-                        UPDATE services
-                        SET status = 'suspended',
-                            updated_at = CURRENT_TIMESTAMP
-                        WHERE id = $1
-                    `, [customer.service_id]);
+                    // Wrap status + radgroup in transaction (atomic suspend)
+                    await transaction(async (client) => {
+                        // 1. Update service status to suspended
+                        await client.query(`
+                            UPDATE services
+                            SET status = 'suspended',
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE id = $1
+                        `, [customer.service_id]);
 
-                    // 2. Update RADIUS group to ISOLIR (only if RADIUS user exists)
-                    if (radiusUsername) {
-                        // Clean ALL radusergroup entries for this user (with and without suffix)
-                        await query(`DELETE FROM radusergroup WHERE username LIKE $1`, [`${baseUsername}%`]);
-                        await query(`
-                            INSERT INTO radusergroup (username, groupname, priority)
-                            VALUES ($1, 'ISOLIR', 1)
-                        `, [radiusUsername]);
-                        logger.info(`RADIUS: Updated ${radiusUsername} to ISOLIR group`);
-                    }
-
-                    // 3. Also suspend in MikroTik (change PPPoE profile)
-                    const pppoeUsername = radiusUsername || customer.service_number;
-                    try {
-                        const isolirProfile = getSetting('isolir_profile', 'isolir');
-                        await MikrotikService.setPPPoESecretProfile(pppoeUsername, isolirProfile, `SUSPENDED - Isolir date passed`);
-                        try {
-                            await MikrotikService.disconnectRadiusUser(pppoeUsername);
-                            logger.info(`Mikrotik: Disconnected session via CoA for ${pppoeUsername}`);
-                        } catch (coaErr) {
-                            logger.warn(`Mikrotik: CoA disconnect failed, falling back to active session removal: ${coaErr.message}`);
-                            await MikrotikService.removeActiveSession(pppoeUsername);
+                        // 2. Update RADIUS group to ISOLIR (only if RADIUS user exists)
+                        if (radiusUsername) {
+                            await client.query(`DELETE FROM radusergroup WHERE username = $1 OR username = $2`, [radiusUsername, baseUsername]);
+                            await client.query(`
+                                INSERT INTO radusergroup (username, groupname, priority)
+                                VALUES ($1, 'ISOLIR', 1)
+                            `, [radiusUsername]);
+                            logger.info(`RADIUS: Updated ${radiusUsername} to ISOLIR group`);
                         }
-                        logger.info(`Mikrotik: Suspended PPPoE user ${pppoeUsername}`);
-                    } catch (mikrotikError) {
-                        logger.warn(`MikroTik suspension failed for ${customer.name}:`, mikrotikError.message);
+                    });
+
+                    // 3. Kick user via CoA — user reconnects and gets ISOLIR group
+                    const pppoeUsername = radiusUsername || customer.service_number;
+                    const coaResult = await MikrotikService.disconnectRadiusUser(pppoeUsername);
+                    if (coaResult.success) {
+                        logger.info(`Mikrotik: CoA ${coaResult.message} for ${pppoeUsername}`);
+                    } else {
+                        logger.warn(`Mikrotik: CoA disconnect failed for ${pppoeUsername}: ${coaResult.message}`);
+                        await MikrotikService.removeActiveSession(pppoeUsername);
                     }
 
                     // 4. Send WhatsApp notification BEFORE updating invoice status
@@ -736,8 +725,8 @@ class ServiceSuspensionManager {
                         UPDATE invoices
                         SET status = 'suspended',
                             updated_at = CURRENT_TIMESTAMP
-                        WHERE customer_id = $1 AND status IN ('unpaid', 'overdue')
-                    `, [customer.customer_id]);
+                        WHERE service_number = $1 AND status IN ('unpaid', 'overdue')
+                    `, [customer.service_number]);
 
                     suspended++;
 
@@ -748,6 +737,35 @@ class ServiceSuspensionManager {
             }
 
             logger.info(`Isolir date suspension check completed. Suspended: ${suspended}, Errors: ${errors}`);
+
+            // Safety net: detect any active customers with past isolir_date but non-ISOLIR radgroup
+            try {
+                const safetyCheck = await query(`
+                    SELECT s.id, s.service_number, c.name
+                    FROM services s
+                    JOIN customers c ON c.id = s.customer_id
+                    LEFT JOIN technical_details td ON td.service_id = s.id
+                    LEFT JOIN radusergroup r ON
+                        (td.pppoe_username IS NOT NULL AND td.pppoe_username != '' AND r.username LIKE td.pppoe_username || '%')
+                        OR (td.pppoe_username IS NULL AND r.username LIKE s.service_number || '%')
+                    WHERE s.status = 'active'
+                      AND s.isolir_date IS NOT NULL
+                      AND DATE(s.isolir_date) <= CURRENT_DATE
+                      AND (r.groupname IS NULL OR r.groupname != 'ISOLIR')
+                    LIMIT 20
+                `);
+                if (safetyCheck.rows.length > 0) {
+                    logger.warn(`[SAFETY] ${safetyCheck.rows.length} active customers with past isolir_date have non-ISOLIR radgroup:`);
+                    safetyCheck.rows.forEach(row => {
+                        logger.warn(`[SAFETY] Customer ${row.name} (${row.service_number}, id=${row.id})`);
+                    });
+                } else {
+                    logger.info('[SAFETY] No radgroup inconsistencies detected');
+                }
+            } catch (safetyErr) {
+                logger.warn('[SAFETY] Safety check query failed:', safetyErr.message);
+            }
+
             return { suspended, errors };
 
         } catch (error) {
@@ -787,6 +805,7 @@ class ServiceSuspensionManager {
                     i.id,
                     i.invoice_number,
                     i.customer_id,
+                    i.service_number,
                     i.due_date,
                     i.amount,
                     c.name as customer_name
@@ -972,4 +991,44 @@ class ServiceSuspensionManager {
         // Create singleton instance
         const serviceSuspensionManager = new ServiceSuspensionManager();
 
+        /**
+         * Find RADIUS username for a service by joining technical_details → radcheck.
+         * Primary: JOIN technical_details via service_id (accurate mapping).
+         * Fallback: search radcheck by service_number prefix (for data without td entry).
+         */
+        async function findRadiusUsername(serviceId, fallbackServiceNumber) {
+            try {
+                const { getOne } = require('./database');
+
+                // Primary: join via technical_details (exact mapping)
+                const result = await getOne(`
+                    SELECT rc.username
+                    FROM technical_details td
+                    JOIN radcheck rc ON LOWER(rc.username) LIKE LOWER(td.pppoe_username || '%')
+                    WHERE td.service_id = $1
+                      AND td.pppoe_username IS NOT NULL
+                      AND td.pppoe_username != ''
+                    LIMIT 1
+                `, [serviceId]);
+
+                if (result && result.username) return result.username;
+
+                // Fallback: search by service_number (data tanpa technical_details)
+                if (fallbackServiceNumber) {
+                    const fallback = await getOne(`
+                        SELECT username FROM radcheck
+                        WHERE LOWER(username) LIKE LOWER($1 || '%')
+                        LIMIT 1
+                    `, [fallbackServiceNumber]);
+                    if (fallback) return fallback.username;
+                }
+
+                return null;
+            } catch (error) {
+                logger.error(`findRadiusUsername(serviceId=${serviceId}) error:`, error.message);
+                return null;
+            }
+        }
+
         module.exports = serviceSuspensionManager;
+        module.exports.findRadiusUsername = findRadiusUsername;

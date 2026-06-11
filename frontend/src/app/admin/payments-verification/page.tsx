@@ -44,6 +44,7 @@ interface PaymentVerification {
     provider?: string
     phone_number?: string
   }
+  is_from_chatbot?: boolean
   status: string
   created_at: string
   due_date: string
@@ -296,7 +297,14 @@ export default function PaymentsVerificationPage() {
       ) : (
         <div className="grid grid-cols-1 gap-4">
           {filteredPayments.map((payment) => (
-            <Card key={payment.id} className="hover:shadow-lg transition-shadow">
+            <Card key={payment.id} className="hover:shadow-lg transition-shadow relative overflow-hidden">
+              {payment.is_from_chatbot && (
+                <div className="absolute top-0 right-0 w-24 h-24 overflow-hidden z-10 pointer-events-none">
+                  <div className="absolute top-3 right-[-30px] rotate-45 bg-gradient-to-r from-purple-600 to-pink-500 text-white text-[10px] font-bold py-1 px-8 shadow-lg whitespace-nowrap tracking-wider">
+                    OMNICHAT
+                  </div>
+                </div>
+              )}
               <CardContent className="p-6">
                 <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                   {/* Customer Info */}

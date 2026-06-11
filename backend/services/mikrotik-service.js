@@ -396,48 +396,9 @@ class MikrotikService {
      */
     async setPPPoESecretProfile(username, profile, comment) {
         if (this.getAuthMode() === 'radius') {
-            try {
-                // Update user group in RADIUS
-                // Assuming radusergroup has (username, groupname)
-                // We use DB query via radiusDb (we need to expose it or use raw query)
-                // radiusDb.createOrUpdateRadiusUser handles group update too.
-                // But we don't want to change password.
-                // radiusDb.upsertRadiusUser updates password.
-
-                // We need a method to update ONLY group.
-                // Let's us raw query via radiusDb.query if locally available or use radiusDb.createOrUpdateRadiusUser with current password?
-                // We don't know current password.
-
-                // radiusDb doesn't have updateGroupOnly.
-                // I will use direct query using the imported radiusDb logic.
-                const { query } = require('../config/database'); // Or use radiusDb.query if it exposes it? radiusDb exposes query (line 595 of radius-postgres.js)
-                const db = require('../config/radius-postgres');
-
-                await db.query(`
-                    INSERT INTO radusergroup (username, groupname, priority)
-                    VALUES ($1, $2, 1)
-                    ON CONFLICT (username, groupname)
-                    DO UPDATE SET priority = EXCLUDED.priority
-                 `, [username, profile]);
-
-                // If changing profile, we should probably remove old groups?
-                // RADIUS supports multiple groups. But usually we want one main profile.
-                // Mikrotik "Profile" usually maps to a single Group or set of attributes.
-                // To restrict, we might want to DELETE other groups for this user and INSERT the new one.
-                // Let's do that for correct suspension.
-
-                await db.query(`DELETE FROM radusergroup WHERE username = $1`, [username]);
-                await db.query(`INSERT INTO radusergroup (username, groupname, priority) VALUES ($1, $2, 1)`, [username, profile]);
-
-                // Disconnect user to apply new profile - ALWAYS disconnect to ensure re-auth with new group
-                // This is critical for both isolation (ISOLIR group) and restoration (package group)
-                logger.info(`[MikrotikService] Profile changed to ${profile}. Disconnecting user ${username} to apply changes...`);
-                this.disconnectRadiusUser(username).catch(err => logger.error(`Background disconnect failed: ${err.message}`));
-
-                return { success: true, message: `Updated RADIUS group to ${profile} and triggered disconnect` };
-            } catch (e) {
-                return { success: false, message: e.message };
-            }
+            // RADIUS mode: profile changes are handled by caller via radusergroup + CoA
+            // This function is kept for future MikroTik API integration
+            return { success: true, message: 'Skipped (RADIUS mode)' };
         }
         return { success: false, message: 'API mode not supported' };
     }
@@ -472,12 +433,14 @@ class MikrotikService {
                 return { success: false, message: 'NAS not found' };
             }
 
-            // 3. Send RADIUS CoA Disconnect Request
+            // 3. Send RADIUS CoA Disconnect Request (use coaport from nas table, default 3799)
             const result = await radiusDisconnect.disconnectUser({
                 username,
                 nasIp: status.nas_ip,
                 nasSecret: nas.secret,
-                sessionId: status.session_id || status.acctsessionid
+                sessionId: status.session_id || status.acctsessionid,
+                framedIp: status.framed_ip,
+                coaPort: nas.coaport || 3799
             });
 
             return result;

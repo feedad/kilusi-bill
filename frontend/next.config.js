@@ -42,6 +42,11 @@ const nextConfig = {
           source: '/api/v1/payments/callback/:path*',
           destination: 'http://localhost:3001/api/v1/payments/callback/:path*',
         },
+        // Proxy QRIS payment page to backend (Cloudflare Tunnel bypasses Nginx)
+        {
+          source: '/pay/:path*',
+          destination: 'http://localhost:3001/pay/:path*',
+        },
       ],
     }
   },

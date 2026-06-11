@@ -93,7 +93,7 @@ export default function BlogDetail({ params }: { params: { slug: string } }) {
             {/* Content */}
             <div className="container mx-auto px-6 max-w-4xl py-12">
                 <div
-                    className="prose prose-lg prose-blue dark:prose-invert max-w-none"
+                    className="prose prose-lg prose-blue dark:prose-invert max-w-none blog-content"
                     dangerouslySetInnerHTML={{ __html: post.content }}
                 />
 

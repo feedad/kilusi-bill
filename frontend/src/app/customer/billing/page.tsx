@@ -910,8 +910,8 @@ export default function CustomerBilling() {
             filteredInvoices.map((invoice) => (
               <Card
                 key={invoice.id}
-                className={`bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow ${invoice.can_pay && invoice.status !== 'paid' ? 'cursor-pointer' : ''}`}
-                onClick={() => { if (invoice.can_pay && invoice.status !== 'paid') handlePayInvoice(invoice) }}
+                className={`bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow ${invoice.can_pay ? 'cursor-pointer' : ''}`}
+                onClick={() => { if (invoice.can_pay) handlePayInvoice(invoice) }}
               >
                 <CardContent className="pt-6">
                   <div className="flex items-center justify-between">

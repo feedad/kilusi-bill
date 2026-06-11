@@ -5,7 +5,6 @@ const ReferralService = require('../../../services/referral-service');
 const { logger } = require('../../../config/logger');
 const { query, getOne } = require('../../../config/database');
 
-// Helper function to get package data
 async function getPackageData(packageId) {
     if (!packageId) return null;
     try {
@@ -26,7 +25,6 @@ router.post('/register', async (req, res) => {
     try {
         const data = req.body;
 
-        // Basic Validation
         if (!data.name || !data.phone || !data.address) {
             return res.status(400).json({
                 success: false,
@@ -34,108 +32,93 @@ router.post('/register', async (req, res) => {
             });
         }
 
-        // 1. Create Customer
-        // We set basic defaults for self-registration
-        const customerData = {
-            ...data,
-            status: 'waiting', // Waiting for admin review before installation
-            billing_type: 'postpaid'
-        };
+        // 1. Create Identity (no service yet — status waiting)
+        const customer = await CustomerService.createIdentity({
+            name: data.name,
+            phone: data.phone,
+            email: data.email,
+            address: data.address
+        });
 
-        // Check if package selected
-        if (!data.package_id) {
-            // Optional: Set default package or leave null?
-            // Leaving null means valid, but they need to select later.
+        // 2. Save selected package
+        if (data.package_id) {
+            await query('UPDATE customers SET selected_package_id = $1 WHERE id = $2', [data.package_id, customer.id]);
         }
 
-        // Create the customer using Service
-        // Note: CustomerService.createCustomer handles Identity + Service creation
-        // We might need to adjust it if we want 'pending' status without full service details yet.
-        // But createCustomer is robust.
+        // 3. Save coordinates if provided
+        if (data.latitude && data.longitude) {
+            await query(
+                'UPDATE customers SET latitude = $1, longitude = $2 WHERE id = $3',
+                [data.latitude, data.longitude, customer.id]
+            );
+        }
 
-        const result = await CustomerService.createCustomer(customerData);
-        const newCustomer = result.customer;
-
-        // 2. Handle Referral if Code provided
-        if (data.referral_code && newCustomer && newCustomer.id) {
+        // 3. Handle Referral if code provided
+        if (data.referral_code && customer && customer.id) {
             try {
-                // Validate first
-                const validation = await ReferralService.validateReferralCode(data.referral_code, newCustomer.id);
-
+                const validation = await ReferralService.validateReferralCode(data.referral_code, customer.id);
                 if (validation.valid) {
-                    // Apply Referral
-                    await ReferralService.applyReferral(
-                        data.referral_code,
-                        newCustomer.id,
-                        'discount' // New customers get discount usually
-                    );
-
-                    logger.info(`Referral applied for new customer ${newCustomer.id} using code ${data.referral_code}`);
+                    await ReferralService.applyReferral(data.referral_code, customer.id, 'discount');
+                    logger.info(`Referral applied for new customer ${customer.id} using code ${data.referral_code}`);
                 }
             } catch (refError) {
                 logger.error(`Referral application failed during registration: ${refError.message}`);
-                // Don't fail the registration, just log valid error
             }
         }
 
-        // 3. Send Notification to Admin (Telegram & Dashboard)
+        // 4. Send Notification to Admin (Telegram & Dashboard)
         try {
             const TelegramService = require('../../../services/telegram-service');
-            await TelegramService.sendNewRegistrationNotification(newCustomer);
+            await TelegramService.sendNewRegistrationNotification(customer);
         } catch (notifError) {
             logger.error(`Failed to send new registration notification: ${notifError.message}`);
-            // Non-blocking error
         }
 
-        // 4. Send WhatsApp notification to customer
+        // 5. Send WhatsApp notification to customer
         try {
             const whatsappNotifications = require('../../../config/whatsapp-notifications');
             const packageData = data.package_id ? await getPackageData(data.package_id) : null;
-
-            // Send registration submitted notification
             await whatsappNotifications.sendRegistrationSubmittedNotification(
-                newCustomer.phone,
+                customer.phone,
                 {
-                    customer_name: newCustomer.name,
+                    customer_name: customer.name,
                     package_name: packageData?.name || 'Paket dipilih',
                     registration_date: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })
                 }
             );
         } catch (notifError) {
             logger.error(`Failed to send WhatsApp registration notification: ${notifError.message}`);
-            // Non-blocking error
         }
 
-        // 5. Send notification to admins about new registration
+        // 6. Send admin notification about new registration
         try {
             const whatsappNotifications = require('../../../config/whatsapp-notifications');
+            const packageData = data.package_id ? await getPackageData(data.package_id) : null;
             await whatsappNotifications.notifyAdminsNewRegistration({
-                customerName: newCustomer.name,
-                customerPhone: newCustomer.phone,
-                customerEmail: newCustomer.email,
-                address: newCustomer.address || newCustomer.installation_address,
+                customerName: customer.name,
+                customerPhone: customer.phone,
+                customerEmail: customer.email,
+                address: customer.address || data.address,
                 packageName: packageData?.name || null,
                 registrationDate: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })
             });
-            logger.info(`📱 Admins notified about new registration from ${newCustomer.name}`);
+            logger.info(`Admins notified about new registration from ${customer.name}`);
         } catch (notifError) {
             logger.error(`Failed to send admin notification for registration:`, notifError.message);
-            // Non-blocking error
         }
 
         res.status(201).json({
             success: true,
             message: 'Registrasi berhasil! Tim kami akan segera menghubungi Anda.',
             data: {
-                customerId: newCustomer.id,
-                name: newCustomer.name
+                customerId: customer.id,
+                name: customer.name
             }
         });
 
     } catch (error) {
         logger.error('Public registration error:', error);
 
-        // Handle specific service errors (e.g. duplicates)
         if (error.code === 'RESOURCE_CONFLICT') {
             return res.status(409).json({
                 success: false,

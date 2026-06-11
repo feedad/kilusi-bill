@@ -25,8 +25,8 @@ function initializeMonthlyInvoiceService() {
     }
   }
 
-  // Start daily reminder service (optional)
-  const reminderEnabled = getSetting('billing_reminder_enable', 'true') === 'true';
+  // Start daily reminder service (optional) — disabled by default, scheduler.js handles reminders
+  const reminderEnabled = getSetting('billing_reminder_enable', 'false') === 'true';
   if (reminderEnabled) {
     startReminderService();
   } else {
@@ -185,16 +185,17 @@ async function generateMonthlyInvoices() {
           continue;
         }
         
-        // Check if invoice for this month already exists
-        const customerInvoices = await billing.getCustomerInvoices(customer.id);
-        const existingInvoice = customerInvoices.find(inv => {
-          const invDate = new Date(inv.created_at);
-          return invDate.getMonth() === currentMonth && 
-                 invDate.getFullYear() === currentYear;
-        });
-        
-        if (existingInvoice) {
-          logger.info(`📄 Invoice already exists for ${customer.id} - ${customer.phone} (${customer.name}) - ${currentMonth + 1}/${currentYear}`);
+        // Check if invoice for this service this month already exists
+        const existingInvoice = await query(`
+            SELECT id FROM invoices
+            WHERE service_number = $1
+              AND EXTRACT(MONTH FROM created_at) = $2
+              AND EXTRACT(YEAR FROM created_at) = $3
+            LIMIT 1
+        `, [customer.service_number, currentMonth + 1, currentYear]);
+
+        if (existingInvoice.rows.length > 0) {
+          logger.info(`📄 Invoice already exists for ${customer.id} - ${customer.service_number} (${customer.name}) - ${currentMonth + 1}/${currentYear}`);
           skippedCount++;
           continue;
         }

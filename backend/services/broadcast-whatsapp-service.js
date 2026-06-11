@@ -36,6 +36,7 @@ async function sendBroadcastNotification(options) {
     target_areas,
     target_mitra,
     whatsapp_template_id,
+    info_tambahan,
     scheduled_start_time,
     scheduled_end_time,
     estimated_duration
@@ -117,102 +118,78 @@ async function sendBroadcastNotification(options) {
     const results = [];
 
     if (useTemplate) {
-      // Use pre-approved template from Meta
       logger.info(`Using WhatsApp template: ${whatsapp_template_id}`);
 
-      // Get company info for template
       const companyInfo = await whatsappNotifications.getCompanyInfo();
 
-      // Format time for maintenance messages (for template parameters)
-      let startTimeStr = '';
-      let endTimeStr = '';
-      let durationStr = '';
-
-      if (type === 'maintenance') {
-        if (scheduled_start_time) {
-          const startDate = new Date(scheduled_start_time);
-          startTimeStr = startDate.toLocaleString('id-ID', {
-            weekday: 'long',
-            day: 'numeric',
-            month: 'long',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            timeZone: 'Asia/Jakarta'
-          });
-        }
-
-        if (scheduled_end_time) {
-          const endDate = new Date(scheduled_end_time);
-          endTimeStr = endDate.toLocaleString('id-ID', {
-            day: 'numeric',
-            month: 'long',
-            hour: '2-digit',
-            minute: '2-digit',
-            timeZone: 'Asia/Jakarta'
-          });
-        }
-
-        if (estimated_duration) {
-          const hours = Math.floor(estimated_duration / 60);
-          const mins = estimated_duration % 60;
-          if (hours > 0) {
-            durationStr = `${hours} jam ${mins} menit`;
+      // Compute info_tambahan value
+      let infoTambahanValue = info_tambahan;
+      if (!infoTambahanValue && type === 'maintenance') {
+        if (scheduled_start_time && scheduled_end_time) {
+          const startMs = new Date(scheduled_start_time).getTime();
+          const endMs = new Date(scheduled_end_time).getTime();
+          const diffMinutes = Math.round((endMs - startMs) / 60000);
+          if (diffMinutes > 0) {
+            const hours = Math.floor(diffMinutes / 60);
+            const mins = diffMinutes % 60;
+            if (hours > 0 && mins > 0) {
+              infoTambahanValue = `estimasi pengerjaan ${hours} jam ${mins} menit`;
+            } else if (hours > 0) {
+              infoTambahanValue = `estimasi pengerjaan ${hours} jam`;
+            } else {
+              infoTambahanValue = `estimasi pengerjaan ${mins} menit`;
+            }
           } else {
-            durationStr = `${mins} menit`;
+            infoTambahanValue = 'estimasi waktu belum dapat kami informasikan';
           }
+        } else {
+          infoTambahanValue = 'estimasi waktu belum dapat kami informasikan';
         }
+      } else if (!infoTambahanValue) {
+        infoTambahanValue = '-';
       }
+
+      // Get template variables
+      const templateResult = await query(
+        'SELECT * FROM whatsapp_templates WHERE template_id = $1',
+        [whatsapp_template_id]
+      );
+
+      if (templateResult.rows.length === 0) {
+        logger.error(`Template not found: ${whatsapp_template_id}`);
+        results.push({ customer: '', success: false, error: 'Template not found' });
+        failedCount = customers.length;
+        return { success: false, total: customers.length, sent: 0, failed: failedCount, customers: results };
+      }
+
+      const template = templateResult.rows[0];
+      const templateVars = template.variables
+        ? template.variables.split(',').map(v => v.trim())
+        : [];
+
+      // Map variable names to values
+      const varMap = {
+        title: title,
+        content: message,
+        info_tambahan: infoTambahanValue,
+        supportPhone: companyInfo.support_phone || '',
+        customerPortal: companyInfo.customer_portal || '',
+        companyName: companyInfo.name || 'KITA SELALU TERKONEKSI'
+      };
 
       for (const customer of customers) {
         try {
-          // Get template details to build parameters
-          const templateResult = await query(
-            'SELECT * FROM whatsapp_templates WHERE template_id = $1',
-            [whatsapp_template_id]
-          );
-
-          if (templateResult.rows.length === 0) {
-            logger.error(`Template not found: ${whatsapp_template_id}`);
-            failedCount++;
-            results.push({ customer: customer.phone, success: false, error: 'Template not found' });
-            continue;
-          }
-
-          const template = templateResult.rows[0];
-
-          // Build template parameters
-          const parameters = {
-            customerName: customer.name,
-            messageTitle: title,
-            messageContent: message,
-            companyName: companyInfo.name || 'KITA SELALU TERKONEKSI',
-            supportPhone: companyInfo.support_phone || '',
-            // Add time parameters for maintenance templates
-            startTime: startTimeStr,
-            endTime: endTimeStr,
-            duration: durationStr
-          };
-
-          // Add additional parameters based on template variables
-          if (template.variables) {
-            const vars = template.variables.split(',').map(v => v.trim());
-            // Only include parameters that the template expects
-            Object.keys(parameters).forEach(key => {
-              if (!vars.includes(key)) {
-                delete parameters[key];
-              }
-            });
-          }
+          // Build parameter array matching template variable order
+          const parameters = templateVars.map(v => ({
+            type: 'text',
+            text: String(varMap[v] || '-').replace(/[\r\n]+/g, ' ').trim()
+          }));
 
           await kilusiOmnichat.sendTemplate(
             customer.phone,
             whatsapp_template_id,
             'id',
-            Object.entries(parameters).map(([key, value]) => ({
-              type: 'text',
-              text: value
-            })),
+            parameters,
             {
               customer_id: customer.customer_id,
               customer_name: customer.name,

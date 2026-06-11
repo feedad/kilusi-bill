@@ -522,7 +522,7 @@ class CustomerAuth {
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
-    const url = `${this.API_BASE}${endpoint}`
+    const url = `${this.API_BASE}${endpoint}${endpoint.includes('?') ? '&' : '?'}_=${Date.now()}`
     const headers = {
       ...this.getAuthenticatedHeaders(),
       ...options.headers
@@ -536,7 +536,8 @@ class CustomerAuth {
       const response = await fetch(url, {
         ...options,
         headers,
-        signal: controller.signal
+        signal: controller.signal,
+        cache: 'no-store'
       })
 
       clearTimeout(timeoutId)

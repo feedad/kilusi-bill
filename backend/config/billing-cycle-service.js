@@ -383,6 +383,8 @@ class BillingCycleService {
                     monthly_due_date = $5,
                     reconnection_method = $6,
                     suspension_time = $7,
+                    invoice_time = $8,
+                    reminder_time = $9,
                     updated_at = CURRENT_TIMESTAMP
                 RETURNING *
             `, [
@@ -392,15 +394,17 @@ class BillingCycleService {
                 newSettings.fixed_day,
                 newSettings.monthly_due_date,
                 newSettings.reconnection_method,
-                newSettings.suspension_time
+                newSettings.suspension_time,
+                newSettings.invoice_time,
+                newSettings.reminder_time
             ]);
 
             if (result.rows.length === 0) {
                 // Insert if no existing settings
                 const insertResult = await query(`
                     INSERT INTO billing_settings (
-                        billing_cycle_type, invoice_advance_days, profile_default_period, fixed_day, monthly_due_date, reconnection_method, suspension_time
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        billing_cycle_type, invoice_advance_days, profile_default_period, fixed_day, monthly_due_date, reconnection_method, suspension_time, invoice_time, reminder_time
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                     RETURNING *
                 `, [
                     newSettings.billing_cycle_type,
@@ -409,7 +413,9 @@ class BillingCycleService {
                     newSettings.fixed_day,
                     newSettings.monthly_due_date,
                     newSettings.reconnection_method,
-                    newSettings.suspension_time
+                    newSettings.suspension_time,
+                    newSettings.invoice_time,
+                    newSettings.reminder_time
                 ]);
 
                 return insertResult.rows[0];
@@ -433,6 +439,7 @@ class BillingCycleService {
                 SELECT
                     i.id as invoice_id,
                     i.customer_id,
+                    i.service_number,
                     i.due_date,
                     COALESCE(p.payment_date, i.payment_date) as payment_date,
                     i.package_id,
@@ -441,7 +448,7 @@ class BillingCycleService {
                     s.billing_type,
                     s.status as service_status
                 FROM invoices i
-                LEFT JOIN services s ON s.customer_id = i.customer_id
+                LEFT JOIN services s ON s.service_number = i.service_number
                 LEFT JOIN LATERAL (
                     SELECT payment_date
                     FROM payments
@@ -450,7 +457,6 @@ class BillingCycleService {
                     LIMIT 1
                 ) p ON true
                 WHERE i.id = $1
-                LIMIT 1
             `, [invoiceId]);
 
             if (result.rows.length === 0) {

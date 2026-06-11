@@ -584,7 +584,8 @@ export default function WhatsAppDashboard() {
     content: '',
     category: 'billing',
     enabled: true,
-    meta_name: ''
+    meta_name: '',
+    buttons: [] as { text: string; url: string; variable: string }[]
   })
   const [isCreatingTemplate, setIsCreatingTemplate] = useState(false)
   const [isCreatingDefaults, setIsCreatingDefaults] = useState(false)
@@ -1160,19 +1161,19 @@ export default function WhatsAppDashboard() {
     // Auto-suggest version suffix for meta_name if template was already submitted
     let suggestedMetaName = template.meta_name || ''
     if (!suggestedMetaName && (template.meta_status === 'approved' || template.meta_status === 'rejected' || template.meta_status === 'pending_approval')) {
-      // Find next version: template_id → template_id_v2, template_id_v3, etc.
+      // Find next version: template_id → template_id_kilusi_v2, template_id_kilusi_v3, etc.
       const existingVersions = templates
-        .filter(t => t.template_id === template.template_id || (t.meta_name && t.meta_name.startsWith(template.template_id + '_v')))
+        .filter(t => t.template_id === template.template_id || (t.meta_name && t.meta_name.startsWith(template.template_id + '_kilusi_v')))
       if (existingVersions.length > 0) {
         let maxVersion = 1
         existingVersions.forEach(t => {
           const name = t.meta_name || t.template_id
-          const match = name.match(/_v(\d+)$/)
+          const match = name.match(/_kilusi_v(\d+)$/)
           if (match) maxVersion = Math.max(maxVersion, parseInt(match[1]))
         })
-        suggestedMetaName = `${template.template_id}_v${maxVersion + 1}`
+        suggestedMetaName = `${template.template_id}_kilusi_v${maxVersion + 1}`
       } else {
-        suggestedMetaName = `${template.template_id}_v2`
+        suggestedMetaName = `${template.template_id}_kilusi_v2`
       }
     }
 
@@ -1182,7 +1183,8 @@ export default function WhatsAppDashboard() {
       content: template.content,
       category: template.category,
       enabled: template.enabled,
-      meta_name: suggestedMetaName
+      meta_name: suggestedMetaName,
+      buttons: template.buttons || []
     })
 
     // Set edit mode (use database ID for editing)
@@ -1234,7 +1236,8 @@ export default function WhatsAppDashboard() {
           content: '',
           category: 'billing',
           enabled: true,
-          meta_name: ''
+          meta_name: '',
+          buttons: []
         })
         fetchTemplates() // Refresh templates
       } else {
@@ -1628,6 +1631,11 @@ export default function WhatsAppDashboard() {
                           {template.meta_status !== 'local' && (
                             <Badge variant="outline" className="text-[10px] uppercase font-mono text-gray-500">
                               Meta: {template.meta_name || template.name}
+                            </Badge>
+                          )}
+                          {template.buttons && template.buttons.length > 0 && (
+                            <Badge variant="secondary" className="text-xs">
+                              🔘 {template.buttons.length} button
                             </Badge>
                           )}
                         </div>
@@ -2444,6 +2452,99 @@ export default function WhatsAppDashboard() {
                 </label>
               </div>
 
+              {/* CTA Buttons Section */}
+              <div className="space-y-3 p-4 border rounded-lg">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium">CTA URL Buttons</label>
+                  <input
+                    type="checkbox"
+                    checked={newTemplate.buttons.length > 0}
+                    onChange={(e) => {
+                      setNewTemplate(prev => ({
+                        ...prev,
+                        buttons: e.target.checked
+                          ? [
+                              { text: 'Bayar Sekarang', url: 'https://billing.kilusi.id/pay/{{1}}', variable: 'invoiceNumber' },
+                              { text: 'Buka Portal', url: 'https://portal.kilusi.id/customer/login/{{1}}', variable: 'customerToken' }
+                            ]
+                          : []
+                      }))
+                    }}
+                    className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                  />
+                </div>
+                {newTemplate.buttons.length > 0 && (
+                  <div className="space-y-2">
+                    {newTemplate.buttons.map((btn, i) => (
+                      <div key={i} className="flex gap-2 items-start">
+                        <div className="flex-1 space-y-1">
+                          <input
+                            placeholder="Button text"
+                            value={btn.text}
+                            onChange={(e) => {
+                              const updated = [...newTemplate.buttons]
+                              updated[i] = { ...updated[i], text: e.target.value }
+                              setNewTemplate(prev => ({ ...prev, buttons: updated }))
+                            }}
+                            className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                          />
+                        </div>
+                        <div className="flex-1 space-y-1">
+                          <input
+                            placeholder="URL (https://...)"
+                            value={btn.url}
+                            onChange={(e) => {
+                              const updated = [...newTemplate.buttons]
+                              updated[i] = { ...updated[i], url: e.target.value }
+                              setNewTemplate(prev => ({ ...prev, buttons: updated }))
+                            }}
+                            className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                          />
+                        </div>
+                        <div className="flex-1 space-y-1">
+                          <select
+                            value={btn.variable}
+                            onChange={(e) => {
+                              const updated = [...newTemplate.buttons]
+                              updated[i] = { ...updated[i], variable: e.target.value }
+                              setNewTemplate(prev => ({ ...prev, buttons: updated }))
+                            }}
+                            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          >
+                            <option value="">— Pilih Variable —</option>
+                            {availableVariables.map(v => (
+                              <option key={v} value={v}>{`{{${v}}}`}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <button
+                          onClick={() => {
+                            const updated = newTemplate.buttons.filter((_, idx) => idx !== i)
+                            setNewTemplate(prev => ({ ...prev, buttons: updated }))
+                          }}
+                          className="p-2 text-red-500 hover:text-red-700"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                    {newTemplate.buttons.length < 2 && (
+                      <button
+                        onClick={() => {
+                          setNewTemplate(prev => ({
+                            ...prev,
+                            buttons: [...prev.buttons, { text: '', url: '', variable: '' }]
+                          }))
+                        }}
+                        className="w-full px-3 py-2 text-sm border border-dashed border-border rounded-md text-muted-foreground hover:text-foreground hover:border-solid"
+                      >
+                        + Tambah Tombol
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
             </CardContent>
             <CardFooter className="flex justify-end gap-2 pt-4 border-t p-6">
               <Button
@@ -2457,7 +2558,8 @@ export default function WhatsAppDashboard() {
                       content: '',
                       category: 'billing',
                       enabled: true,
-                      meta_name: ''
+                      meta_name: '',
+                      buttons: []
                     })
                   } catch (error) {
                     console.error('Error in cancel button:', error)

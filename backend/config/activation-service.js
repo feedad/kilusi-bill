@@ -26,9 +26,14 @@ class ActivationService {
 
         // 2. Calculate dates
         const activeDate = new Date();
-        const isolirDate = await BillingCycleService.calculateIsolirDate(
+        let isolirDate = await BillingCycleService.calculateIsolirDate(
             customerId, activeDate, null, siklus
         );
+
+        // Prepaid: isolir_date = active_date (trial handles suspension within 30 min)
+        if (billingType === 'prepaid') {
+            isolirDate = new Date(activeDate);
+        }
 
         // 3. Update services table
         await query(`
@@ -44,7 +49,7 @@ class ActivationService {
         let invoice = null;
         try {
             invoice = await billingService.createCustomerInvoice(
-                customerId, serviceResult.package_id, billingType
+                customerId, serviceResult.package_id, billingType, serviceResult.service_number
             );
         } catch (e) {
             logger.error(`Failed to create installation invoice for ${customerId}:`, e);
@@ -83,7 +88,7 @@ class ActivationService {
         // 7. If prepaid, set trial timer (non-blocking)
         if (billingType === 'prepaid') {
             try {
-                await this.setPrepaidTrial(customerId, invoice);
+                await this.setPrepaidTrial(customerId, invoice, serviceResult.id);
             } catch (e) {
                 logger.warn(`Prepaid trial setup failed for ${customerId}: ${e.message}`);
             }
@@ -93,7 +98,7 @@ class ActivationService {
         return { customerId, billingType, invoice, alreadyActive: false };
     }
 
-    async setPrepaidTrial(customerId, invoice) {
+    async setPrepaidTrial(customerId, invoice, serviceId) {
         const trialExpires = new Date();
         trialExpires.setMinutes(trialExpires.getMinutes() + 30);
 
@@ -102,10 +107,10 @@ class ActivationService {
             SET trial_active = true,
                 trial_expires_at = $1,
                 updated_at = CURRENT_TIMESTAMP
-            WHERE customer_id = $2
-        `, [trialExpires, customerId]);
+            WHERE id = $2
+        `, [trialExpires, serviceId]);
 
-        logger.info(`Prepaid trial set for customer ${customerId}, expires at ${trialExpires.toISOString()}`);
+        logger.info(`Prepaid trial set for service ${serviceId}, expires at ${trialExpires.toISOString()}`);
     }
 }
 

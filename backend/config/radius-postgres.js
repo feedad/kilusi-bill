@@ -203,9 +203,9 @@ async function createOrUpdateRadiusUser(username, password, groupname = 'default
                 DO UPDATE SET value = EXCLUDED.value
             `, [username, password]);
 
-            // Delete all existing group assignments for this user (clean both with/without suffix)
+            // Delete all existing group assignments for this user (exact match for both with/without suffix)
             const baseUsername = username.split('@')[0];
-            await client.query(`DELETE FROM radusergroup WHERE username LIKE $1`, [`${baseUsername}%`]);
+            await client.query(`DELETE FROM radusergroup WHERE username = $1 OR username = $2`, [username, baseUsername]);
 
             // Add user to group (only one group)
             await client.query(`
@@ -290,6 +290,7 @@ async function getUserConnectionStatus(username) {
                 framedipaddress,
                 acctstarttime,
                 acctsessiontime,
+                acctsessionid,
                 callingstationid
             FROM radacct
             WHERE username = $1 AND acctstoptime IS NULL
@@ -297,18 +298,17 @@ async function getUserConnectionStatus(username) {
             LIMIT 1
         `, [username]);
 
-        console.log(`[RADIUS-DEBUG] Active session query result:`, activeSession);
-
         if (activeSession) {
-            // Session is active - return real data without auto-stale detection
-            // RADIUS accounting only updates traffic data on session stop
             const result = {
                 online: true,
                 status: 'online',
                 ip_address: activeSession.framedipaddress,
+                framed_ip: activeSession.framedipaddress,
                 nas_ip: activeSession.nasipaddress,
                 session_start: activeSession.acctstarttime,
                 session_time: activeSession.acctsessiontime,
+                session_id: activeSession.acctsessionid,
+                acctsessionid: activeSession.acctsessionid,
                 mac_address: activeSession.callingstationid
             };
             console.log(`[RADIUS-DEBUG] Returning active session:`, result);

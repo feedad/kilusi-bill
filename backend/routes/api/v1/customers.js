@@ -263,31 +263,99 @@ router.post('/:id/activate', jwtAuth, asyncHandler(async (req, res) => {
     }
 }));
 
-// POST /api/v1/customers/:id/process - Approve waiting registration (waiting → pending)
+// POST /api/v1/customers/:id/process - Approve waiting registration (identity → create service)
 router.post('/:id/process', jwtAuth, asyncHandler(async (req, res) => {
     try {
         const { query, getOne } = require('../../../config/database');
+        const CustomerService = require('../../../services/customer-service');
+        const whatsappNotifications = require('../../../config/whatsapp-notifications');
 
-        // Verify customer exists and service is 'waiting'
-        const svc = await getOne(`
-            SELECT s.id, s.customer_id, s.status
-            FROM services s WHERE s.customer_id = $1
-            ORDER BY s.created_at DESC LIMIT 1
-        `, [req.params.id]);
-
-        if (!svc) {
+        // Verify customer exists
+        const customer = await getOne('SELECT id, name, phone, address, selected_package_id FROM customers WHERE id = $1', [req.params.id]);
+        if (!customer) {
             return res.sendError('NOT_FOUND', 'Customer tidak ditemukan');
         }
 
-        if (svc.status !== 'waiting') {
-            return res.sendError('INVALID_STATUS', 'Hanya pendaftaran dengan status waiting yang bisa diproses');
+        // Check no existing active service for this customer
+        const existing = await getOne(
+            'SELECT id FROM services WHERE customer_id = $1 AND status != \'waiting\' LIMIT 1',
+            [req.params.id]
+        );
+        if (existing) {
+            return res.sendError('INVALID_STATUS', 'Pelanggan sudah memiliki layanan yang aktif');
         }
 
-        // Update service status from 'waiting' to 'pending' (siap instalasi)
-        await query(`
-            UPDATE services SET status = 'pending', updated_at = CURRENT_TIMESTAMP
-            WHERE id = $1
-        `, [svc.id]);
+        if (!customer.selected_package_id) {
+            return res.sendError('VALIDATION', 'Paket layanan belum dipilih');
+        }
+
+        // Read defaults from customer_default_settings
+        const defaults = await query(`
+            SELECT field_name, default_value FROM customer_default_settings
+            WHERE is_active = true AND field_name IN ('billing_type', 'billing_cycle', 'pppoe_suffix', 'pppoe_password')
+        `);
+        const defMap = {};
+        defaults.rows.forEach(r => { defMap[r.field_name] = r.default_value; });
+
+        // Clean up any waiting service (from old flow)
+        await query("DELETE FROM services WHERE customer_id = $1 AND status = 'waiting'", [req.params.id]);
+
+        // Create service with defaults
+        const serviceData = await CustomerService.createService(req.params.id, {
+            package_id: customer.selected_package_id,
+            billing_type: defMap.billing_type || 'prepaid',
+            siklus: defMap.billing_cycle || 'tetap',
+            pppoe_suffix: defMap.pppoe_suffix || 'kilusi.id',
+            pppoe_password: defMap.pppoe_password || '1234567',
+            status: 'pending'
+        });
+
+        // Create installation record
+        const { technician_id, scheduled_date, notes } = req.body;
+        if (technician_id || scheduled_date || notes) {
+            await query(`
+                INSERT INTO installations (customer_id, technician_id, scheduled_date, notes, status)
+                VALUES ($1, $2, $3, $4, 'scheduled')
+            `, [req.params.id, technician_id || null, scheduled_date || null, notes || null]);
+        }
+
+        // Send WA notification to technician (non-blocking)
+        if (technician_id) {
+            try {
+                const technician = await getOne(
+                    'SELECT id, username as name, phone FROM users WHERE id = $1',
+                    [technician_id]
+                );
+                if (technician && technician.phone) {
+                    const packageData = await getOne(
+                        'SELECT id, name, speed, price FROM packages WHERE id = $1',
+                        [customer.selected_package_id]
+                    );
+                    const installationJob = {
+                        job_number: `INS-${customer.id}`,
+                        installation_date: scheduled_date || new Date().toISOString(),
+                        installation_time: scheduled_date
+                            ? new Date(scheduled_date).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+                            : 'TBD',
+                        customer_name: customer.name,
+                        customer_phone: customer.phone,
+                        customer_address: customer.address || '',
+                        package_name: packageData?.name || '',
+                        notes: notes || 'Tidak ada catatan',
+                        equipment_needed: 'Standard equipment',
+                        priority: 'Normal',
+                    };
+                    await whatsappNotifications.sendInstallationJobNotification(
+                        technician, installationJob, customer, packageData
+                    );
+                    logger.info(`Installation WA sent to technician ${technician.name} for customer ${req.params.id}`);
+                }
+            } catch (waErr) {
+                logger.warn(`Failed to send WA to technician for ${req.params.id}:`, waErr.message);
+            }
+        }
+
+        logger.info(`Customer ${req.params.id} processed: service + installation created`);
 
         return res.sendSuccess({
             id: req.params.id,
@@ -303,12 +371,16 @@ router.post('/:id/process', jwtAuth, asyncHandler(async (req, res) => {
 // GET /api/v1/customers/:id/package-history
 router.get('/:id/package-history', jwtAuth, asyncHandler(async (req, res) => {
     const { query } = require('../../../config/database');
-    const result = await query(`
-        SELECT * FROM package_change_history
-        WHERE customer_id = $1
-        ORDER BY changed_at DESC
-        LIMIT 50
-    `, [req.params.id]);
+    const { service_number } = req.query;
+    let sql, params;
+    if (service_number) {
+        sql = `SELECT * FROM package_change_history WHERE customer_id = $1 AND service_number = $2 ORDER BY changed_at DESC LIMIT 50`;
+        params = [req.params.id, service_number];
+    } else {
+        sql = `SELECT * FROM package_change_history WHERE customer_id = $1 ORDER BY changed_at DESC LIMIT 50`;
+        params = [req.params.id];
+    }
+    const result = await query(sql, params);
     return res.sendSuccess(result.rows);
 }));
 

@@ -44,4 +44,39 @@ router.get('/settings', async (req, res) => {
     }
 });
 
+// GET /api/v1/public/bank-accounts
+// Returns bank accounts + company info for the isolir page
+router.get('/bank-accounts', async (req, res) => {
+    try {
+        const company = await getSetting('company') || {};
+        const paymentSettings = await getSetting('payment_settings') || {};
+        const branding = await getSetting('branding') || {};
+
+        res.json({
+            success: true,
+            data: {
+                company: {
+                    name: company.name || 'Kilusi Bill',
+                    address: company.address || '',
+                    phone: company.phone || '',
+                    email: company.email || '',
+                    website: company.website || '',
+                    supportContacts: company.supportContacts || [],
+                    operatingHours: company.operatingHours || {}
+                },
+                branding: {
+                    siteTitle: branding.siteTitle || 'Kilusi Bill',
+                    logoUrl: branding.logoUrl || '',
+                    faviconUrl: branding.faviconUrl || ''
+                },
+                bankAccounts: (paymentSettings.bank_accounts || []).filter(b => b.isActive !== false),
+                ewallets: (paymentSettings.ewallets || []).filter(e => e.isActive !== false)
+            }
+        });
+    } catch (error) {
+        logger.error('Error fetching bank accounts:', error);
+        res.status(500).json({ success: false, message: 'Gagal memuat data pembayaran' });
+    }
+});
+
 module.exports = router;

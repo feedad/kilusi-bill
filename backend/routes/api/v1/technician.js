@@ -160,59 +160,58 @@ router.post('/customers/:id/activate', async (req, res) => {
 
     try {
         await transaction(async (client) => {
-            // 1. Update Customer Technical details & Status
-            const updateCustomerResult = await client.query(`
-                UPDATE customers 
-                SET device_id = $1, -- ONT SN
-                    package_id = $2,
-                    latitude = $3,
-                    longitude = $4,
-                    region_id = $5,
-                    status = 'active',
-                    odp_name = $6,
-                    odp_port = $7,
-                    odp_id = $8,
-                    active_date = NOW(),
-                    install_date = NOW()
-                WHERE id = $9
-                RETURNING id, name
-            `, [
-                ont_sn,
-                package_id,
-                coordinates?.lat || null,
-                coordinates?.lng || null,
-                region_id || null,
-                odp_name || (odp_id ? (await getOdpName(client, odp_id)) : null),
-                port_no,
-                odp_id || null,
-                id
-            ]);
-
-            if (updateCustomerResult.rowCount === 0) {
-                throw new Error('Customer ID not found: ' + id);
-            }
-
-            // 2. Update services table as well (billing reads from services)
-            const BillingCycleService = require('../../../config/billing-cycle-service');
-            const activeDate = new Date();
+            // 1. Find the service to activate (prefer pending/waiting, fallback to latest)
             const srvResult = await client.query(
-                'SELECT siklus FROM services WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1',
+                `SELECT id, service_number, siklus, package_id FROM services
+                 WHERE customer_id = $1
+                 ORDER BY CASE status WHEN 'pending' THEN 0 WHEN 'waiting' THEN 1 ELSE 2 END, created_at DESC
+                 LIMIT 1`,
                 [id]
             );
-            if (srvResult.rows.length > 0) {
-                const siklus = srvResult.rows[0].siklus || 'profile';
-                const isolirDate = await BillingCycleService.calculateIsolirDate(id, activeDate, null, siklus);
+            if (srvResult.rows.length === 0) {
+                throw new Error('No service found for customer ' + id);
+            }
+            const srv = srvResult.rows[0];
+
+            // 2. Activate the service
+            const BillingCycleService = require('../../../config/billing-cycle-service');
+            const activeDate = new Date();
+            const siklus = srv.siklus || 'profile';
+            const isolirDate = await BillingCycleService.calculateIsolirDate(id, activeDate, null, siklus);
+
+            await client.query(`
+                UPDATE services
+                SET status = 'active',
+                    active_date = $1,
+                    isolir_date = $2,
+                    installation_date = NOW(),
+                    package_id = COALESCE($3, package_id),
+                    region_id = COALESCE($4, region_id),
+                    latitude = COALESCE($5, latitude),
+                    longitude = COALESCE($6, longitude),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = $7
+            `, [
+                activeDate, isolirDate,
+                package_id || null,
+                region_id || null,
+                coordinates?.lat || null,
+                coordinates?.lng || null,
+                srv.id
+            ]);
+
+            // 3. Update technical_details with ONT SN
+            if (ont_sn) {
                 await client.query(`
-                    UPDATE services
-                    SET status = 'active',
-                        active_date = $1,
-                        isolir_date = $2,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE customer_id = $3
-                `, [activeDate, isolirDate, id]);
+                    INSERT INTO technical_details (service_id, device_serial_number, updated_at)
+                    VALUES ($1, $2, NOW())
+                    ON CONFLICT (service_id) DO UPDATE SET
+                        device_serial_number = $2,
+                        updated_at = NOW()
+                `, [srv.id, ont_sn]);
             }
 
-            // 3. Link to ODP via cable_routes (if ODP selected)
+            // 4. Link to ODP via cable_routes (if ODP selected)
             if (odp_id) {
                 const portCheck = await client.query(`
                     SELECT id FROM cable_routes WHERE odp_id = $1 AND port_number = $2 AND status = 'connected'

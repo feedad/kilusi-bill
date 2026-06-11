@@ -389,3 +389,13 @@ input[type="time"] {
 .textarea {
   @apply flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
 }
+
+/* Blog content dark mode overrides (content rendered via dangerouslySetInnerHTML) */
+.dark .blog-content .bg-gray\35 0 { background-color: #1e293b; }
+.dark .blog-content .bg-yellow-50 { background-color: #422006; }
+.dark .blog-content .border-yellow-200 { border-color: #713f12; }
+.dark .blog-content .bg-blue-50 { background-color: #172554; }
+.dark .blog-content .border-blue-200 { border-color: #1e40af; }
+.dark .blog-content .border-red-200 { border-color: #7f1d1d; }
+.dark .blog-content .bg-red-50 { background-color: #450a0a; }
+.dark .blog-content .bg-gray-100 { background-color: #1e293b; }

@@ -1,0 +1,1195 @@
+[
+  {
+    "id": "TC001",
+    "title": "Log in with phone and OTP to reach the portal",
+    "description": "This verifies that a customer can authenticate with phone number and OTP and land on the dashboard with account information visible.",
+    "category": "Customer Login",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the phone number field with a valid customer phone number"
+      },
+      {
+        "type": "action",
+        "description": "Request an OTP"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the OTP field with a valid code"
+      },
+      {
+        "type": "action",
+        "description": "Submit the verification"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the customer dashboard is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify account status, billing summary, and connected devices information are displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC002",
+    "title": "Log in with a valid token link to reach the portal",
+    "description": "This verifies that opening a valid customer token login link signs the user in and shows the dashboard.",
+    "category": "Customer Login",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/login/[token]"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the customer dashboard is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify account status and package information are displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC003",
+    "title": "View the main dashboard summary after login",
+    "description": "This verifies that the portal shows the customer's core service summary, including status, package, billing, devices, and announcements.",
+    "category": "Customer Dashboard",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the phone number field with a valid customer phone number"
+      },
+      {
+        "type": "action",
+        "description": "Request an OTP"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the OTP field with a valid code"
+      },
+      {
+        "type": "action",
+        "description": "Submit the verification"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify account status, package information, billing summary, connected devices, and active announcements are displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC004",
+    "title": "Restore the portal after reloading an authenticated session",
+    "description": "This verifies that a signed-in customer can revisit the portal and still see their dashboard information after a page reload.",
+    "category": "Customer Login",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the phone number field with a valid customer phone number"
+      },
+      {
+        "type": "action",
+        "description": "Request an OTP"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the OTP field with a valid code"
+      },
+      {
+        "type": "action",
+        "description": "Submit the verification"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /customer/portal"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the customer dashboard is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify account status and billing summary are displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC005",
+    "title": "Pay an unpaid invoice",
+    "description": "A customer can open an unpaid invoice, start payment, and reach the payment success page.",
+    "category": "Invoice Detail",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials for a customer account"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open an unpaid billing invoice with a known valid invoice identifier"
+      },
+      {
+        "type": "action",
+        "description": "Proceed to pay the invoice"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the payment success page is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a successful payment confirmation is visible"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC006",
+    "title": "View invoice list in the billing page",
+    "description": "This verifies that the billing page shows the customer invoice list with invoice details.",
+    "category": "Customer Billing",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the phone number field with a valid customer phone number"
+      },
+      {
+        "type": "action",
+        "description": "Request an OTP"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the OTP field with a valid code"
+      },
+      {
+        "type": "action",
+        "description": "Submit the verification"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /customer/billing"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the invoices list is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify invoice numbers, amounts, due dates, and status badges are displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC007",
+    "title": "View invoice details",
+    "description": "A customer can open an invoice and see its line items, totals, due date, and payment status.",
+    "category": "Invoice Detail",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials for a customer account"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open a billing invoice with a known valid invoice identifier"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify invoice line items and totals are displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the due date and payment status are displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC008",
+    "title": "Create a support ticket",
+    "description": "Verifies that a customer can submit a new support ticket and return to the support area with the ticket created.",
+    "category": "Support Tickets",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/support/tickets/new"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the ticket subject"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the ticket description"
+      },
+      {
+        "type": "action",
+        "description": "Select a ticket category"
+      },
+      {
+        "type": "action",
+        "description": "Select a ticket priority"
+      },
+      {
+        "type": "action",
+        "description": "Submit the ticket"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the ticket is created and visible in the support area"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the support ticket list is displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC009",
+    "title": "Open an invoice from the billing list",
+    "description": "This verifies that a customer can drill into an invoice from the billing list and see its detail page.",
+    "category": "Customer Billing",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the phone number field with a valid customer phone number"
+      },
+      {
+        "type": "action",
+        "description": "Request an OTP"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the OTP field with a valid code"
+      },
+      {
+        "type": "action",
+        "description": "Submit the verification"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /customer/billing"
+      },
+      {
+        "type": "action",
+        "description": "Open an invoice from the list"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the invoice detail page is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the invoice summary and payment status are displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC010",
+    "title": "Update the WiFi password",
+    "description": "A customer can change the WiFi password from WiFi settings and see a success notification.",
+    "category": "WiFi Settings",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials for a customer account"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open the WiFi settings page"
+      },
+      {
+        "type": "action",
+        "description": "Fill in a new password in the password field"
+      },
+      {
+        "type": "action",
+        "description": "Save the password change"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a success confirmation is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the updated password state is displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC011",
+    "title": "Add a follow-up message to a support ticket",
+    "description": "Verifies that a customer can add a new message to an existing support ticket and see it appear in the thread.",
+    "category": "Support Tickets",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/support"
+      },
+      {
+        "type": "action",
+        "description": "Open an existing support ticket"
+      },
+      {
+        "type": "action",
+        "description": "Add a new message to the ticket thread"
+      },
+      {
+        "type": "action",
+        "description": "Submit the message"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the new message appears in the thread"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the updated conversation is displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC012",
+    "title": "Show an error for invalid login details",
+    "description": "This verifies that invalid phone number or OTP input is rejected and an error message is shown.",
+    "category": "Customer Login",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the phone number field with an invalid phone number"
+      },
+      {
+        "type": "action",
+        "description": "Submit the verification"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a login error message is displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC013",
+    "title": "Update the WiFi name",
+    "description": "A customer can change the SSID from WiFi settings and see a success notification.",
+    "category": "WiFi Settings",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials for a customer account"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open the WiFi settings page"
+      },
+      {
+        "type": "action",
+        "description": "Fill in a new SSID in the SSID field"
+      },
+      {
+        "type": "action",
+        "description": "Save the SSID change"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a success confirmation is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the updated SSID is displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC014",
+    "title": "Update WiFi credentials successfully",
+    "description": "This verifies that a customer can change WiFi details and see a success confirmation after saving.",
+    "category": "Customer Settings WiFi",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the phone number field with a valid customer phone number"
+      },
+      {
+        "type": "action",
+        "description": "Request an OTP"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the OTP field with a valid code"
+      },
+      {
+        "type": "action",
+        "description": "Submit the verification"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /customer/settings/wifi"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the WiFi name field with a valid new name"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the WiFi password field with a valid new password"
+      },
+      {
+        "type": "action",
+        "description": "Save the WiFi settings"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a success confirmation is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the updated WiFi details are displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC015",
+    "title": "View support ticket list",
+    "description": "Verifies that a customer can open the support area and see their existing tickets and statuses.",
+    "category": "Support Tickets",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/support"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify existing support tickets are displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify ticket statuses are displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC016",
+    "title": "Add a follow-up message to an existing ticket",
+    "description": "This verifies that a customer can open a ticket and post an additional message in the conversation thread.",
+    "category": "Customer Support",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the phone number field with a valid customer phone number"
+      },
+      {
+        "type": "action",
+        "description": "Request an OTP"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the OTP field with a valid code"
+      },
+      {
+        "type": "action",
+        "description": "Submit the verification"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /customer/support"
+      },
+      {
+        "type": "action",
+        "description": "Open an existing support ticket"
+      },
+      {
+        "type": "action",
+        "description": "Add a follow-up message to the thread"
+      },
+      {
+        "type": "action",
+        "description": "Submit the message"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the new message appears in the ticket thread"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the ticket conversation remains open"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC017",
+    "title": "View device connection details",
+    "description": "A customer can open device settings and see the current SSID, hidden WiFi password state, and connected devices list.",
+    "category": "Device Settings",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials for a customer account"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open the device settings page"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the current SSID is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the connected devices list is displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC018",
+    "title": "View the device settings summary",
+    "description": "This verifies that the device settings page shows the current WiFi details and connected device information for the customer.",
+    "category": "Customer Settings Device",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the phone number field with a valid customer phone number"
+      },
+      {
+        "type": "action",
+        "description": "Request an OTP"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the OTP field with a valid code"
+      },
+      {
+        "type": "action",
+        "description": "Submit the verification"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /customer/settings/device"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the current SSID and WiFi password are displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify connected devices information is displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC019",
+    "title": "View the WiFi settings page",
+    "description": "This verifies that a customer can open WiFi settings and see the fields needed to manage wireless credentials.",
+    "category": "Customer Settings WiFi",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the phone number field with a valid customer phone number"
+      },
+      {
+        "type": "action",
+        "description": "Request an OTP"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the OTP field with a valid code"
+      },
+      {
+        "type": "action",
+        "description": "Submit the verification"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /customer/settings/wifi"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify WiFi credential fields are displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the current network name is displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC020",
+    "title": "Switch to payment history in billing",
+    "description": "This verifies that a customer can view payment history from the billing page.",
+    "category": "Customer Billing",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the phone number field with a valid customer phone number"
+      },
+      {
+        "type": "action",
+        "description": "Request an OTP"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the OTP field with a valid code"
+      },
+      {
+        "type": "action",
+        "description": "Submit the verification"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /customer/billing"
+      },
+      {
+        "type": "action",
+        "description": "Switch to the payment history tab"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify payment history is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify payment dates, amounts, and methods are displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC021",
+    "title": "Restart the device",
+    "description": "A customer can initiate a device reboot from device settings and see the reboot action complete.",
+    "category": "Device Settings",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials for a customer account"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open the device settings page"
+      },
+      {
+        "type": "action",
+        "description": "Restart the device"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a reboot completion confirmation is visible"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC022",
+    "title": "View support ticket details",
+    "description": "Verifies that a customer can open a support ticket and see the ticket details and message thread.",
+    "category": "Support Tickets",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/support"
+      },
+      {
+        "type": "action",
+        "description": "Open an existing support ticket"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the ticket details are displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the message thread is displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC023",
+    "title": "Switch to another linked account from the dashboard",
+    "description": "This verifies that a customer with multiple linked accounts can change the active account and see the dashboard refresh accordingly.",
+    "category": "Customer Dashboard",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the phone number field with a valid customer phone number"
+      },
+      {
+        "type": "action",
+        "description": "Request an OTP"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the OTP field with a valid code"
+      },
+      {
+        "type": "action",
+        "description": "Submit the verification"
+      },
+      {
+        "type": "action",
+        "description": "Switch to another linked account"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the dashboard displays a different account's details"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the account summary updates for the selected account"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC024",
+    "title": "Reveal and hide the WiFi password",
+    "description": "A customer can reveal the hidden WiFi password in device settings and hide it again afterward.",
+    "category": "Device Settings",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials for a customer account"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open the device settings page"
+      },
+      {
+        "type": "action",
+        "description": "Reveal the WiFi password"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the WiFi password is visible"
+      },
+      {
+        "type": "action",
+        "description": "Hide the WiFi password"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the WiFi password is hidden"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC025",
+    "title": "Update profile information",
+    "description": "Verifies that a customer can edit profile settings and see the saved profile information afterward.",
+    "category": "Profile Settings",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/settings/profile"
+      },
+      {
+        "type": "action",
+        "description": "Edit the profile information"
+      },
+      {
+        "type": "action",
+        "description": "Save the profile changes"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the updated profile information is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a success confirmation is visible"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC026",
+    "title": "Use a dashboard quick action to open billing",
+    "description": "This verifies that a customer can start from the dashboard and open the billing area through a quick action.",
+    "category": "Customer Dashboard",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the phone number field with a valid customer phone number"
+      },
+      {
+        "type": "action",
+        "description": "Request an OTP"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the OTP field with a valid code"
+      },
+      {
+        "type": "action",
+        "description": "Submit the verification"
+      },
+      {
+        "type": "action",
+        "description": "Open the billing quick action"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the billing page is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the invoices section is displayed"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC027",
+    "title": "View profile details",
+    "description": "Verifies that a customer can open profile settings and see their current profile information.",
+    "category": "Profile Settings",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/settings/profile"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the customer profile information is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the customer contact and address details are displayed"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC028",
+    "title": "View referral code and rewards",
+    "description": "Verifies that a customer can open the referral program and see their referral code, history, and earned rewards.",
+    "category": "Referral Program",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/referrals"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the referral code is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify referral history and earned rewards are displayed"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC029",
+    "title": "View referral code and referral history",
+    "description": "This verifies that a customer can open the referrals page and see their referral code and referral activity.",
+    "category": "Customer Referrals",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the phone number field with a valid customer phone number"
+      },
+      {
+        "type": "action",
+        "description": "Request an OTP"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the OTP field with a valid code"
+      },
+      {
+        "type": "action",
+        "description": "Submit the verification"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /customer/referrals"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the referral code is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify referral history is displayed"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC030",
+    "title": "Copy referral link",
+    "description": "Verifies that a customer can copy their referral link from the referral program.",
+    "category": "Referral Program",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/referrals"
+      },
+      {
+        "type": "action",
+        "description": "Copy the referral link"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a copy confirmation is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the referral link remains available"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC031",
+    "title": "Keep WiFi settings ready when changes are not submitted",
+    "description": "A customer can enter new WiFi credentials without applying them and the page remains on the WiFi settings screen.",
+    "category": "WiFi Settings",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login credentials for a customer account"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open the WiFi settings page"
+      },
+      {
+        "type": "action",
+        "description": "Fill in a new SSID in the SSID field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in a new password in the password field"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the WiFi settings form remains visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify no success confirmation is visible"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC032",
+    "title": "View the empty state for billing history",
+    "description": "This verifies that the billing page shows a clear empty state when there are no invoices or payment history records to display.",
+    "category": "Customer Billing",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the phone number field with a valid customer phone number"
+      },
+      {
+        "type": "action",
+        "description": "Request an OTP"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the OTP field with a valid code"
+      },
+      {
+        "type": "action",
+        "description": "Submit the verification"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /customer/billing"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an empty state is displayed for invoices or payment history"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC033",
+    "title": "View an empty or closed support thread",
+    "description": "This verifies that a customer can open a ticket with no active discussion and see an appropriate empty or closed state.",
+    "category": "Customer Support",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /customer/login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the phone number field with a valid customer phone number"
+      },
+      {
+        "type": "action",
+        "description": "Request an OTP"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the OTP field with a valid code"
+      },
+      {
+        "type": "action",
+        "description": "Submit the verification"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /customer/support"
+      },
+      {
+        "type": "action",
+        "description": "Open a closed or empty ticket thread"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an empty or closed thread state is displayed"
+      }
+    ],
+    "priority": "Low"
+  }
+]

@@ -468,6 +468,11 @@ if (process.env.NODE_ENV !== 'production') {
     });
 }
 
+// Halaman isolir (suspension redirect) — public, tanpa auth
+app.get('/isolir', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'isolir.html'));
+});
+
 // Route RADIUS management page
 // NOTE: RADIUS page is served via routes/adminRadius.js which renders EJS view.
 // The legacy static HTML handler has been removed to avoid overriding the router.
@@ -542,6 +547,23 @@ app.use('/api/v1', apiV1Router);
 const oltRouter = require('./routes/api/v1/olts');
 app.use('/api/v1/olts', oltRouter);
 
+// QRIS branded payment page (public, for WhatsApp buttons + portal)
+app.get('/pay/:invoice_number', async (req, res) => {
+    try {
+        const { invoice_number } = req.params;
+        const { query } = require('./config/database');
+        const invResult = await query('SELECT id FROM invoices WHERE invoice_number = $1', [invoice_number]);
+        if (invResult.rows.length === 0) return res.status(404).send('Invoice tidak ditemukan');
+        const { generateBrandedPage } = require('./config/qris-generator');
+        const html = await generateBrandedPage(invResult.rows[0].id);
+        if (!html) return res.status(500).send('Gagal generate halaman');
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.setHeader('Cache-Control', 'public, max-age=3600');
+        res.send(html);
+    } catch (e) {
+        res.status(500).send('Internal error');
+    }
+});
 
 // Konstanta
 const VERSION = '1.0.0';
@@ -1257,6 +1279,16 @@ async function waitForDatabase() {
         // Initialize scheduler (Main Cron)
         require('./config/scheduler');
         logger.info('✅ Scheduler initialized');
+
+        // Initialize payment webhook notifier (LISTEN for payment_cancelled)
+        try {
+            const db = require('./config/database');
+            const paymentWebhookNotifier = require('./services/payment-webhook-notifier');
+            paymentWebhookNotifier.start(db.getPool());
+            logger.info('✅ Payment webhook notifier initialized');
+        } catch (e) {
+            logger.warn(`⚠️ Payment webhook notifier: ${e.message}`);
+        }
 
         // Initialize auto expense service
         const autoExpenseService = require('./config/auto-expense-service');

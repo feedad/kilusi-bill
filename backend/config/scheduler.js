@@ -24,6 +24,9 @@ class InvoiceScheduler {
         // All dynamic times loaded from billing_settings via rescheduleDynamicJobs()
         this.rescheduleDynamicJobs();
 
+        // Startup catch-up — jalankan jika ada cron job yang terlewat
+        this.runStartupCatchUp().catch(err => logger.error('[StartupCatchUp] Error:', err));
+
         // 4. RADIUS orphan cleanup - once daily at 03:00
         cron.schedule('0 3 * * *', async () => {
             try {
@@ -87,6 +90,94 @@ class InvoiceScheduler {
         logger.info('Meta template status sync scheduler initialized (every 30 min)');
     }
 
+    // ───────────── Startup Catch-Up ─────────────
+
+    hasTimePassed(timeStr) {
+        const now = new Date();
+        const [h, m] = (timeStr || '07:00').split(':').map(Number);
+        return now.getHours() > h || (now.getHours() === h && now.getMinutes() >= m);
+    }
+
+    async runStartupCatchUp() {
+        try {
+            const BillingCycleService = require('./billing-cycle-service');
+            const settings = await BillingCycleService.getBillingSettings();
+
+            const results = {};
+            if (this.hasTimePassed(settings.invoice_time))    results.invoices    = await this.startupCatchUpInvoices();
+            if (this.hasTimePassed(settings.reminder_time))   results.reminders   = await this.startupCatchUpReminders();
+            if (this.hasTimePassed(settings.suspension_time)) results.suspensions = await this.startupCatchUpSuspensions();
+
+            const summaries = [];
+            if (results.invoices)    summaries.push(`invoices=${results.invoices.created}/${results.invoices.skipped}`);
+            if (results.reminders)   summaries.push(`reminders=${results.reminders.sent}`);
+            if (results.suspensions) summaries.push(`suspensions=${results.suspensions.suspended}`);
+            if (summaries.length > 0) logger.info(`[StartupCatchUp] ${summaries.join(', ')}`);
+            else                       logger.info('[StartupCatchUp] Belum lewat jam cron, skip semua');
+        } catch (error) {
+            logger.error('[StartupCatchUp] Error:', error);
+        }
+    }
+
+    async startupCatchUpInvoices() {
+        const { query } = require('./database');
+        const today = new Date();
+        const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+        const existing = await query('SELECT COUNT(*) as cnt FROM invoices WHERE created_at >= $1', [startOfDay]);
+        if (parseInt(existing.rows[0].cnt) > 0) {
+            logger.info('[CatchUp] Invoice sudah tergenerate hari ini, skip');
+            return { created: 0, skipped: 0 };
+        }
+
+        logger.info('[CatchUp] Invoice belum ada — menjalankan catch-up...');
+        const r1 = await this.generateDailyInvoicesForFixedAndProfile();
+        const r2 = await this.generateDailyInvoicesByBillingDay();
+        const totalCreated = (r1?.created || 0) + (r2?.created || 0);
+        logger.info(`[CatchUp] Invoice catch-up selesai: ${totalCreated} created`);
+        return { created: totalCreated, skipped: (r1?.skipped || 0) + (r2?.skipped || 0) };
+    }
+
+    async startupCatchUpReminders() {
+        const { query } = require('./database');
+        const whatsappNotifications = require('./whatsapp-notifications');
+
+        const invoices = await query(`
+            SELECT i.id, i.invoice_number, i.customer_id, i.due_date
+            FROM invoices i
+            WHERE i.due_date = (CURRENT_DATE + INTERVAL '1 day')
+              AND i.status IN ('unpaid', 'sent', 'overdue')
+              AND (i.sent_at IS NULL OR i.sent_at < CURRENT_DATE)
+        `);
+
+        if (invoices.rows.length === 0) {
+            logger.info('[CatchUp] Tidak ada reminder H-1 yang terlewat');
+            return { sent: 0 };
+        }
+
+        let sent = 0;
+        for (const invoice of invoices.rows) {
+            try {
+                await whatsappNotifications.sendDueDateReminder(invoice.id);
+                await query('UPDATE invoices SET sent_at = NOW() WHERE id = $1', [invoice.id]);
+                sent++;
+                logger.info(`[CatchUp] Reminder sent for invoice ${invoice.invoice_number}`);
+            } catch (error) {
+                logger.error(`[CatchUp] Reminder failed for invoice ${invoice.invoice_number}:`, error);
+            }
+        }
+        logger.info(`[CatchUp] Reminder catch-up selesai: ${sent} sent`);
+        return { sent };
+    }
+
+    async startupCatchUpSuspensions() {
+        const serviceSuspension = require('./serviceSuspension');
+        logger.info('[CatchUp] Menjalankan suspension catch-up...');
+        await serviceSuspension.checkAndSuspendOverdueCustomers();
+        logger.info('[CatchUp] Suspension catch-up selesai');
+        return { suspended: 0 };
+    }
+
     getDynamicInvoiceExpression(settings) {
         try {
             const timeStr = settings ? settings.invoice_time : '07:00';
@@ -112,7 +203,7 @@ class InvoiceScheduler {
     async checkVoucherUsage() {
         try {
             const VoucherService = require('../services/voucher-service');
-            await VoucherService.checkExpiredVouchers();
+            await VoucherService.checkAndUpdateExpiredVouchers();
         } catch (error) {
             logger.error('Error in voucher usage check:', error);
         }
@@ -123,7 +214,7 @@ class InvoiceScheduler {
             const { query } = require('./database');
             const serviceSuspension = require('./serviceSuspension');
             const expiredTrials = await query(`
-                SELECT c.id, c.name, c.phone, t.pppoe_username, s.id as service_id
+                SELECT c.id, c.name, c.phone, t.pppoe_username, s.id as service_id, s.service_number
                 FROM customers c
                 JOIN services s ON s.customer_id = c.id
                 LEFT JOIN technical_details t ON t.service_id = s.id
@@ -138,13 +229,14 @@ class InvoiceScheduler {
                 try {
                     const unpaidInvoice = await query(`
                         SELECT id FROM invoices
-                        WHERE customer_id = $1 AND status = 'unpaid'
+                        WHERE service_number = $1 AND status = 'unpaid'
                         LIMIT 1
-                    `, [customer.id]);
+                    `, [customer.service_number]);
 
                     if (unpaidInvoice.rows.length > 0) {
                         const customerData = {
                             id: customer.id,
+                            service_id: customer.service_id,
                             name: customer.name,
                             username: customer.pppoe_username,
                             pppoe_username: customer.pppoe_username,
@@ -156,8 +248,8 @@ class InvoiceScheduler {
 
                     await query(`
                         UPDATE services SET trial_active = false, updated_at = NOW()
-                        WHERE customer_id = $1
-                    `, [customer.id]);
+                        WHERE id = $1
+                    `, [customer.service_id]);
                 } catch (e) {
                     logger.error(`Error processing trial expiry for ${customer.id}:`, e.message);
                 }
@@ -178,6 +270,7 @@ class InvoiceScheduler {
                 FROM invoices i
                 WHERE i.status IN ('unpaid', 'sent')
                   AND i.due_date = (CURRENT_DATE + INTERVAL '1 day')
+                  AND (i.sent_at IS NULL OR i.sent_at < CURRENT_DATE)
             `);
 
             logger.info(`Found ${upcomingInvoices.rows.length} invoices with due_date tomorrow`);
@@ -185,6 +278,7 @@ class InvoiceScheduler {
             for (const invoice of upcomingInvoices.rows) {
                 try {
                     await whatsappNotifications.sendDueDateReminder(invoice.id);
+                    await query('UPDATE invoices SET sent_at = NOW() WHERE id = $1', [invoice.id]);
                     logger.info(`Due date reminder sent for invoice ${invoice.invoice_number} (due tomorrow)`);
                 } catch (error) {
                     logger.error(`Error sending due date reminder for invoice ${invoice.invoice_number}:`, error);
@@ -223,19 +317,19 @@ class InvoiceScheduler {
                         continue;
                     }
 
-                    // Check if invoice already exists for this month
+                    // Check if invoice already exists for this service this month
                     const currentDate = new Date();
                     const startOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
                     const endOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
 
-                    const existingInvoices = await billingManager.getInvoicesByCustomerAndDateRange(
-                        customer.username,
-                        startOfMonth,
-                        endOfMonth
-                    );
+                    const existingInvoice = await getOne(`
+                        SELECT id FROM invoices
+                        WHERE service_number = $1
+                        AND created_at >= $2 AND created_at <= $3
+                    `, [customer.service_number, startOfMonth, endOfMonth]);
 
-                    if (existingInvoices.length > 0) {
-                        logger.info(`Invoice already exists for customer ${customer.username} this month`);
+                    if (existingInvoice) {
+                        logger.info(`Invoice already exists for service ${customer.service_number} this month`);
                         continue;
                     }
 
@@ -354,14 +448,15 @@ class InvoiceScheduler {
                         continue;
                     }
 
-                    // Check if invoice already exists for this month
-                    const existingInvoices = await billingManager.getInvoicesByCustomerAndDateRange(
-                        customer.username,
-                        startOfMonth,
-                        endOfMonth
-                    );
-                    if (existingInvoices.length > 0) {
-                        logger.info(`Invoice already exists for customer ${customer.username} this month (daily generator)`);
+                    // Check if invoice already exists for this service this month
+                    const existingInvoice = await getOne(`
+                        SELECT id FROM invoices
+                        WHERE service_number = $1
+                        AND created_at >= $2 AND created_at <= $3
+                    `, [customer.service_number, startOfMonth, endOfMonth]);
+
+                    if (existingInvoice) {
+                        logger.info(`Invoice already exists for service ${customer.service_number} this month (daily generator)`);
                         continue;
                     }
 
@@ -398,14 +493,10 @@ class InvoiceScheduler {
                         amountWithTax = billingManager.calculatePriceWithTax(basePrice, taxRate);
                     }
 
-                    // Get service_number for this customer
-                    const svcResult = await query('SELECT service_number FROM services WHERE customer_id = $1 LIMIT 1', [customer.id]);
-                    const svcNumber = svcResult.rows.length > 0 ? svcResult.rows[0].service_number : null;
-
                     const invoiceData = {
                         customer_id: customer.id,
                         package_id: customer.package_id,
-                        service_number: svcNumber,
+                        service_number: customer.service_number,
                         amount: amountWithTax,
                         base_amount: basePrice,
                         tax_rate: taxRate,
@@ -491,12 +582,12 @@ class InvoiceScheduler {
 
             for (const service of eligibleServices) {
                 try {
-                    // Check if invoice already exists for this month
+                    // Check if invoice already exists for this service this month
                     const existingInvoice = await getOne(`
                         SELECT id FROM invoices
-                        WHERE customer_id = $1
+                        WHERE service_number = $1
                         AND created_at >= $2 AND created_at <= $3
-                    `, [service.customer_id, startOfMonth, endOfMonth]);
+                    `, [service.service_number, startOfMonth, endOfMonth]);
 
                     if (existingInvoice) {
                         logger.info(`Invoice already exists for service ${service.service_number} this month`);

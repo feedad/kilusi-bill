@@ -883,9 +883,28 @@ router.post('/switch-account', async (req, res) => {
             });
         }
 
-        // Verify current token
-        const decoded = jwt.verify(token, CUSTOMER_JWT_SECRET);
-        const currentPhone = decoded.phone;
+        let currentPhone = null;
+        let currentCustomerId = null;
+
+        // Try JWT first (for switch-account flow)
+        try {
+            const decoded = jwt.verify(token, CUSTOMER_JWT_SECRET);
+            currentPhone = decoded.phone;
+            currentCustomerId = decoded.customerId;
+        } catch (jwtError) {
+            // If JWT fails, try magic token (portal_access_token) for initial login flow
+            const CustomerTokenService = require('../../../services/customer-token-service');
+            const magicValidation = await CustomerTokenService.validateToken(token);
+            if (magicValidation.valid) {
+                currentPhone = magicValidation.customer.phone;
+                currentCustomerId = magicValidation.customer.id;
+            } else {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Token tidak valid atau kadaluarsa'
+                });
+            }
+        }
 
         // Verify target account (Service) belongs to same phone (Customer)
         // targetAccountId is Service ID

@@ -654,7 +654,7 @@ router.get('/invoices/paid', asyncHandler(async (req, res) => {
 
 // POST /api/v1/billing/invoices/rapel/calculate - Preview rapel calculation
 router.post('/invoices/rapel/calculate', asyncHandler(async (req, res) => {
-    const { customer_id, months } = req.body;
+    const { customer_id, months, service_number } = req.body;
     const numMonths = parseInt(months) || 1;
 
     if (!customer_id) {
@@ -670,11 +670,28 @@ router.post('/invoices/rapel/calculate', asyncHandler(async (req, res) => {
     if (customerResult.rows.length === 0) return res.sendNotFound('Customer');
     const customer = customerResult.rows[0];
 
-    const serviceResult = await query(
-        `SELECT s.service_number, s.package_id, s.siklus, s.isolir_date,
+    // Resolve service: if service_number provided, use it; otherwise check count
+    let svcFilter = `s.customer_id = $1`;
+    let svcParams = [customer_id];
+    let invFilter = `i.customer_id = $1`;
+    let invParams = [customer_id];
+    if (service_number) {
+        svcFilter = `s.service_number = $1`;
+        svcParams = [service_number];
+        invFilter = `i.service_number = $1`;
+        invParams = [service_number];
+    } else {
+        const countResult = await query(`SELECT COUNT(*) as cnt FROM services WHERE customer_id = $1`, [customer_id]);
+        if (parseInt(countResult.rows[0].cnt) > 1) {
+            return res.status(400).json({ error: 'Customer has multiple services — specify service_number' });
+        }
+    }
+
+    const serviceResult = await query(`
+        SELECT s.service_number, s.package_id, s.siklus, s.isolir_date,
                 p.name as package_name, p.price as package_price
          FROM services s JOIN packages p ON s.package_id = p.id
-         WHERE s.customer_id = $1 LIMIT 1`, [customer_id]
+         WHERE ${svcFilter} LIMIT 1`, svcParams
     );
     if (serviceResult.rows.length === 0) return res.sendNotFound('Service');
     const svc = serviceResult.rows[0];
@@ -682,7 +699,7 @@ router.post('/invoices/rapel/calculate', asyncHandler(async (req, res) => {
 
     // Find last invoice month (same logic as execute endpoint)
     const lastInvResult = await query(
-        `SELECT MAX(due_date) as last_due_date FROM invoices WHERE customer_id = $1`, [customer_id]
+        `SELECT MAX(due_date) as last_due_date FROM invoices i WHERE ${invFilter}`, invParams
     );
     const lastDueDate = lastInvResult.rows[0]?.last_due_date
         ? new Date(lastInvResult.rows[0].last_due_date)
@@ -741,26 +758,43 @@ router.post('/invoices/rapel/calculate', asyncHandler(async (req, res) => {
 
 // POST /api/v1/billing/invoices/rapel - Execute rapel (create invoices + payment)
 router.post('/invoices/rapel', asyncHandler(async (req, res) => {
-    const { customer_id, months, payment_method, payment_date, notes } = req.body;
+    const { customer_id, months, payment_method, payment_date, notes, service_number } = req.body;
     const numMonths = parseInt(months) || 1;
     const processedBy = req.user?.username || 'admin';
 
     if (!customer_id) return res.sendError('VALIDATION', 'Customer ID harus diisi');
     if (numMonths < 1 || numMonths > 12) return res.sendError('VALIDATION', 'Jumlah bulan harus 1-12');
 
+    // Resolve service scope
+    let svcFilter = `s.customer_id = $1`;
+    let svcParams = [customer_id];
+    let invFilter = `i.customer_id = $1`;
+    let invParams = [customer_id];
+    if (service_number) {
+        svcFilter = `s.service_number = $1`;
+        svcParams = [service_number];
+        invFilter = `i.service_number = $1`;
+        invParams = [service_number];
+    } else {
+        const countResult = await query(`SELECT COUNT(*) as cnt FROM services WHERE customer_id = $1`, [customer_id]);
+        if (parseInt(countResult.rows[0].cnt) > 1) {
+            return res.status(400).json({ error: 'Customer has multiple services — specify service_number' });
+        }
+    }
+
     const result = await transaction(async (client) => {
-        const svcResult = await client.query(
-            `SELECT s.id as service_id, s.service_number, s.package_id, s.status as service_status,
+        const svcResult = await client.query(`
+            SELECT s.id as service_id, s.service_number, s.package_id, s.status as service_status,
                     s.siklus, s.isolir_date, p.name as package_name, p.price as package_price
              FROM services s JOIN packages p ON s.package_id = p.id
-             WHERE s.customer_id = $1 LIMIT 1`, [customer_id]
+             WHERE ${svcFilter} LIMIT 1`, svcParams
         );
         if (svcResult.rows.length === 0) throw new Error('Service not found');
         const svc = svcResult.rows[0];
         const price = parseFloat(svc.package_price) || 0;
 
         const lastInvResult = await client.query(
-            `SELECT MAX(due_date) as last_due_date FROM invoices WHERE customer_id = $1`, [customer_id]
+            `SELECT MAX(due_date) as last_due_date FROM invoices i WHERE ${invFilter}`, invParams
         );
         const lastDueDate = lastInvResult.rows[0]?.last_due_date
             ? new Date(lastInvResult.rows[0].last_due_date)
@@ -1084,7 +1118,8 @@ router.post('/invoices', asyncHandler(async (req, res) => {
         package_id,
         amount,
         due_date,
-        notes
+        notes,
+        service_number: reqServiceNumber
     } = req.body;
 
     // Validation with detailed field-level errors
@@ -1145,8 +1180,17 @@ router.post('/invoices', asyncHandler(async (req, res) => {
     const invoiceNumber = generateInvoiceNumber();
 
     // Get service_number for this customer
-    const serviceResult = await query('SELECT service_number FROM services WHERE customer_id = $1 LIMIT 1', [customer_id]);
-    const serviceNumber = serviceResult.rows.length > 0 ? serviceResult.rows[0].service_number : null;
+    let serviceNumber = reqServiceNumber;
+    if (!serviceNumber) {
+        const serviceResult = await query('SELECT service_number FROM services WHERE customer_id = $1', [customer_id]);
+        if (serviceResult.rows.length === 0) {
+            return res.sendNotFound('Service');
+        }
+        if (serviceResult.rows.length > 1) {
+            return res.status(400).json({ error: 'Customer has multiple services — specify service_number in request' });
+        }
+        serviceNumber = serviceResult.rows[0].service_number;
+    }
 
     // Calculate all discounts (referral + compensation)
     const discountResult = await BillingDiscountIntegration.calculateInvoiceDiscounts(
@@ -1214,10 +1258,7 @@ router.post('/invoices', asyncHandler(async (req, res) => {
         const whatsappNotifications = require('../../../config/whatsapp-notifications');
         await whatsappNotifications.sendInvoiceCreatedNotification(customer_id, invoice.id);
         logger.info(`WhatsApp notification sent for invoice ${invoice.invoice_number}`);
-
-        // Update status to 'sent' after successful WhatsApp delivery
-        await query(`UPDATE invoices SET status = 'sent' WHERE id = $1`, [invoice.id]);
-        invoice.status = 'sent';
+        // sent_at already set inside sendInvoiceCreatedNotification — status stays unpaid
     } catch (notifError) {
         logger.error(`Failed to send WhatsApp notification for invoice ${invoice.invoice_number}:`, notifError.message);
         // Keep as 'draft' - sent_at already set, TAGIH column will be green
@@ -1365,72 +1406,73 @@ router.post('/payments', asyncHandler(async (req, res) => {
         updatedDates = await BillingCycleService.updateServiceDatesAfterPayment(invoice_id, payment_date || new Date());
 
         // Check if customer has any other unpaid invoices and update status if all paid
-        const unpaidInvoicesCheck = await query(`
-            SELECT COUNT(*) as unpaid_count
-            FROM invoices
-            WHERE customer_id = $1 AND status IN ('unpaid', 'suspended')
-        `, [invoice.customer_id]);
+        const serviceNumber = invoice.service_number;
+        if (!serviceNumber) {
+            logger.warn(`⚠️ No service_number on invoice ${invoice.id}`);
+        } else {
+            const unpaidInvoicesCheck = await query(`
+                SELECT COUNT(*) as unpaid_count
+                FROM invoices
+                WHERE service_number = $1 AND status IN ('unpaid', 'suspended')
+            `, [serviceNumber]);
 
-        const unpaidCount = parseInt(unpaidInvoicesCheck.rows[0].unpaid_count);
+            const unpaidCount = parseInt(unpaidInvoicesCheck.rows[0].unpaid_count);
 
-        if (unpaidCount === 0) {
-            // All invoices paid - need to restore service fully (RADIUS + MikroTik)
-            logger.info(`🔄 All invoices paid for customer ${invoice.customer_id}, starting full restoration...`);
+            if (unpaidCount === 0) {
+                logger.info(`🔄 All invoices paid for service ${serviceNumber}, starting full restoration...`);
 
-            // Get service data with customer and package info
-            const serviceDataQuery = await query(`
-                SELECT
-                    s.id as service_id,
-                    s.service_number,
-                    s.status as service_status,
-                    s.package_id,
-                    c.id as customer_id,
-                    c.name as customer_name,
-                    p.group as package_group,
-                    p.pppoe_profile
-                FROM services s
-                JOIN customers c ON c.id = s.customer_id
-                LEFT JOIN packages p ON p.id = s.package_id
-                WHERE s.customer_id = $1
-                LIMIT 1
-            `, [invoice.customer_id]);
+                // Get service data with customer and package info
+                const serviceDataQuery = await query(`
+                    SELECT
+                        s.id as service_id,
+                        s.service_number,
+                        s.status as service_status,
+                        s.package_id,
+                        c.id as customer_id,
+                        c.name as customer_name,
+                        p.group as package_group,
+                        p.pppoe_profile
+                    FROM services s
+                    JOIN customers c ON c.id = s.customer_id
+                    LEFT JOIN packages p ON p.id = s.package_id
+                    WHERE s.service_number = $1
+                `, [serviceNumber]);
 
-            if (serviceDataQuery.rows.length > 0) {
-                const serviceData = serviceDataQuery.rows[0];
+                if (serviceDataQuery.rows.length > 0) {
+                    const serviceData = serviceDataQuery.rows[0];
 
-                // Only restore if service is currently not active (was suspended)
-                if (serviceData.service_status !== 'active') {
-                    logger.info(`🔄 Restoring service ${serviceData.service_id} for customer ${serviceData.customer_name}...`);
+                    // Only restore if service is currently not active (was suspended)
+                    if (serviceData.service_status !== 'active') {
+                        logger.info(`🔄 Restoring service ${serviceData.service_id} for customer ${serviceData.customer_name}...`);
 
-                    try {
-                        // Call full restoration logic: RADIUS group, MikroTik profile, and kick user
-                        await serviceSuspension.restoreServiceByServiceId(
-                            serviceData.service_id,
-                            {
-                                name: serviceData.customer_name,
-                                service_number: serviceData.service_number,
-                                package_group: serviceData.package_group,
-                                pppoe_profile: serviceData.pppoe_profile
-                            },
-                            'Payment received - full restoration'
-                        );
+                        try {
+                            await serviceSuspension.restoreServiceByServiceId(
+                                serviceData.service_id,
+                                {
+                                    name: serviceData.customer_name,
+                                    service_number: serviceData.service_number,
+                                    package_group: serviceData.package_group,
+                                    pppoe_profile: serviceData.pppoe_profile
+                                },
+                                'Payment received - full restoration'
+                            );
 
+                            customerReactivated = true;
+                            logger.info(`✅ Service ${serviceNumber} fully restored`);
+                        } catch (restoreError) {
+                            logger.error(`❌ Failed to restore service ${serviceNumber}:`, restoreError);
+                            await query(`UPDATE services SET status = 'active', updated_at = NOW() WHERE service_number = $1`, [serviceNumber]);
+                        }
+                    } else {
+                        logger.info(`ℹ️ Service ${serviceNumber} already active, no restoration needed`);
                         customerReactivated = true;
-                        logger.info(`✅ Customer ${invoice.customer_id} fully restored - RADIUS group updated, MikroTik profile updated, user kicked for reconnection`);
-                    } catch (restoreError) {
-                        logger.error(`❌ Failed to restore service for customer ${invoice.customer_id}:`, restoreError);
-                        // Still update service status even if restoration fails
-                        await query(`UPDATE services SET status = 'active', updated_at = NOW() WHERE customer_id = $1`, [invoice.customer_id]);
                     }
                 } else {
-                    logger.info(`ℹ️ Service already active for customer ${invoice.customer_id}, no restoration needed`);
-                    customerReactivated = true;
+                    logger.warn(`⚠️ No service found for number ${serviceNumber}`);
                 }
             } else {
-                logger.warn(`⚠️ No service found for customer ${invoice.customer_id}`);
+                logger.info(`ℹ️ Service ${serviceNumber} still has ${unpaidCount} unpaid invoice(s)`);
             }
-        } else {
-            logger.info(`ℹ️ Customer ${invoice.customer_id} still has ${unpaidCount} unpaid invoices`);
         }
     }
 
@@ -1582,6 +1624,16 @@ router.post('/payments/:id/rollback', asyncHandler(async (req, res) => {
             }
 
             logger.info(`✅ Invoice ${payment.invoice_id} status changed to unpaid due to payment rollback`);
+
+            // Notify autopay that invoice is unpaid again (re-push for monitoring)
+            try {
+                const autopayService = require('../../../services/autopay-service');
+                await autopayService.notifyAutopayInvoiceUnpaid({
+                    invoice_id: payment.invoice_id,
+                });
+            } catch (autopayError) {
+                logger.error(`[Rollback] Failed to notify autopay for invoice ${payment.invoice_id}:`, autopayError.message);
+            }
         }
 
         // Delete the original accounting transaction for this payment to prevent duplicates
@@ -1674,7 +1726,6 @@ router.post('/invoices/:id/resend', asyncHandler(async (req, res) => {
         );
 
         if (notificationResult.success && !notificationResult.skipped) {
-            await query(`UPDATE invoices SET status = 'sent' WHERE id = $1`, [id]);
             logger.info(`✅ Invoice ${invoice.invoice_number} resent successfully`);
             return res.sendSuccess({ message: 'Invoice berhasil dikirim ulang', invoice_id: id, invoice_number: invoice.invoice_number, sent_at: new Date() }, { action: 'invoice_resent', customer_id: invoice.customer_id });
         } else if (notificationResult.skipped) {

@@ -133,30 +133,33 @@ webhookRouter.post('/:gateway', asyncHandler(async (req, res) => {
 
              // Restore service if all invoices paid (Tripay payment reactivates)
             try {
-                const unpaidCheck = await query(
-                    `SELECT COUNT(*) as cnt FROM invoices WHERE customer_id = (SELECT customer_id FROM invoices WHERE id = $1) AND status IN ('unpaid','suspended')`,
-                    [invoiceId]
-                );
-                if (parseInt(unpaidCheck.rows[0].cnt) === 0) {
-                    const serviceSuspension = require('../../../config/serviceSuspension');
-                    const svcData = await query(
-                        `SELECT s.id, s.service_number, c.name, p.group as package_group, p.pppoe_profile
-                         FROM services s JOIN customers c ON c.id = s.customer_id
-                         LEFT JOIN packages p ON p.id = s.package_id
-                         WHERE s.customer_id = (SELECT customer_id FROM invoices WHERE id = $1) LIMIT 1`,
-                        [invoiceId]
+                const svcNumber = await query(`SELECT service_number FROM invoices WHERE id = $1`, [invoiceId]);
+                const serviceNumber = svcNumber.rows[0]?.service_number;
+                if (serviceNumber) {
+                    const unpaidCheck = await query(
+                        `SELECT COUNT(*) as cnt FROM invoices WHERE service_number = $1 AND status IN ('unpaid','suspended')`,
+                        [serviceNumber]
                     );
-                    if (svcData.rows.length > 0 && svcData.rows[0].id) {
-                        await serviceSuspension.restoreServiceByServiceId(
-                            svcData.rows[0].id,
-                            { name: svcData.rows[0].name, service_number: svcData.rows[0].service_number, package_group: svcData.rows[0].package_group, pppoe_profile: svcData.rows[0].pppoe_profile },
-                            'Tripay - full restoration'
+                    if (parseInt(unpaidCheck.rows[0].cnt) === 0) {
+                        const serviceSuspension = require('../../../config/serviceSuspension');
+                        const svcData = await query(
+                            `SELECT s.id, s.service_number, c.name, p.group as package_group, p.pppoe_profile
+                             FROM services s JOIN customers c ON c.id = s.customer_id
+                             LEFT JOIN packages p ON p.id = s.package_id
+                             WHERE s.service_number = $1`,
+                            [serviceNumber]
                         );
-                        await query(`UPDATE services SET status = 'active', updated_at = NOW() WHERE customer_id = (SELECT customer_id FROM invoices WHERE id = $1)`, [invoiceId]);
-                        logger.info(`🔄 Service ${svcData.rows[0].id} restored via Tripay webhook`);
+                        if (svcData.rows.length > 0 && svcData.rows[0].id) {
+                            await serviceSuspension.restoreServiceByServiceId(
+                                svcData.rows[0].id,
+                                { name: svcData.rows[0].name, service_number: svcData.rows[0].service_number, package_group: svcData.rows[0].package_group, pppoe_profile: svcData.rows[0].pppoe_profile },
+                                'Tripay - full restoration'
+                            );
+                            logger.info(`🔄 Service ${serviceNumber} restored via Tripay webhook`);
+                        }
+                    } else {
+                        logger.info(`ℹ️ Service ${serviceNumber} still has ${unpaidCheck.rows[0].cnt} unpaid, skipping restore`);
                     }
-                } else {
-                    logger.info(`ℹ️ Customer still has ${unpaidCheck.rows[0].cnt} unpaid invoices, skipping restore`);
                 }
             } catch (e) { logger.warn('Restore service after Tripay payment failed:', e.message); }
 

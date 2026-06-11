@@ -5,22 +5,14 @@ import Link from 'next/link';
 import Navbar from '@/components/landing/Navbar';
 import Footer from '@/components/landing/Footer';
 import { CalendarIcon, EyeIcon } from '@heroicons/react/24/outline';
-
-async function getPosts() {
-    // Note: In Next.js App Router we can fetch directly in Server Component
-    // but for simplicity and to match the client-side paradigm used elsewhere, using fetch
-    // Actually, let's use client Component here to avoid build complexity with mixed envs
-    const res = await fetch('/api/v1/blog/posts');
-    const data = await res.json();
-    return data.data || [];
-}
+import { CONFIG } from '@/lib/config';
 
 export default function BlogListing() {
     const [posts, setPosts] = useState([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        fetch('/api/v1/blog/posts')
+        fetch(`${CONFIG.API_BASE_URL}/api/v1/blog/posts`)
             .then(res => res.json())
             .then(data => {
                 if (data.success) setPosts(data.data);
@@ -51,7 +43,7 @@ export default function BlogListing() {
                             {posts.map(post => (
                                 <Link href={`/blog/${post.slug}`} key={post.id} className="group">
                                     <div className="bg-slate-50 dark:bg-slate-900 rounded-2xl overflow-hidden border border-slate-100 dark:border-slate-800 hover:shadow-xl transition-all duration-300 h-full flex flex-col">
-                                        <div className="aspect-[16/9] bg-slate-200 relative overflow-hidden">
+                                        <div className="aspect-[16/9] bg-slate-200 dark:bg-slate-800 relative overflow-hidden">
                                             {post.cover_image ? (
                                                 <img
                                                     src={post.cover_image}
@@ -59,7 +51,7 @@ export default function BlogListing() {
                                                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                                                 />
                                             ) : (
-                                                <div className="w-full h-full flex items-center justify-center bg-blue-100 text-blue-500">
+                                                <div className="w-full h-full flex items-center justify-center bg-blue-100 dark:bg-blue-900 text-blue-500 dark:text-blue-300">
                                                     <span className="font-bold text-2xl">KILUSI</span>
                                                 </div>
                                             )}

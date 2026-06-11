@@ -789,7 +789,7 @@ async function getActiveCustomers() {
 /**
  * Update customer isolir status
  */
-async function updateCustomerIsolirStatus(phone, status) {
+async function updateCustomerIsolirStatus(phone, status, serviceNumber) {
     try {
         const customer = await getCustomerByPhone(phone);
         if (!customer) {
@@ -800,13 +800,22 @@ async function updateCustomerIsolirStatus(phone, status) {
         // 'isolated' stays 'isolated'
         const serviceStatus = status === 'isolated' ? 'isolated' : 'active';
 
-        // Update services table
-        await query('UPDATE services SET status = $1, updated_at = NOW() WHERE customer_id = $2', [serviceStatus, customer.id]);
+        // Update only the specific service if service_number is provided
+        let sql, params;
+        if (serviceNumber) {
+            sql = 'UPDATE services SET status = $1, updated_at = NOW() WHERE service_number = $2';
+            params = [serviceStatus, serviceNumber];
+        } else {
+            sql = 'UPDATE services SET status = $1, updated_at = NOW() WHERE customer_id = $2';
+            params = [serviceStatus, customer.id];
+        }
+        await query(sql, params);
 
-        logger.info(`Customer ${phone} isolir status updated to ${status}`);
+        const scope = serviceNumber ? `service_number=${serviceNumber}` : `customer_id=${customer.id}`;
+        logger.info(`Service status updated for ${scope} to ${status}`);
         return true;
     } catch (error) {
-        logger.error('Error updating customer isolir status:', error);
+        logger.error('Error updating service status:', error);
         throw error;
     }
 }
@@ -857,16 +866,25 @@ async function switchCustomerPackage(phone, packageId, saveHistory = true) {
 }
 
 /**
- * Set customer status by ID (updates services table)
+ * Set service status by service_id (updates services table)
+ * Falls back to customer_id if service_id is not provided
  */
-async function setCustomerStatusById(id, status) {
+async function setCustomerStatusById(id, status, serviceId) {
     try {
-        const sql = 'UPDATE services SET status = $1, updated_at = NOW() WHERE customer_id = $2';
-        await query(sql, [status, id]);
-        logger.info(`Customer services status updated for customer_id=${id} to '${status}'`);
+        let sql, params;
+        if (serviceId) {
+            sql = 'UPDATE services SET status = $1, updated_at = NOW() WHERE id = $2';
+            params = [status, serviceId];
+        } else {
+            sql = 'UPDATE services SET status = $1, updated_at = NOW() WHERE customer_id = $2';
+            params = [status, id];
+        }
+        await query(sql, params);
+        const scope = serviceId ? `service_id=${serviceId}` : `customer_id=${id}`;
+        logger.info(`Service status updated for ${scope} to '${status}'`);
         return true;
     } catch (error) {
-        logger.error(`Error updating customer status for customer_id=${id}:`, error);
+        logger.error(`Error updating service status:`, error);
         throw error;
     }
 }

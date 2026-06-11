@@ -5,6 +5,12 @@ import { toast } from 'react-hot-toast';
 import { UserIcon, PhoneIcon, MapPinIcon, TicketIcon, CheckBadgeIcon } from '@heroicons/react/24/outline';
 import { CONFIG } from '@/lib/config';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
+
+const CoordinateMap = dynamic(
+    () => import('@/components/CoordinateMap'),
+    { ssr: false }
+);
 
 export default function RegisterPage() {
     const searchParams = useSearchParams();
@@ -24,6 +30,7 @@ export default function RegisterPage() {
     const [loading, setLoading] = useState(false);
     const [checkingCode, setCheckingCode] = useState(false);
     const [codeValid, setCodeValid] = useState(null); // null, true, false
+    const [coordinates, setCoordinates] = useState<{ lat: number; lng: number } | null>(null);
 
     // Pre-fill from URL
     useEffect(() => {
@@ -84,10 +91,14 @@ export default function RegisterPage() {
         setLoading(true);
 
         try {
+            const payload = {
+                ...formData,
+                ...(coordinates ? { latitude: coordinates.lat, longitude: coordinates.lng } : {})
+            };
             const res = await fetch(`${CONFIG.API_BASE_URL}/api/v1/public/register`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(formData)
+                body: JSON.stringify(payload)
             });
 
             const data = await res.json();
@@ -124,7 +135,7 @@ export default function RegisterPage() {
                 </p>
             </div>
 
-            <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
+            <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-2xl">
                 <div className="bg-white dark:bg-slate-800 py-8 px-4 shadow sm:rounded-lg sm:px-10 border border-slate-200 dark:border-slate-700">
                     <form className="space-y-6" onSubmit={handleSubmit}>
 
@@ -245,6 +256,25 @@ export default function RegisterPage() {
                                     placeholder="Jalan, RT/RW, Kelurahan, Kecamatan"
                                 />
                             </div>
+                        </div>
+
+                        {/* Pin Location on Map */}
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                                Pin Lokasi Pemasangan
+                            </label>
+                            <p className="text-xs text-slate-500 mb-2">Seret pin ke posisi yang tepat</p>
+                            <div className="h-[250px] rounded-md overflow-hidden border border-slate-300 dark:border-slate-600">
+                                <CoordinateMap
+                                    address={formData.address}
+                                    onCoordinatesChange={(lat, lng) => setCoordinates({ lat, lng })}
+                                />
+                            </div>
+                            {coordinates && (
+                                <p className="mt-1 text-xs text-slate-500">
+                                    Lat: {coordinates.lat.toFixed(6)}, Lng: {coordinates.lng.toFixed(6)}
+                                </p>
+                            )}
                         </div>
 
                         <div>

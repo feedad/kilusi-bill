@@ -18,6 +18,11 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // Priority Exception: QRIS branded payment page — let Next.js rewrite handle it
+  if (request.nextUrl.pathname.startsWith('/pay/')) {
+    return NextResponse.next();
+  }
+
   // Extract subdomain from hostname
   const subdomain = hostname.split('.')[0];
 

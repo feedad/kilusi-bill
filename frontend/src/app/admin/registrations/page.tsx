@@ -36,7 +36,6 @@ import { Textarea } from '@/components/ui/textarea'
 import { formatCurrency } from '@/lib/utils'
 import { adminApi } from '@/lib/api-clients'
 import { API_BASE_URL } from '@/lib/api'
-import CustomerMap from '@/components/CustomerMap'
 import CoordinateMap from '@/components/CoordinateMap'
 import RegionModal from '@/components/RegionModal'
 import CustomerDefaultSettingsModal from '@/components/CustomerDefaultSettingsModal'
@@ -179,6 +178,30 @@ export default function RegistrationsPage() {
 
   const { defaults, getDefaultValue } = useCustomerDefaults()
   const [showSettingsModal, setShowSettingsModal] = useState(false)
+  const [technicians, setTechnicians] = useState<any[]>([])
+  const [selectedTechnicianId, setSelectedTechnicianId] = useState<string>('')
+  const [scheduledDate, setScheduledDate] = useState('')
+  const [scheduledTime, setScheduledTime] = useState('')
+  const [installNotes, setInstallNotes] = useState('')
+  const [fetchingTechnicians, setFetchingTechnicians] = useState(false)
+
+  useEffect(() => {
+    fetchTechnicians()
+  }, [])
+
+  const fetchTechnicians = async () => {
+    try {
+      setFetchingTechnicians(true)
+      const response = await adminApi.get('/api/v1/installations/technician/list')
+      if (response.data?.success) {
+        setTechnicians(response.data.data || [])
+      }
+    } catch (err) {
+      console.error('Error fetching technicians:', err)
+    } finally {
+      setFetchingTechnicians(false)
+    }
+  }
 
   useEffect(() => {
     fetchDashboardStats()
@@ -489,7 +512,11 @@ export default function RegistrationsPage() {
   }
 
   const handleProcessCustomer = async (customerId: string) => {
-    if (!window.confirm('Setujui pendaftaran ini? Pelanggan akan muncul di halaman Pelanggan.')) {
+    const technicianName = technicians.find(t => String(t.id) === String(selectedTechnicianId))?.name
+    const msg = technicianName
+      ? `Setujui pendaftaran ini?\nTeknisi: ${technicianName}\nTanggal: ${scheduledDate || 'Belum diatur'}`
+      : 'Setujui pendaftaran ini? (tanpa assign teknisi)'
+    if (!window.confirm(msg)) {
       return
     }
 
@@ -497,10 +524,24 @@ export default function RegistrationsPage() {
       setSubmittingBulk(true)
       setError(null)
 
-      const response = await adminApi.post(`/api/v1/customers/${customerId}/process`)
+      const scheduledAt = scheduledTime && scheduledDate
+        ? `${scheduledDate}T${scheduledTime}:00`
+        : scheduledDate
+          ? `${scheduledDate}T00:00:00`
+          : null
+
+      const response = await adminApi.post(`/api/v1/customers/${customerId}/process`, {
+        technician_id: selectedTechnicianId || null,
+        scheduled_date: scheduledAt,
+        notes: installNotes || null
+      })
 
       if (response.data.success) {
         setShowDetailModal(false)
+        setSelectedTechnicianId('')
+        setScheduledDate('')
+        setScheduledTime('')
+        setInstallNotes('')
         fetchCustomers() // Refresh customer list
       } else {
         setError(response.data.message || 'Gagal memproses pendaftaran')
@@ -1443,7 +1484,7 @@ export default function RegistrationsPage() {
           )}
 
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse">
+            <table className="w-full border-collapse uppercase">
               <thead>
                 <tr className="border-b bg-muted/50">
                   <th className="text-center p-3 font-semibold text-foreground whitespace-nowrap w-12">
@@ -1577,179 +1618,117 @@ export default function RegistrationsPage() {
         </div>
       </div>
 
-      {/* Customer Detail Modal */}
+      {/* Approve Registration Modal */}
       {showDetailModal && selectedCustomer && (
         <Dialog open={showDetailModal} onOpenChange={setShowDetailModal}>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Detail Pelanggan</DialogTitle>
+              <DialogTitle>Setujui Pendaftaran</DialogTitle>
             </DialogHeader>
             <div className="space-y-6">
-              {/* Informasi Dasar */}
+              {/* Data Pelanggan */}
               <div>
-                <h3 className="text-lg font-semibold text-foreground mb-4">Informasi Dasar</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm text-muted-foreground">ID Pelanggan</p>
-                    <p className="font-medium text-foreground font-mono mt-1">{selectedCustomer.customer_id || '-'}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Nama Lengkap</p>
-                    <p className="font-medium text-foreground">{selectedCustomer.name}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">NIK</p>
-                    <p className="font-medium text-foreground">{selectedCustomer.nik || '-'}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Nomor Telepon</p>
-                    <p className="font-medium text-foreground text-blue-600">{selectedCustomer.phone}</p>
-                  </div>
-                  <div className="md:col-span-2">
-                    <p className="text-sm text-muted-foreground">Alamat Tagihan</p>
-                    <p className="font-medium text-foreground">{selectedCustomer.address || '-'}</p>
-                  </div>
-                  <div className="md:col-span-2">
-                    <p className="text-sm text-muted-foreground">Alamat Instalasi</p>
-                    <p className="font-medium text-foreground">{selectedCustomer.installation_address || selectedCustomer.address || '-'}</p>
-                  </div>
-
-                  {/* Peta Lokasi */}
-                  {selectedCustomer.address && (
+                <h3 className="text-lg font-semibold text-foreground mb-4">Data Pelanggan</h3>
+                <div className="bg-muted/30 rounded-lg p-4 space-y-2">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Nama</p>
+                      <p className="font-medium">{selectedCustomer.name}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Telepon</p>
+                      <p className="font-medium text-blue-600">{selectedCustomer.phone}</p>
+                    </div>
                     <div className="md:col-span-2">
-                      <p className="text-sm text-muted-foreground mb-2">Lokasi pada Peta</p>
-                      <CustomerMap customer={selectedCustomer} />
+                      <p className="text-xs text-muted-foreground">Alamat</p>
+                      <p className="font-medium">{selectedCustomer.address || '-'}</p>
                     </div>
-                  )}
-                  <div>
-                    <p className="text-sm text-muted-foreground">Status</p>
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(selectedCustomer.status)}`}>
-                      {getStatusText(selectedCustomer.status)}
-                    </span>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Wilayah</p>
-                    <p className="font-medium text-foreground">{selectedCustomer.region_name || '-'}</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Informasi Layanan */}
-              <div>
-                <h3 className="text-lg font-semibold text-foreground mb-4">Informasi Layanan</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Nomor Layanan</p>
-                    <p className="font-medium text-foreground font-mono text-blue-600 mt-1">{selectedCustomer.service_number || '-'}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Paket</p>
-                    <p className="font-medium text-foreground mt-1">{selectedCustomer.package_name || '-'}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Router</p>
-                    <p className="font-medium text-foreground">{getRouterText(selectedCustomer.router, routers)}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Username PPPoE</p>
-                    <p className="font-medium text-foreground font-mono text-sm">{selectedCustomer.pppoe_username || '-'}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Password PPPoE</p>
-                    <p className="font-medium text-foreground font-mono text-sm">{selectedCustomer.pppoe_password || '-'}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Panjang Kabel</p>
-                    <p className="font-medium text-foreground">{selectedCustomer.cable_length ? `${selectedCustomer.cable_length} Meter` : '-'}</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Status Koneksi */}
-              <div>
-                <h3 className="text-lg font-semibold text-foreground mb-4">Status Koneksi</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Status Saat Ini</p>
-                    <div className={`inline-flex items-center px-3 py-2 rounded-full text-sm font-medium border ${getConnectionStatus(selectedCustomer).color}`}>
-                      <span className="mr-2">{getConnectionStatus(selectedCustomer).icon}</span>
-                      {getConnectionStatus(selectedCustomer).text}
-                    </div>
-                  </div>
-                  {selectedCustomer.connection_status?.ip_address && (
                     <div>
-                      <p className="text-sm text-muted-foreground">IP Address</p>
-                      <p className="font-medium text-foreground font-mono">{selectedCustomer.connection_status.ip_address}</p>
-                    </div>
-                  )}
-                  {selectedCustomer.connection_status?.nas_ip && (
-                    <div>
-                      <p className="text-sm text-muted-foreground">NAS Server</p>
-                      <p className="font-medium text-foreground font-mono">{selectedCustomer.connection_status.nas_ip}</p>
-                    </div>
-                  )}
-                  {selectedCustomer.connection_status?.session_start && (
-                    <div>
-                      <p className="text-sm text-muted-foreground">Session Start</p>
-                      <p className="font-medium text-foreground">
-                        {new Date(selectedCustomer.connection_status.session_start).toLocaleString('id-ID')}
+                      <p className="text-xs text-muted-foreground">Paket</p>
+                      <p className="font-medium">
+                        {selectedCustomer.package_name
+                          ? `${selectedCustomer.package_name}${selectedCustomer.package_price ? ` - ${formatCurrency(selectedCustomer.package_price)}` : ''}`
+                          : '-'}
                       </p>
                     </div>
-                  )}
-                  {selectedCustomer.connection_status?.last_seen && (
                     <div>
-                      <p className="text-sm text-muted-foreground">Terakhir Lihat</p>
-                      <p className="font-medium text-foreground">
-                        {new Date(selectedCustomer.connection_status.last_seen).toLocaleString('id-ID')}
-                      </p>
+                      <p className="text-xs text-muted-foreground">Status</p>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getStatusColor(selectedCustomer.status)}`}>
+                        {getStatusText(selectedCustomer.status)}
+                      </span>
                     </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Informasi Tagihan */}
-              <div>
-                <h3 className="text-lg font-semibold text-foreground mb-4">Informasi Tagihan</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Jenis Tagihan</p>
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${selectedCustomer.billing_type === 'prepaid' ? 'bg-blue-100 text-blue-800' :
-                      selectedCustomer.billing_type === 'postpaid' ? 'bg-green-100 text-green-800' :
-                        'bg-gray-100 text-gray-800'
-                      }`}>
-                      {getBillingTypeText(selectedCustomer.billing_type)}
-                    </span>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Siklus Tagihan</p>
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
-                      {getBillingCycleText(selectedCustomer.siklus)}
-                    </span>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Harga Paket</p>
-                    <p className="font-medium text-foreground">{selectedCustomer.package_price ? formatCurrency(selectedCustomer.package_price) : '-'}</p>
                   </div>
                 </div>
               </div>
 
-              {/* Informasi Tanggal */}
+              {/* Pin Lokasi */}
+              {selectedCustomer.address && (
+                <div>
+                  <h3 className="text-lg font-semibold text-foreground mb-4">Lokasi Pemasangan</h3>
+                  <div className="h-[250px] rounded-md overflow-hidden border border-slate-300 dark:border-slate-600">
+                    <CoordinateMap
+                      address={selectedCustomer.address}
+                      latitude={selectedCustomer.latitude}
+                      longitude={selectedCustomer.longitude}
+                      onCoordinatesChange={() => {}}
+                      readOnly
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Assign Teknisi & Jadwal */}
               <div>
-                <h3 className="text-lg font-semibold text-foreground mb-4">Informasi Tanggal</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <h3 className="text-lg font-semibold text-foreground mb-4">Assign Teknisi & Jadwal</h3>
+                <div className="space-y-4">
                   <div>
-                    <p className="text-sm text-muted-foreground">Tanggal Daftar</p>
-                    <p className="font-medium text-foreground">{formatDate(selectedCustomer.created_at)}</p>
+                    <Label htmlFor="technician">Teknisi</Label>
+                    <select
+                      id="technician"
+                      value={selectedTechnicianId}
+                      onChange={(e) => setSelectedTechnicianId(e.target.value)}
+                      className="block w-full mt-1 pl-3 pr-10 py-2 text-base border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
+                    >
+                      <option value="">-- Pilih Teknisi --</option>
+                      {technicians.map((t: any) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name} {t.phone ? `(${t.phone})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="installDate">Tanggal</Label>
+                      <input
+                        id="installDate"
+                        type="date"
+                        value={scheduledDate}
+                        onChange={(e) => setScheduledDate(e.target.value)}
+                        className="block w-full mt-1 pl-3 pr-10 py-2 text-base border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="installTime">Jam (Opsional)</Label>
+                      <input
+                        id="installTime"
+                        type="time"
+                        value={scheduledTime}
+                        onChange={(e) => setScheduledTime(e.target.value)}
+                        className="block w-full mt-1 pl-3 pr-10 py-2 text-base border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
+                      />
+                    </div>
                   </div>
                   <div>
-                    <p className="text-sm text-muted-foreground">Tanggal Aktif</p>
-                    <p className="font-medium text-foreground">{formatDate(selectedCustomer.active_date || selectedCustomer.install_date || '-')}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Tanggal Isolir</p>
-                    <p className={`font-medium ${isCustomerIsolir(selectedCustomer) || selectedCustomer.status === 'suspended' || selectedCustomer.status === 'inactive' ? 'text-red-600' : 'text-foreground'}`}>
-                      {formatDate(getIsolirDate(selectedCustomer) || '-')}
-                    </p>
+                    <Label htmlFor="installNotes">Catatan (Opsional)</Label>
+                    <textarea
+                      id="installNotes"
+                      rows={2}
+                      value={installNotes}
+                      onChange={(e) => setInstallNotes(e.target.value)}
+                      placeholder="Catatan untuk teknisi..."
+                      className="block w-full mt-1 border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md p-2.5"
+                    />
                   </div>
                 </div>
               </div>
@@ -1774,7 +1753,7 @@ export default function RegistrationsPage() {
                     className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white"
                   >
                     <Check className="h-4 w-4" />
-                    Setujui (Proses)
+                    Setujui & Assign
                   </Button>
                 ) : null}
                 <Button variant="outline" onClick={() => setShowDetailModal(false)}>

@@ -309,7 +309,16 @@ router.post('/invoices/:id/pay', customerJwtAuth, asyncHandler(async (req, res) 
       }
 
       // 1. Get customer's current package from SERVICES table
-      const customerRes = await query(`SELECT package_id, service_number FROM services WHERE customer_id = $1 LIMIT 1`, [customerId]);
+      let customerRes;
+      if (req.body.service_number) {
+        customerRes = await query(`SELECT package_id, service_number FROM services WHERE service_number = $1 AND customer_id = $2`, [req.body.service_number, customerId]);
+      } else {
+        const svcCount = await query(`SELECT COUNT(*) as cnt FROM services WHERE customer_id = $1`, [customerId]);
+        if (parseInt(svcCount.rows[0].cnt) > 1) {
+          return res.status(400).json({ success: false, error: 'Customer has multiple services — specify service_number' });
+        }
+        customerRes = await query(`SELECT package_id, service_number FROM services WHERE customer_id = $1 LIMIT 1`, [customerId]);
+      }
       const packageId = customerRes.rows[0]?.package_id;
       const serviceNumber = customerRes.rows[0]?.service_number;
 
@@ -537,7 +546,7 @@ router.post('/invoices/:id/pay', customerJwtAuth, asyncHandler(async (req, res) 
       invoiceId,
       isManualPayment ? 'manual' : gateway,
       paymentResult.token || paymentResult.gateway_transaction_id,
-      paymentResult.order_id,
+      paymentResult.token || paymentResult.order_id,
       payment_method,
       'invoice',
       invoice.total_amount,

@@ -214,10 +214,10 @@ router.put('/:id', jwtAuth, asyncHandler(async (req, res) => {
 // GET /api/v1/installations/technician/list - Get list of technicians
 router.get('/technician/list', jwtAuth, asyncHandler(async (req, res) => {
     const result = await query(`
-        SELECT id, username, name, phone, status
+        SELECT id, username, username as name, phone
         FROM users
         WHERE role = 'technician'
-        ORDER BY name ASC
+        ORDER BY username ASC
     `);
 
     return res.sendSuccess(result.rows);

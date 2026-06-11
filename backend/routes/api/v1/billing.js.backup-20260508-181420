@@ -1,0 +1,1608 @@
+const express = require('express');
+const router = express.Router();
+const { logger } = require('../../../config/logger');
+const { getSetting } = require('../../../config/settingsManager');
+const { query, getOne, getAll } = require('../../../config/database');
+const ReferralService = require('../../../services/referral-service');
+const DiscountService = require('../../../services/discount-service');
+const BillingDiscountIntegration = require('../../../services/billing-discount-integration');
+const { asyncHandler } = require('../../../middleware/response');
+const serviceSuspension = require('../../../config/serviceSuspension');
+const { generateInvoiceNumber } = require('../../../config/billing');
+
+function categorizePaymentMethod(rawMethod, gateway) {
+    if (!rawMethod || rawMethod.trim() === '') return { method: '-', channel: '-' };
+
+    if (gateway === 'tripay') return { method: 'Tripay', channel: rawMethod };
+
+    const m = rawMethod.toUpperCase().trim();
+
+    // Legacy shorthand methods from manual payments
+    if (m === 'CASH' || m === 'TUNAI') return { method: 'Tunai', channel: '-' };
+    if (m === 'TRANSFER' || m === 'BANK_TRANSFER') return { method: 'Transfer Bank', channel: '-' };
+    if (m === 'OTHER' || m === 'LAINNYA') return { method: 'Lainnya', channel: '-' };
+    if (m.startsWith('BANK_')) return { method: 'Manual', channel: rawMethod };
+    if (m.startsWith('E-WALLET') || m.startsWith('EWALLET')) {
+        const channel = rawMethod.replace(/E-WALLET\s*[\(\(]?\s*/i, '').replace(/[\)\)]/, '').trim();
+        return { method: 'E-Wallet', channel: channel || rawMethod };
+    }
+    if (m.startsWith('TRANSFER BANK')) {
+        const channel = rawMethod.replace(/TRANSFER BANK\s*/i, '').trim();
+        return { method: 'Transfer Bank', channel: channel || rawMethod };
+    }
+    if (m === 'QRIS') return { method: 'QRIS', channel: 'QRIS' };
+    if (m === 'BRIVA') return { method: 'Transfer Bank', channel: 'BRI VA' };
+    if (m === 'ALFAMART' || m === 'INDOMARET') return { method: 'Retail', channel: rawMethod };
+
+    if (gateway === 'admin' || gateway === 'manual') return { method: 'Manual', channel: rawMethod };
+    return { method: rawMethod, channel: '-' };
+}
+const BillingCycleService = require('../../../config/billing-cycle-service');
+
+// Helper function to format payment method for display
+const formatPaymentMethod = async (paymentMethod) => {
+    if (!paymentMethod) return '-';
+
+    // If it's a bank code, try to get the bank name
+    if (paymentMethod.startsWith('bank_')) {
+        try {
+            const bankId = paymentMethod.replace('bank_', '');
+
+            // Try different settings keys - parse JSON if needed
+            let paymentSettings = await getSetting('payment_settings');
+            if (typeof paymentSettings === 'string') {
+                try { paymentSettings = JSON.parse(paymentSettings); } catch(e) {}
+            }
+
+            if (!paymentSettings) {
+                let settings = await getSetting('paymentGateway');
+                if (typeof settings === 'string') {
+                    try { settings = JSON.parse(settings); } catch(e) {}
+                }
+                paymentSettings = settings;
+            }
+
+            if (paymentSettings) {
+                // Handle both bank_accounts and bankAccounts naming
+                const bankAccounts = paymentSettings.bank_accounts || paymentSettings.bankAccounts || [];
+                const bank = bankAccounts.find(b => b.id == bankId || b.id === bankId || String(b.id) === String(bankId));
+                if (bank) {
+                    return `${bank.bankName || bank.bank_name || 'Bank'} - ${bank.accountNumber || bank.account_number || ''}`;
+                }
+            }
+
+            // Fallback for bank codes that can't be resolved
+            logger.warn(`Could not resolve bank name for ID: ${bankId}`);
+            return 'Transfer Bank';
+        } catch (error) {
+            logger.warn('Error resolving bank name:', error);
+            return 'Transfer Bank';
+        }
+    }
+
+    // For manual payments (cash, ewallet), get details
+    if (paymentMethod.startsWith('ewallet_')) {
+        return 'E-Wallet';
+    }
+
+    if (paymentMethod === 'cash') {
+        return 'Tunai';
+    }
+
+    // For gateway payments, return as-is
+    return paymentMethod;
+};
+
+/**
+ * Update service active_date and isolir_date after payment
+ * This should be called whenever an invoice is marked as paid
+ */
+
+
+// Helper function to create accounting transaction
+const createAccountingTransaction = async (type, amount, description, referenceType = null, referenceId = null) => {
+    try {
+        // Check if transaction already exists for this reference to prevent duplicates
+        // Use reference_type='payment' with reference_id=payment_id for unique identification
+        if (referenceType && referenceId) {
+            const existingCheck = await query(`
+                SELECT id FROM accounting_transactions
+                WHERE reference_type = $1 AND reference_id = $2
+                LIMIT 1
+            `, [referenceType, referenceId]);
+
+            if (existingCheck.rows.length > 0) {
+                logger.info(`ℹ️ Accounting transaction already exists for ${referenceType}:${referenceId}, skipping`);
+                return existingCheck.rows[0].id;
+            }
+        }
+
+        // Get default category for this transaction type
+        const categoryQuery = await query(`
+            SELECT id FROM accounting_categories
+            WHERE type = $1 AND is_active = true
+            ORDER BY name LIMIT 1
+        `, [type]);
+
+        if (categoryQuery.rows.length === 0) {
+            logger.warn(`No active category found for ${type} transactions`);
+            return;
+        }
+
+        const categoryId = categoryQuery.rows[0].id;
+
+        const result = await query(`
+            INSERT INTO accounting_transactions (
+                category_id, type, amount, description,
+                reference_type, reference_id, date, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_DATE, CURRENT_TIMESTAMP)
+            RETURNING id
+        `, [categoryId, type, amount, description, referenceType, referenceId]);
+
+        logger.info(`✅ Accounting transaction created: ${type} ${amount} - ${description} (ID: ${result.rows[0].id})`);
+        return result.rows[0].id;
+    } catch (error) {
+        logger.error('Error creating accounting transaction:', error);
+    }
+};
+
+// GET /api/v1/billing/invoices - Get invoices with pagination
+router.get('/invoices', asyncHandler(async (req, res) => {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const status = req.query.status || '';
+    const customer_id = req.query.customer_id || '';
+    const search = req.query.search || '';
+    const offset = (page - 1) * limit;
+
+    let whereClause = 'WHERE 1=1';
+    let queryParams = [];
+
+    if (status) {
+        whereClause += ` AND i.status = $${queryParams.length + 1}`;
+        queryParams.push(status);
+    }
+
+    if (customer_id) {
+        whereClause += ` AND i.customer_id = $${queryParams.length + 1}`;
+        queryParams.push(customer_id);
+    }
+
+    // Search by invoice_number, customer name, phone, or service_number
+    if (search && search.trim()) {
+        whereClause += ` AND (
+            LOWER(i.invoice_number) LIKE LOWER($${queryParams.length + 1})
+            OR LOWER(c.name) LIKE LOWER($${queryParams.length + 1})
+            OR LOWER(c.phone) LIKE LOWER($${queryParams.length + 1})
+            OR LOWER(i.service_number) LIKE LOWER($${queryParams.length + 1})
+        )`;
+        queryParams.push(`%${search.trim()}%`);
+    }
+
+    // Count query - need to include JOIN for search
+    const countQuery = `
+        SELECT COUNT(*) as total
+        FROM invoices i
+        JOIN customers c ON i.customer_id::text = c.id::text
+        ${whereClause}
+    `;
+
+    const countResult = await query(countQuery, queryParams);
+    const total = parseInt(countResult.rows[0].total);
+
+    // Data query - include payment source and processed by
+    const dataQuery = `
+        SELECT
+            i.*,
+            c.name as customer_name,
+            c.phone as customer_phone,
+            pkg.name as package_name,
+            pkg.price as package_price,
+            COALESCE(
+                pt_latest.gateway,
+                CASE WHEN pay_legacy.id IS NOT NULL THEN 'admin' ELSE NULL END
+            ) as payment_source,
+            CASE
+                WHEN pt_latest.gateway = 'tripay' THEN 'System'
+                WHEN u_latest.username IS NOT NULL THEN u_latest.username
+                WHEN pay_legacy.id IS NOT NULL THEN 'Admin'
+                ELSE NULL
+            END as processed_by,
+            COALESCE(pt_latest.paid_at, pay_legacy.payment_date, i.paid_at) as actual_paid_at,
+            COALESCE(pt_latest.payment_method, pay_legacy.payment_method, i.payment_method) as payment_method_display
+        FROM invoices i
+        JOIN customers c ON i.customer_id::text = c.id::text
+        LEFT JOIN packages pkg ON i.package_id = pkg.id
+        LEFT JOIN LATERAL (
+            SELECT pt.gateway, pt.verified_by, pt.paid_at, pt.payment_method
+            FROM payment_transactions pt
+            WHERE pt.invoice_id = i.id AND pt.status = 'paid'
+            ORDER BY pt.paid_at DESC NULLS LAST, pt.created_at DESC
+            LIMIT 1
+        ) pt_latest ON true
+        LEFT JOIN users u_latest ON pt_latest.verified_by = u_latest.id
+        LEFT JOIN LATERAL (
+            SELECT pay.id, pay.payment_date, pay.payment_method
+            FROM payments pay
+            WHERE pay.invoice_id = i.id
+            ORDER BY pay.created_at DESC
+            LIMIT 1
+        ) pay_legacy ON true
+        ${whereClause}
+        ORDER BY i.created_at DESC
+        LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}
+    `;
+
+    queryParams.push(limit, offset);
+    const result = await query(dataQuery, queryParams);
+
+    // Enrich each invoice with categorized payment method
+    const enrichedRows = result.rows.map(row => {
+        const { method, channel } = categorizePaymentMethod(
+            row.payment_method_display || row.payment_method,
+            row.payment_source
+        );
+        return {
+            ...row,
+            payment_method_category: method,
+            payment_channel: channel
+        };
+    });
+
+    const pagination = {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+        hasNext: page < Math.ceil(total / limit),
+        hasPrev: page > 1
+    };
+
+    const meta = {
+        search: search || undefined,
+        status: status || undefined,
+        customer_id: customer_id || undefined,
+        total_records: total
+    };
+
+    return res.sendPaginated(enrichedRows, pagination, meta);
+}));
+
+// GET /api/v1/billing/invoices/stats - Get invoice statistics
+router.get('/invoices/stats', asyncHandler(async (req, res) => {
+    const { month, year, start_date, end_date } = req.query;
+
+    // For status counts, use created_at (when invoice was created)
+    // For revenue, use paid_at (when payment was actually received)
+    let statusDateFilter = '';
+    let revenueDateFilter = '';
+    let params = [];
+
+    if (start_date && end_date) {
+        statusDateFilter = ' AND created_at >= $1 AND created_at <= $2';
+        revenueDateFilter = ' AND (paid_at >= $1 OR payment_date >= $1) AND (paid_at <= $2 OR payment_date <= $2)';
+        params = [start_date, end_date];
+    } else if (month && year) {
+        statusDateFilter = ' AND EXTRACT(MONTH FROM created_at) = $1 AND EXTRACT(YEAR FROM created_at) = $2';
+        revenueDateFilter = ' AND EXTRACT(MONTH FROM COALESCE(paid_at, payment_date)) = $1 AND EXTRACT(YEAR FROM COALESCE(paid_at, payment_date)) = $2';
+        params = [parseInt(month), parseInt(year)];
+    } else if (year) {
+        statusDateFilter = ' AND EXTRACT(YEAR FROM created_at) = $1';
+        revenueDateFilter = ' AND EXTRACT(YEAR FROM COALESCE(paid_at, payment_date)) = $1';
+        params = [parseInt(year)];
+    }
+
+    const statsQuery = params.length > 0 ? `
+        SELECT
+            COUNT(*) FILTER (WHERE status = 'draft' ${statusDateFilter.replace(/\$\d+/g, (m) => `$${parseInt(m.slice(1)) + params.length}`)}) as draft_count,
+            COUNT(*) FILTER (WHERE status = 'sent' ${statusDateFilter.replace(/\$\$\d+/g, (m) => `$${parseInt(m.slice(2)) + params.length}`)}) as sent_count,
+            COUNT(*) FILTER (WHERE status = 'paid') as paid_count,
+            COUNT(*) FILTER (WHERE status = 'unpaid' ${statusDateFilter.replace(/\$\d+/g, (m) => `$${parseInt(m.slice(1)) + params.length * 2}`)}) as unpaid_count,
+            COUNT(*) FILTER (WHERE status = 'overdue') as overdue_count,
+            COUNT(*) FILTER (WHERE status = 'cancelled') as cancelled_count,
+            COALESCE(SUM(amount) FILTER (WHERE status = 'paid' ${revenueDateFilter}), 0) as total_revenue,
+            COALESCE(SUM(amount) FILTER (WHERE status = 'unpaid'), 0) as pending_revenue,
+            COALESCE(SUM(payment_fee_amount) FILTER (WHERE status = 'paid' ${revenueDateFilter}), 0) as total_admin_fee,
+            COALESCE(SUM(amount) FILTER (WHERE status = 'paid' ${revenueDateFilter}), 0) as net_revenue
+        FROM invoices
+    ` : `
+        SELECT
+            COUNT(*) FILTER (WHERE status = 'draft') as draft_count,
+            COUNT(*) FILTER (WHERE status = 'sent') as sent_count,
+            COUNT(*) FILTER (WHERE status = 'paid') as paid_count,
+            COUNT(*) FILTER (WHERE status = 'unpaid') as unpaid_count,
+            COUNT(*) FILTER (WHERE status = 'overdue') as overdue_count,
+            COUNT(*) FILTER (WHERE status = 'cancelled') as cancelled_count,
+            COALESCE(SUM(amount) FILTER (WHERE status = 'paid'), 0) as total_revenue,
+            COALESCE(SUM(amount) FILTER (WHERE status = 'unpaid'), 0) as pending_revenue,
+            COALESCE(SUM(payment_fee_amount) FILTER (WHERE status = 'paid'), 0) as total_admin_fee,
+            COALESCE(SUM(amount) FILTER (WHERE status = 'paid'), 0) as net_revenue
+        FROM invoices
+    `;
+
+    // Simple approach: separate queries for status counts and revenue
+    let result;
+    if (params.length > 0) {
+        // Status counts filtered by created_at, revenue filtered by payment date
+        const statusQuery = `
+            SELECT
+                COUNT(*) FILTER (WHERE status = 'draft') as draft_count,
+                COUNT(*) FILTER (WHERE status = 'sent') as sent_count,
+                COUNT(*) FILTER (WHERE status = 'paid') as paid_count,
+                COUNT(*) FILTER (WHERE status = 'unpaid') as unpaid_count,
+                COUNT(*) FILTER (WHERE status = 'overdue') as overdue_count,
+                COUNT(*) FILTER (WHERE status = 'cancelled') as cancelled_count,
+                COALESCE(SUM(amount) FILTER (WHERE status = 'unpaid'), 0) as pending_revenue
+            FROM invoices
+            WHERE 1=1 ${statusDateFilter}
+        `;
+        const revenueQuery = `
+            SELECT
+                -- Total base revenue (what Kilusi set as price, always received regardless of fee bearer)
+                COALESCE(SUM(amount), 0) as total_revenue,
+                -- Total admin fees (from payment_transactions)
+                COALESCE(SUM(payment_fee_amount), 0) as total_admin_fee,
+                -- Net received: if fee_bearer=customer, we receive full amount; if merchant, we receive amount-fee
+                COALESCE(SUM(CASE WHEN fee_bearer = 'merchant' THEN amount - COALESCE(payment_fee_amount, 0) ELSE amount END), 0) as net_revenue,
+                -- Total customer paid: if fee_bearer=customer, amount+fee; if merchant, just amount
+                COALESCE(SUM(CASE WHEN fee_bearer = 'merchant' THEN amount ELSE amount + COALESCE(payment_fee_amount, 0) END), 0) as total_customer_paid
+            FROM invoices
+            WHERE status = 'paid' ${revenueDateFilter}
+        `;
+
+        const statusResult = await query(statusQuery, params);
+        const revenueResult = await query(revenueQuery, params);
+        result = {
+            ...statusResult.rows[0],
+            ...revenueResult.rows[0]
+        };
+    } else {
+        const allQuery = `
+            SELECT
+                COUNT(*) FILTER (WHERE status = 'draft') as draft_count,
+                COUNT(*) FILTER (WHERE status = 'sent') as sent_count,
+                COUNT(*) FILTER (WHERE status = 'paid') as paid_count,
+                COUNT(*) FILTER (WHERE status = 'unpaid') as unpaid_count,
+                COUNT(*) FILTER (WHERE status = 'overdue') as overdue_count,
+                COUNT(*) FILTER (WHERE status = 'cancelled') as cancelled_count,
+                COALESCE(SUM(amount) FILTER (WHERE status = 'paid'), 0) as total_revenue,
+                COALESCE(SUM(amount) FILTER (WHERE status = 'unpaid'), 0) as pending_revenue,
+COALESCE(SUM(payment_fee_amount) FILTER (WHERE status = 'paid'), 0) as total_admin_fee,
+            COALESCE(SUM(CASE WHEN fee_bearer = 'merchant' THEN amount - COALESCE(payment_fee_amount, 0) ELSE amount END) FILTER (WHERE status = 'paid'), 0) as net_revenue,
+            COALESCE(SUM(CASE WHEN fee_bearer = 'merchant' THEN amount ELSE amount + COALESCE(payment_fee_amount, 0) END) FILTER (WHERE status = 'paid'), 0) as total_customer_paid
+            FROM invoices
+        `;
+        const allResult = await query(allQuery);
+        result = allResult.rows[0];
+    }
+
+    // Get fee breakdown by payment method in the period
+    let feeQuery, feeParams;
+    if (start_date && end_date) {
+        feeQuery = `SELECT payment_method, COUNT(*) as count, SUM(fee_amount) as total_fee
+            FROM payment_transactions WHERE fee_amount > 0 AND created_at >= $1 AND created_at <= $2
+            GROUP BY payment_method ORDER BY total_fee DESC`;
+        feeParams = [start_date, end_date];
+    } else if (month && year) {
+        feeQuery = `SELECT payment_method, COUNT(*) as count, SUM(fee_amount) as total_fee
+            FROM payment_transactions WHERE fee_amount > 0 AND EXTRACT(MONTH FROM created_at) = $1 AND EXTRACT(YEAR FROM created_at) = $2
+            GROUP BY payment_method ORDER BY total_fee DESC`;
+        feeParams = [parseInt(month), parseInt(year)];
+    } else if (year) {
+        feeQuery = `SELECT payment_method, COUNT(*) as count, SUM(fee_amount) as total_fee
+            FROM payment_transactions WHERE fee_amount > 0 AND EXTRACT(YEAR FROM created_at) = $1
+            GROUP BY payment_method ORDER BY total_fee DESC`;
+        feeParams = [parseInt(year)];
+    } else {
+        feeQuery = `SELECT payment_method, COUNT(*) as count, SUM(fee_amount) as total_fee
+            FROM payment_transactions WHERE fee_amount > 0
+            GROUP BY payment_method ORDER BY total_fee DESC`;
+        feeParams = [];
+    }
+
+    const feeResult = await query(feeQuery, feeParams);
+
+    return res.sendSuccess({
+        draftCount: parseInt(result.draft_count) || 0,
+        sentCount: parseInt(result.sent_count) || 0,
+        paidCount: parseInt(result.paid_count) || 0,
+        unpaidCount: parseInt(result.unpaid_count) || 0,
+        overdueCount: parseInt(result.overdue_count) || 0,
+        cancelledCount: parseInt(result.cancelled_count) || 0,
+        totalRevenue: parseFloat(result.total_revenue) || 0,
+        pendingRevenue: parseFloat(result.pending_revenue) || 0,
+        totalAdminFee: parseFloat(result.total_admin_fee) || 0,
+        netRevenue: parseFloat(result.net_revenue) || 0,
+        totalCustomerPaid: parseFloat(result.total_customer_paid) || 0,
+        adminFeeByMethod: feeResult.rows.map(r => ({
+            payment_method: r.payment_method,
+            count: parseInt(r.count) || 0,
+            total_fee: parseFloat(r.total_fee) || 0
+        }))
+    });
+}));
+
+// GET /api/v1/billing/invoices/search - Search invoices by universal search
+router.get('/invoices/search', asyncHandler(async (req, res) => {
+    const searchTerm = req.query.q || '';
+
+    if (!searchTerm.trim()) {
+        return res.sendSuccess([]);
+    }
+
+    // Search invoices by number, customer name, phone, or service_number
+    const searchQuery = `
+        SELECT DISTINCT
+            i.id,
+            i.invoice_number,
+            i.customer_id,
+            i.service_number,
+            i.amount,
+            i.due_date,
+            i.status,
+            i.created_at,
+            c.name as customer_name,
+            c.phone as customer_phone,
+            c.email as customer_email,
+            pkg.name as package_name,
+            COALESCE(
+                pt_latest.gateway,
+                CASE WHEN pay_legacy.id IS NOT NULL THEN 'admin' ELSE NULL END
+            ) as payment_source,
+            u_latest.username as processed_by,
+            COALESCE(pt_latest.paid_at, pay_legacy.payment_date, i.paid_at) as actual_paid_at,
+            CASE
+                WHEN LOWER(i.invoice_number) = LOWER($2) THEN 1
+                WHEN LOWER(c.name) = LOWER($2) THEN 2
+                ELSE 3
+            END as relevance_score
+        FROM invoices i
+        JOIN customers c ON i.customer_id::text = c.id::text
+        LEFT JOIN packages pkg ON i.package_id = pkg.id
+        LEFT JOIN LATERAL (
+            SELECT pt.gateway, pt.verified_by, pt.paid_at
+            FROM payment_transactions pt
+            WHERE pt.invoice_id = i.id AND pt.status = 'paid'
+            ORDER BY pt.paid_at DESC NULLS LAST, pt.created_at DESC
+            LIMIT 1
+        ) pt_latest ON true
+        LEFT JOIN users u_latest ON pt_latest.verified_by = u_latest.id
+        LEFT JOIN LATERAL (
+            SELECT pay.id, pay.payment_date
+            FROM payments pay
+            WHERE pay.invoice_id = i.id
+            ORDER BY pay.created_at DESC
+            LIMIT 1
+        ) pay_legacy ON true
+        WHERE (
+            LOWER(i.invoice_number) LIKE LOWER($1)
+            OR LOWER(c.name) LIKE LOWER($1)
+            OR c.phone LIKE $1
+            OR LOWER(i.service_number) LIKE LOWER($1)
+        )
+        AND i.status != 'paid'
+        ORDER BY
+            relevance_score,
+            i.created_at DESC
+        LIMIT 50
+    `;
+
+    const searchPattern = `%${searchTerm.trim()}%`;
+    const exactTerm = searchTerm.trim();
+
+    const result = await query(searchQuery, [searchPattern, exactTerm]);
+
+    logger.info(`🔍 Invoice search: "${searchTerm}" - Found ${result.rows.length} results`);
+
+    const meta = {
+        search: searchTerm,
+        result_count: result.rows.length,
+        search_type: 'universal',
+        filters: ['invoice_number', 'customer_name', 'phone', 'service_number']
+    };
+
+    return res.sendSuccess(result.rows, meta);
+}));
+
+// GET /api/v1/billing/invoices/:id - Get invoice by ID
+router.get('/invoices/:id', asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    const invoiceQuery = `
+        SELECT
+            i.*,
+            c.name as customer_name,
+            c.phone as customer_phone,
+            c.address as customer_address,
+            p.name as package_name,
+            p.price as package_price,
+            p.description as package_description
+        FROM invoices i
+        JOIN customers c ON i.customer_id = c.id
+        LEFT JOIN packages p ON i.package_id = p.id
+        WHERE i.id = $1
+    `;
+
+    const result = await query(invoiceQuery, [id]);
+
+    if (result.rows.length === 0) {
+        return res.sendNotFound('Invoice');
+    }
+
+    const invoice = result.rows[0];
+
+    // Get payments for this invoice
+    const paymentsQuery = `
+        SELECT
+            id,
+            amount,
+            payment_method,
+            payment_date,
+            notes,
+            processed_by,
+            created_at,
+            is_rolled_back,
+            rolled_back_at,
+            rolled_back_by,
+            rollback_reason
+        FROM payments
+        WHERE invoice_id = $1
+        ORDER BY created_at DESC
+    `;
+
+    const paymentsResult = await query(paymentsQuery, [id]);
+
+    logger.info(`📊 Invoice ${id} - Payments found: ${paymentsResult.rows.length}`);
+
+    // Format payment methods for display
+    const formattedPayments = await Promise.all(
+        paymentsResult.rows.map(async (payment) => ({
+            ...payment,
+            payment_method_display: await formatPaymentMethod(payment.payment_method)
+        }))
+    );
+
+    if (formattedPayments.length > 0) {
+        logger.info(`📊 Invoice ${id} - First payment:`, JSON.stringify(formattedPayments[0]));
+    }
+
+    const invoiceWithPayments = {
+        ...invoice,
+        payments: formattedPayments
+    };
+
+    const meta = {
+        invoice_id: id,
+        customer_id: invoice.customer_id,
+        status: invoice.status,
+        payment_count: paymentsResult.rows.length,
+        has_payments: paymentsResult.rows.length > 0
+    };
+
+    logger.info(`✅ Sending invoice response for ID ${id}:`, JSON.stringify({
+        status: invoice.status,
+        payment_count: paymentsResult.rows.length,
+        has_payments: paymentsResult.rows.length > 0,
+        payments: paymentsResult.rows.map(p => ({ id: p.id, amount: p.amount, is_rolled_back: p.is_rolled_back }))
+    }));
+
+    return res.sendSuccess({ invoice: invoiceWithPayments }, meta);
+}));
+
+// POST /api/v1/billing/invoices - Create new invoice
+router.post('/invoices', asyncHandler(async (req, res) => {
+    const {
+        customer_id,
+        package_id,
+        amount,
+        due_date,
+        notes
+    } = req.body;
+
+    // Validation with detailed field-level errors
+    const validationErrors = [];
+    if (!customer_id) {
+        validationErrors.push({
+            field: 'customer_id',
+            message: 'Customer ID harus diisi',
+            value: customer_id
+        });
+    }
+    if (!package_id) {
+        validationErrors.push({
+            field: 'package_id',
+            message: 'Package ID harus diisi',
+            value: package_id
+        });
+    }
+    if (!amount) {
+        validationErrors.push({
+            field: 'amount',
+            message: 'Amount harus diisi',
+            value: amount
+        });
+    }
+    if (!due_date) {
+        validationErrors.push({
+            field: 'due_date',
+            message: 'Due date harus diisi',
+            value: due_date
+        });
+    }
+    if (amount && parseFloat(amount) <= 0) {
+        validationErrors.push({
+            field: 'amount',
+            message: 'Amount harus lebih dari 0',
+            value: amount
+        });
+    }
+
+    if (validationErrors.length > 0) {
+        return res.sendValidationErrors(validationErrors);
+    }
+
+    // Check if customer exists
+    const customerQuery = await query('SELECT id, name FROM customers WHERE id = $1', [customer_id]);
+    if (customerQuery.rows.length === 0) {
+        return res.sendNotFound('Customer');
+    }
+
+    // Check if package exists
+    const packageQuery = await query('SELECT id, name FROM packages WHERE id = $1', [package_id]);
+    if (packageQuery.rows.length === 0) {
+        return res.sendNotFound('Package');
+    }
+
+    // Generate invoice number
+    const invoiceNumber = generateInvoiceNumber();
+
+    // Get service_number for this customer
+    const serviceResult = await query('SELECT service_number FROM services WHERE customer_id = $1 LIMIT 1', [customer_id]);
+    const serviceNumber = serviceResult.rows.length > 0 ? serviceResult.rows[0].service_number : null;
+
+    // Calculate all discounts (referral + compensation)
+    const discountResult = await BillingDiscountIntegration.calculateInvoiceDiscounts(
+        customer_id,
+        parseFloat(amount),
+        { package_id, due_date, invoiceNumber }
+    );
+
+    logger.info(`Invoice ${invoiceNumber} discounts applied:`, {
+        originalAmount: discountResult.originalAmount,
+        totalDiscount: discountResult.totalDiscount,
+        finalAmount: discountResult.finalAmount,
+        appliedDiscounts: discountResult.appliedDiscounts.length
+    });
+
+    // Insert invoice with discounts (start as draft)
+    const result = await query(`
+        INSERT INTO invoices (
+            customer_id, package_id, invoice_number, amount,
+            due_date, notes, status, created_at,
+            discount_amount, final_amount, discount_notes, service_number
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, 'draft', CURRENT_TIMESTAMP,
+            $7, $8, $9, $10
+        ) RETURNING *
+    `, [
+        customer_id,
+        package_id,
+        invoiceNumber,
+        discountResult.originalAmount,
+        due_date,
+        notes,
+        discountResult.totalDiscount,
+        discountResult.finalAmount,
+        BillingDiscountIntegration.formatDiscountNotes(discountResult.appliedDiscounts),
+        serviceNumber
+    ]);
+
+    const invoice = result.rows[0];
+
+    // Send WhatsApp notification for new invoice
+    try {
+        const whatsappNotifications = require('../../../config/whatsapp-notifications');
+        await whatsappNotifications.sendInvoiceCreatedNotification(customer_id, invoice.id);
+        logger.info(`WhatsApp notification sent for invoice ${invoice.invoice_number}`);
+
+        // Update status to 'sent' after successful WhatsApp delivery
+        await query(
+            `UPDATE invoices SET status = 'sent', sent_at = CURRENT_TIMESTAMP WHERE id = $1`,
+            [invoice.id]
+        );
+        invoice.status = 'sent';
+        invoice.sent_at = new Date();
+    } catch (notifError) {
+        logger.error(`Failed to send WhatsApp notification for invoice ${invoice.invoice_number}:`, notifError.message);
+        // Keep as 'draft' if notification fails
+    }
+
+    const meta = {
+        invoice_number: invoiceNumber,
+        customer_id,
+        package_id,
+        original_amount: discountResult.originalAmount,
+        total_discount: discountResult.totalDiscount,
+        final_amount: discountResult.finalAmount,
+        discounts_applied: discountResult.appliedDiscounts.length,
+        status: 'created'
+    };
+
+    return res.sendCreated({ invoice }, meta);
+}));
+
+// POST /api/v1/billing/payments - Record payment
+router.post('/payments', asyncHandler(async (req, res) => {
+    const {
+        invoice_id,
+        amount,
+        payment_method,
+        payment_date,
+        notes
+    } = req.body;
+
+    // Validation with detailed field-level errors
+    const validationErrors = [];
+    if (!invoice_id) {
+        validationErrors.push({
+            field: 'invoice_id',
+            message: 'Invoice ID harus diisi',
+            value: invoice_id
+        });
+    }
+    if (!amount) {
+        validationErrors.push({
+            field: 'amount',
+            message: 'Amount harus diisi',
+            value: amount
+        });
+    }
+    if (!payment_method) {
+        validationErrors.push({
+            field: 'payment_method',
+            message: 'Payment method harus diisi',
+            value: payment_method
+        });
+    }
+    if (amount && parseFloat(amount) <= 0) {
+        validationErrors.push({
+            field: 'amount',
+            message: 'Amount harus lebih dari 0',
+            value: amount
+        });
+    }
+
+    if (validationErrors.length > 0) {
+        return res.sendValidationErrors(validationErrors);
+    }
+
+    // Check if invoice exists
+    const invoiceQuery = await query(
+        'SELECT * FROM invoices WHERE id = $1',
+        [invoice_id]
+    );
+
+    if (invoiceQuery.rows.length === 0) {
+        return res.sendNotFound('Invoice');
+    }
+
+    const invoice = invoiceQuery.rows[0];
+
+    // Check if invoice is already paid
+    if (invoice.status === 'paid') {
+        return res.sendError('RESOURCE_CONFLICT', 'Invoice sudah dibayar', [], {
+            invoice_id,
+            current_status: 'paid'
+        });
+    }
+
+    // Insert payment with admin info
+    const processedBy = req.user?.username || 'Admin';
+    const paymentResult = await query(`
+        INSERT INTO payments (
+            invoice_id, amount, payment_method, payment_date,
+            notes, processed_by, created_at
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP
+        ) RETURNING *
+    `, [invoice_id, amount, payment_method, payment_date || new Date(), notes, processedBy]);
+
+    const payment = paymentResult.rows[0];
+
+    // Send WhatsApp notification for payment received
+    try {
+        const whatsappNotifications = require('../../../config/whatsapp-notifications');
+        await whatsappNotifications.sendPaymentReceivedNotification(payment.id);
+        logger.info(`WhatsApp notification sent for payment ${payment.id}`);
+    } catch (notifError) {
+        logger.error(`Failed to send WhatsApp notification for payment ${payment.id}:`, notifError.message);
+    }
+
+    // Update invoice status
+    const totalPaid = await query(`
+        SELECT COALESCE(SUM(amount), 0) as total_paid
+        FROM payments
+        WHERE invoice_id = $1
+    `, [invoice_id]);
+
+    const totalPaidAmount = parseFloat(totalPaid.rows[0].total_paid);
+    let invoiceStatusChanged = false;
+    let customerReactivated = false;
+
+    if (totalPaidAmount >= invoice.amount) {
+        await query(
+            'UPDATE invoices SET status = $1 WHERE id = $2',
+            ['paid', invoice_id]
+        );
+        invoiceStatusChanged = true;
+
+        // Update service dates after payment
+        await BillingCycleService.updateServiceDatesAfterPayment(invoice_id, payment_date || new Date());
+
+        // Check if customer has any other unpaid invoices and update status if all paid
+        const unpaidInvoicesCheck = await query(`
+            SELECT COUNT(*) as unpaid_count
+            FROM invoices
+            WHERE customer_id = $1 AND status = 'unpaid'
+        `, [invoice.customer_id]);
+
+        const unpaidCount = parseInt(unpaidInvoicesCheck.rows[0].unpaid_count);
+
+        if (unpaidCount === 0) {
+            // All invoices paid - need to restore service fully (RADIUS + MikroTik)
+            logger.info(`🔄 All invoices paid for customer ${invoice.customer_id}, starting full restoration...`);
+
+            // Get service data with customer and package info
+            const serviceDataQuery = await query(`
+                SELECT
+                    s.id as service_id,
+                    s.status as service_status,
+                    s.package_id,
+                    c.id as customer_id,
+                    c.name as customer_name,
+                    p.group as package_group,
+                    p.pppoe_profile
+                FROM services s
+                JOIN customers c ON c.id = s.customer_id
+                LEFT JOIN packages p ON p.id = s.package_id
+                WHERE s.customer_id = $1
+                LIMIT 1
+            `, [invoice.customer_id]);
+
+            if (serviceDataQuery.rows.length > 0) {
+                const serviceData = serviceDataQuery.rows[0];
+
+                // Only restore if service is currently not active (was suspended)
+                if (serviceData.service_status !== 'active') {
+                    logger.info(`🔄 Restoring service ${serviceData.service_id} for customer ${serviceData.customer_name}...`);
+
+                    try {
+                        // Call full restoration logic: RADIUS group, MikroTik profile, and kick user
+                        await serviceSuspension.restoreServiceByServiceId(
+                            serviceData.service_id,
+                            {
+                                name: serviceData.customer_name,
+                                package_group: serviceData.package_group,
+                                pppoe_profile: serviceData.pppoe_profile
+                            },
+                            'Payment received - full restoration'
+                        );
+
+                        customerReactivated = true;
+                        logger.info(`✅ Customer ${invoice.customer_id} fully restored - RADIUS group updated, MikroTik profile updated, user kicked for reconnection`);
+                    } catch (restoreError) {
+                        logger.error(`❌ Failed to restore service for customer ${invoice.customer_id}:`, restoreError);
+                        // Still update service status even if restoration fails
+                        await query(`UPDATE services SET status = 'active', updated_at = NOW() WHERE customer_id = $1`, [invoice.customer_id]);
+                    }
+                } else {
+                    logger.info(`ℹ️ Service already active for customer ${invoice.customer_id}, no restoration needed`);
+                    customerReactivated = true;
+                }
+            } else {
+                logger.warn(`⚠️ No service found for customer ${invoice.customer_id}`);
+            }
+        } else {
+            logger.info(`ℹ️ Customer ${invoice.customer_id} still has ${unpaidCount} unpaid invoices`);
+        }
+    }
+
+    // Create accounting transaction for revenue
+    const customerQuery = await query('SELECT name FROM customers WHERE id = $1', [invoice.customer_id]);
+    const customerName = customerQuery.rows[0]?.name || 'Unknown Customer';
+
+    // Use payment_id as reference to prevent duplicates and allow multiple payments per invoice
+    await createAccountingTransaction(
+        'revenue',
+        parseFloat(amount),
+        `Pembayaran tagihan #${invoice_id} dari ${customerName} (${payment_method})`,
+        'payment',
+        payment.id
+    );
+
+    const meta = {
+        invoice_id,
+        customer_id: invoice.customer_id,
+        payment_id: payment.id,
+        amount: parseFloat(amount),
+        payment_method,
+        total_paid: totalPaidAmount,
+        remaining_balance: invoice.amount - totalPaidAmount,
+        invoice_fully_paid: totalPaidAmount >= invoice.amount,
+        invoice_status_changed: invoiceStatusChanged,
+        customer_reactivated: customerReactivated
+    };
+
+    return res.sendSuccess({ payment }, meta, 201);
+}));
+
+// POST /api/v1/billing/payments/:id/rollback - Rollback a payment (Admin only)
+router.post('/payments/:id/rollback', asyncHandler(async (req, res) => {
+    try {
+        // Check if user is administrator or superadmin
+        if (req.user?.role !== 'administrator' && req.user?.role !== 'admin' && req.user?.role !== 'superadmin') {
+            return res.status(403).json({
+                success: false,
+                message: 'Hanya administrator yang dapat melakukan rollback pembayaran'
+            });
+        }
+
+        const { id } = req.params;
+        const { reason } = req.body;
+        const rolledBackBy = req.user?.username || 'Admin';
+
+        // Get payment details
+        const paymentResult = await query(`
+            SELECT p.*, i.customer_id, i.amount as invoice_amount, i.status as invoice_status
+            FROM payments p
+            JOIN invoices i ON i.id = p.invoice_id
+            WHERE p.id = $1
+        `, [id]);
+
+        if (paymentResult.rows.length === 0) {
+            return res.sendNotFound('Payment');
+        }
+
+        const payment = paymentResult.rows[0];
+
+        // Check if already rolled back
+        if (payment.is_rolled_back) {
+            return res.sendError('RESOURCE_CONFLICT', 'Pembayaran sudah di-rollback sebelumnya', [], {
+                payment_id: id
+            });
+        }
+
+        // Mark payment as rolled back
+        await query(`
+            UPDATE payments
+            SET is_rolled_back = TRUE,
+                rolled_back_at = CURRENT_TIMESTAMP,
+                rolled_back_by = $1,
+                rollback_reason = $2
+            WHERE id = $3
+        `, [rolledBackBy, reason || 'Perbaikan data', id]);
+
+        // Recalculate total paid (excluding rolled back payments)
+        const totalPaidResult = await query(`
+            SELECT COALESCE(SUM(amount), 0) as total_paid
+            FROM payments
+            WHERE invoice_id = $1 AND is_rolled_back = FALSE
+        `, [payment.invoice_id]);
+
+        const totalPaidAmount = parseFloat(totalPaidResult.rows[0].total_paid);
+        const invoiceWasFullyPaid = parseFloat(payment.invoice_amount) <= (totalPaidAmount + parseFloat(payment.amount));
+
+        // Update invoice status if it was fully paid before
+        if (payment.invoice_status === 'paid' && invoiceWasFullyPaid && totalPaidAmount < parseFloat(payment.invoice_amount)) {
+            await query(`
+                UPDATE invoices
+                SET status = 'unpaid', updated_at = CURRENT_TIMESTAMP
+                WHERE id = $1
+            `, [payment.invoice_id]);
+
+            // Suspend service again if this was the payment that reactivated the customer
+            const serviceSuspension = require('../../config/serviceSuspension');
+
+            // Get service data
+            const serviceDataResult = await query(`
+                SELECT
+                    s.id as service_id,
+                    s.status as service_status,
+                    s.package_id,
+                    c.name,
+                    p.group as package_group,
+                    p.pppoe_profile
+                FROM services s
+                JOIN customers c ON c.id = s.customer_id
+                LEFT JOIN packages p ON p.id = s.package_id
+                WHERE s.customer_id = $1
+                LIMIT 1
+            `, [payment.customer_id]);
+
+            if (serviceDataResult.rows.length > 0) {
+                const serviceData = serviceDataResult.rows[0];
+
+                // Only suspend if service is currently active
+                if (serviceData.service_status === 'active') {
+                    logger.info(`🔄 Rolling back payment ${id} - suspending service for ${serviceData.name}`);
+                    try {
+                        await serviceSuspension.suspendCustomerService(
+                            { name: serviceData.name, service_id: serviceData.service_id },
+                            'Payment rollback - service suspended'
+                        );
+                        logger.info(`✅ Service suspended for rollback: ${serviceData.name}`);
+                    } catch (suspendError) {
+                        // Log error but don't fail the rollback
+                        logger.error(`⚠️ Failed to suspend service during rollback for ${serviceData.name}:`, suspendError.message);
+                        // Continue with rollback - service suspension is secondary
+                    }
+                }
+            }
+
+            logger.info(`✅ Invoice ${payment.invoice_id} status changed to unpaid due to payment rollback`);
+        }
+
+        // Delete the original accounting transaction for this payment to prevent duplicates
+        // Find transactions with reference_type='invoice' (old format) or 'payment' (new format)
+        const accountingDeleteResult = await query(`
+            DELETE FROM accounting_transactions
+            WHERE reference_type IN ('invoice', 'payment')
+            AND (
+                (reference_type = 'invoice' AND reference_id = $1) OR
+                (reference_type = 'payment' AND reference_id = $2)
+            )
+            RETURNING id, type, amount
+        `, [payment.invoice_id, id]);
+
+        if (accountingDeleteResult.rows.length > 0) {
+            logger.info(`🗑️  Deleted ${accountingDeleteResult.rows.length} accounting transaction(s) for rolled back payment ${id}`);
+            accountingDeleteResult.rows.forEach(row => {
+                logger.info(`   - Deleted ID ${row.id}: ${row.type} Rp ${row.amount}`);
+            });
+        } else {
+            logger.warn(`⚠️  No accounting transaction found to delete for payment ${id}`);
+        }
+
+        // Create accounting transaction for reversal
+        const customerQuery = await query('SELECT name FROM customers WHERE id = $1', [payment.customer_id]);
+        const customerName = customerQuery.rows[0]?.name || 'Unknown Customer';
+
+        // Use unique reference for rollback to prevent duplicate expense transactions
+        await createAccountingTransaction(
+            'expense',
+            parseFloat(payment.amount),
+            `Rollback pembayaran #${payment.invoice_id} dari ${customerName} (${payment.payment_method}) - ${reason || 'Perbaikan data'}`,
+            'rollback',
+            id // Use payment ID being rolled back as reference
+        );
+
+        logger.info(`Payment ${id} rolled back by ${rolledBackBy}`);
+
+        return res.sendSuccess({
+            message: 'Pembayaran berhasil di-rollback',
+            payment_id: id,
+            invoice_id: payment.invoice_id,
+            new_invoice_status: totalPaidAmount < parseFloat(payment.invoice_amount) ? 'unpaid' : 'paid'
+        });
+
+    } catch (error) {
+        logger.error('Error rolling back payment:', error);
+        return res.sendError('INTERNAL_ERROR', 'Gagal melakukan rollback pembayaran', [error.message]);
+    }
+}));
+
+// POST /api/v1/billing/invoices/:id/resend - Resend invoice notification
+router.post('/invoices/:id/resend', asyncHandler(async (req, res) => {
+    try {
+        const { id } = req.params;
+        const userId = req.user?.id;
+
+        // Get invoice details
+        const invoiceResult = await query(`
+            SELECT i.*, c.id as customer_id
+            FROM invoices i
+            JOIN customers c ON i.customer_id = c.id
+            WHERE i.id = $1
+        `, [id]);
+
+        if (invoiceResult.rows.length === 0) {
+            return res.sendNotFound('Invoice');
+        }
+
+        const invoice = invoiceResult.rows[0];
+
+        // Check if invoice can be resent (overdue or unpaid)
+        if (invoice.status !== 'overdue' && invoice.status !== 'unpaid' && invoice.status !== 'sent') {
+            return res.sendError('INVALID_OPERATION', 'Invoice tidak dapat dikirim ulang. Hanya invoice yang overdue, unpaid, atau sent yang dapat dikirim ulang.', [], {
+                current_status: invoice.status
+            });
+        }
+
+        logger.info(`📤 Resending invoice ${invoice.invoice_number} for customer ${invoice.customer_id}`);
+
+        // Send WhatsApp notification
+        const whatsappNotifications = require('../../../config/whatsapp-notifications');
+        const notificationResult = await whatsappNotifications.sendInvoiceCreatedNotification(
+            invoice.customer_id,
+            invoice.id
+        );
+
+        if (notificationResult.success && !notificationResult.skipped) {
+            // Update status to 'sent' and update sent_at timestamp
+            await query(
+                `UPDATE invoices SET status = 'sent', sent_at = CURRENT_TIMESTAMP WHERE id = $1`,
+                [id]
+            );
+
+            logger.info(`✅ Invoice ${invoice.invoice_number} resent successfully`);
+
+            return res.sendSuccess({
+                message: 'Invoice berhasil dikirim ulang',
+                invoice_id: id,
+                invoice_number: invoice.invoice_number,
+                sent_at: new Date()
+            }, {
+                action: 'invoice_resent',
+                customer_id: invoice.customer_id
+            });
+        } else if (notificationResult.skipped) {
+            return res.sendSuccess({
+                message: 'Pengingat invoice dilewati (template dinonaktifkan)',
+                invoice_id: id
+            }, {
+                action: 'invoice_remind_skipped',
+                reason: notificationResult.reason
+            });
+        } else {
+            throw new Error(notificationResult.error || 'Gagal mengirim invoice');
+        }
+    } catch (error) {
+        logger.error('Error resending invoice:', error);
+        return res.sendError('INTERNAL_ERROR', 'Gagal mengirim ulang invoice', [error.message]);
+    }
+}));
+
+// GET /api/v1/billing/packages - Get all packages
+router.get('/packages', asyncHandler(async (req, res) => {
+    const packagesQuery = `
+        SELECT
+            p.*,
+            COUNT(c.id) as customer_count
+        FROM packages p
+        LEFT JOIN customers_view c ON p.id = c.package_id
+        GROUP BY p.id
+        ORDER BY p.price ASC
+    `;
+
+    const result = await query(packagesQuery);
+
+    const meta = {
+        total_packages: result.rows.length,
+        active_packages: result.rows.filter(p => p.is_active).length,
+        price_range: {
+            min: Math.min(...result.rows.map(p => p.price)),
+            max: Math.max(...result.rows.map(p => p.price))
+        }
+    };
+
+    return res.sendSuccess({ packages: result.rows }, meta);
+}));
+
+// Bulk Payment Settings endpoints
+router.get('/bulk-payment-settings', asyncHandler(async (req, res) => {
+    const result = await query(`
+        SELECT * FROM bulk_payment_settings
+        WHERE id = 1
+    `);
+
+    let settings;
+    let isDefault = false;
+
+    if (result.rows.length === 0) {
+        // Return default settings if none exist
+        settings = {
+            enabled: true,
+            discount_1_month_type: 'percentage',
+            discount_1_month_value: 0,
+            discount_2_months_type: 'percentage',
+            discount_2_months_value: 0,
+            discount_3_months_type: 'percentage',
+            discount_3_months_value: 5,
+            discount_6_months_type: 'percentage',
+            discount_6_months_value: 10,
+            discount_12_months_type: 'percentage',
+            discount_12_months_value: 15
+        };
+        isDefault = true;
+    } else {
+        settings = result.rows[0];
+    }
+
+    const meta = {
+        settings_type: isDefault ? 'default' : 'custom',
+        enabled: settings.enabled,
+        available_discount_periods: [1, 2, 3, 6, 12],
+        discount_types: ['percentage', 'free_months', 'fixed_amount']
+    };
+
+    return res.sendSuccess(settings, meta);
+}));
+
+router.put('/bulk-payment-settings', asyncHandler(async (req, res) => {
+    const {
+        enabled,
+        discount_1_month_type,
+        discount_1_month_value,
+        discount_2_months_type,
+        discount_2_months_value,
+        discount_3_months_type,
+        discount_3_months_value,
+        discount_6_months_type,
+        discount_6_months_value,
+        discount_12_months_type,
+        discount_12_months_value
+    } = req.body;
+
+    // Validate discount types
+    const validTypes = ['percentage', 'free_months', 'fixed_amount'];
+    const validateType = (type) => validTypes.includes(type);
+
+    const validationErrors = [];
+
+    if (!validateType(discount_1_month_type)) {
+        validationErrors.push({
+            field: 'discount_1_month_type',
+            message: 'Tipe diskon tidak valid. Gunakan: percentage, free_months, atau fixed_amount',
+            value: discount_1_month_type
+        });
+    }
+    if (!validateType(discount_2_months_type)) {
+        validationErrors.push({
+            field: 'discount_2_months_type',
+            message: 'Tipe diskon tidak valid. Gunakan: percentage, free_months, atau fixed_amount',
+            value: discount_2_months_type
+        });
+    }
+    if (!validateType(discount_3_months_type)) {
+        validationErrors.push({
+            field: 'discount_3_months_type',
+            message: 'Tipe diskon tidak valid. Gunakan: percentage, free_months, atau fixed_amount',
+            value: discount_3_months_type
+        });
+    }
+    if (!validateType(discount_6_months_type)) {
+        validationErrors.push({
+            field: 'discount_6_months_type',
+            message: 'Tipe diskon tidak valid. Gunakan: percentage, free_months, atau fixed_amount',
+            value: discount_6_months_type
+        });
+    }
+    if (!validateType(discount_12_months_type)) {
+        validationErrors.push({
+            field: 'discount_12_months_type',
+            message: 'Tipe diskon tidak valid. Gunakan: percentage, free_months, atau fixed_amount',
+            value: discount_12_months_type
+        });
+    }
+
+    if (validationErrors.length > 0) {
+        return res.sendValidationErrors(validationErrors);
+    }
+
+    // First, try to update existing settings
+    const updateResult = await query(`
+        UPDATE bulk_payment_settings
+        SET enabled = $1,
+            discount_1_month_type = $2,
+            discount_1_month_value = $3,
+            discount_2_months_type = $4,
+            discount_2_months_value = $5,
+            discount_3_months_type = $6,
+            discount_3_months_value = $7,
+            discount_6_months_type = $8,
+            discount_6_months_value = $9,
+            discount_12_months_type = $10,
+            discount_12_months_value = $11,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = 1
+        RETURNING *
+    `, [
+        enabled,
+        discount_1_month_type,
+        discount_1_month_value,
+        discount_2_months_type,
+        discount_2_months_value,
+        discount_3_months_type,
+        discount_3_months_value,
+        discount_6_months_type,
+        discount_6_months_value,
+        discount_12_months_type,
+        discount_12_months_value
+    ]);
+
+    let settings;
+    let wasCreated = false;
+
+    if (updateResult.rows.length > 0) {
+        settings = updateResult.rows[0];
+    } else {
+        // Insert new settings if none exist
+        const insertResult = await query(`
+            INSERT INTO bulk_payment_settings (
+                id, enabled, discount_1_month_type, discount_1_month_value,
+                discount_2_months_type, discount_2_months_value,
+                discount_3_months_type, discount_3_months_value,
+                discount_6_months_type, discount_6_months_value,
+                discount_12_months_type, discount_12_months_value,
+                created_at, updated_at
+            ) VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            RETURNING *
+        `, [
+            enabled,
+            discount_1_month_type,
+            discount_1_month_value,
+            discount_2_months_type,
+            discount_2_months_value,
+            discount_3_months_type,
+            discount_3_months_value,
+            discount_6_months_type,
+            discount_6_months_value,
+            discount_12_months_type,
+            discount_12_months_value
+        ]);
+
+        settings = insertResult.rows[0];
+        wasCreated = true;
+    }
+
+    logger.info('Bulk payment settings updated by admin', {
+        enabled,
+        discount_1_month_type,
+        discount_1_month_value,
+        discount_2_months_type,
+        discount_2_months_value,
+        discount_3_months_type,
+        discount_3_months_value,
+        discount_6_months_type,
+        discount_6_months_value,
+        discount_12_months_type,
+        discount_12_months_value
+    });
+
+    const meta = {
+        operation: wasCreated ? 'created' : 'updated',
+        enabled: settings.enabled,
+        affected_periods: [1, 2, 3, 6, 12],
+        settings_applied: true
+    };
+
+    return res.sendSuccess(settings, meta);
+}));
+
+// Customer endpoints for billing
+router.get('/my-invoices', asyncHandler(async (req, res) => {
+    // Get phone number from customer token or session
+    const customerPhone = req.headers['x-customer-phone'] ||
+                        req.query.phone ||
+                        req.session?.customerPhone;
+
+    if (!customerPhone) {
+        return res.sendSuccess([]);
+    }
+
+    // Find customer by phone number
+    const customerQuery = await query(`
+        SELECT id, name FROM customers WHERE phone = $1 LIMIT 1
+    `, [customerPhone]);
+
+    if (customerQuery.rows.length === 0) {
+        return res.sendSuccess([]);
+    }
+
+    const customerId = customerQuery.rows[0].id;
+
+    // Get invoices for this customer
+    const invoicesQuery = `
+        SELECT
+            i.*,
+            p.name as package_name,
+            p.price as package_price
+        FROM invoices i
+        LEFT JOIN packages p ON i.package_id = p.id
+        WHERE i.customer_id = $1
+        ORDER BY i.created_at DESC
+    `;
+
+    const invoicesResult = await query(invoicesQuery, [customerId]);
+
+    const meta = {
+        customer_phone: customerPhone,
+        customer_id: customerId,
+        invoice_count: invoicesResult.rows.length,
+        has_unpaid: invoicesResult.rows.some(inv => inv.status === 'unpaid')
+    };
+
+    return res.sendSuccess(invoicesResult.rows, meta);
+}));
+
+router.get('/my-payments', asyncHandler(async (req, res) => {
+    // Get phone number from customer token or session
+    const customerPhone = req.headers['x-customer-phone'] ||
+                        req.query.phone ||
+                        req.session?.customerPhone;
+
+    if (!customerPhone) {
+        return res.sendSuccess([]);
+    }
+
+    // Find customer by phone number
+    const customerQuery = await query(`
+        SELECT id, name FROM customers WHERE phone = $1 LIMIT 1
+    `, [customerPhone]);
+
+    if (customerQuery.rows.length === 0) {
+        return res.sendSuccess([]);
+    }
+
+    const customerId = customerQuery.rows[0].id;
+
+    // Get payments for this customer
+    const paymentsQuery = `
+        SELECT
+            p.*,
+            i.invoice_number,
+            i.due_date,
+            c.name as customer_name
+        FROM payments p
+        JOIN invoices i ON p.invoice_id = i.id
+        JOIN customers c ON i.customer_id = c.id
+        WHERE i.customer_id = $1
+        ORDER BY p.payment_date DESC
+    `;
+
+    const paymentsResult = await query(paymentsQuery, [customerId]);
+
+    const meta = {
+        customer_phone: customerPhone,
+        customer_id: customerId,
+        payment_count: paymentsResult.rows.length,
+        total_paid: paymentsResult.rows.reduce((sum, p) => sum + parseFloat(p.amount), 0)
+    };
+
+    return res.sendSuccess(paymentsResult.rows, meta);
+}));
+
+// Calculate bulk payment with dynamic discount logic
+router.post('/calculate-bulk-payment', asyncHandler(async (req, res) => {
+    const { months, packagePrice } = req.body;
+    const numMonths = parseInt(months);
+    const numPackagePrice = parseFloat(packagePrice);
+
+    // Validation with detailed field-level errors
+    const validationErrors = [];
+    if (!numMonths || numMonths <= 0) {
+        validationErrors.push({
+            field: 'months',
+            message: 'Jumlah bulan harus lebih dari 0',
+            value: months
+        });
+    }
+    if (!numPackagePrice || numPackagePrice <= 0) {
+        validationErrors.push({
+            field: 'packagePrice',
+            message: 'Harga paket harus lebih dari 0',
+            value: packagePrice
+        });
+    }
+
+    if (validationErrors.length > 0) {
+        return res.sendValidationErrors(validationErrors);
+    }
+
+    // Get current bulk payment settings
+    const settingsResult = await query(`
+        SELECT * FROM bulk_payment_settings WHERE id = 1
+    `);
+
+    let settings = {
+        enabled: true,
+        discount_1_month_type: 'percentage',
+        discount_1_month_value: 0,
+        discount_2_months_type: 'percentage',
+        discount_2_months_value: 0,
+        discount_3_months_type: 'percentage',
+        discount_3_months_value: 10,
+        discount_6_months_type: 'free_months',
+        discount_6_months_value: 1,
+        discount_12_months_type: 'free_months',
+        discount_12_months_value: 2
+    };
+
+    if (settingsResult.rows.length > 0) {
+        settings = settingsResult.rows[0];
+    }
+
+    if (!settings.enabled) {
+        const noDiscountData = {
+            months: numMonths,
+            originalTotal: numPackagePrice * numMonths,
+            discount: 0,
+            discountType: 'none',
+            discountDisplay: 'Tidak ada diskon',
+            finalTotal: numPackagePrice * numMonths,
+            totalMonthsPaid: numMonths,
+            effectiveMonths: numMonths
+        };
+
+        const meta = {
+            calculation_type: 'no_discount',
+            settings_enabled: false,
+            calculation_performed: true
+        };
+
+        return res.sendSuccess(noDiscountData, meta);
+    }
+
+    let discountAmount = 0;
+    let discountType = 'percentage';
+    let discountDisplay = '';
+    let totalMonthsPaid = numMonths;
+
+    // Get the appropriate discount type and value for the selected months
+    const discountConfig = {
+        1: { type: settings.discount_1_month_type, value: parseInt(settings.discount_1_month_value) },
+        2: { type: settings.discount_2_months_type, value: parseInt(settings.discount_2_months_value) },
+        3: { type: settings.discount_3_months_type, value: parseInt(settings.discount_3_months_value) },
+        6: { type: settings.discount_6_months_type, value: parseInt(settings.discount_6_months_value) },
+        12: { type: settings.discount_12_months_type, value: parseInt(settings.discount_12_months_value) }
+    };
+
+    const selectedDiscount = discountConfig[numMonths] || { type: 'percentage', value: 0 };
+    discountType = selectedDiscount.type;
+
+    switch (selectedDiscount.type) {
+        case 'percentage':
+            discountAmount = (numPackagePrice * numMonths) * (selectedDiscount.value / 100);
+            discountDisplay = `Diskon ${selectedDiscount.value}%`;
+            break;
+        case 'free_months':
+            discountAmount = numPackagePrice * selectedDiscount.value;
+            discountDisplay = `Gratis ${selectedDiscount.value} bulan`;
+            totalMonthsPaid = numMonths;
+            break;
+        case 'fixed_amount':
+            discountAmount = selectedDiscount.value;
+            discountDisplay = `Diskon Rp ${selectedDiscount.value.toLocaleString('id-ID')}`;
+            break;
+    }
+
+    const originalTotal = numPackagePrice * numMonths;
+    const finalTotal = originalTotal - discountAmount;
+    const effectiveMonths = selectedDiscount.type === 'free_months' ?
+        (numMonths + selectedDiscount.value) : numMonths;
+
+    const calculationData = {
+        months: numMonths,
+        originalTotal,
+        discount: discountAmount,
+        discountType: selectedDiscount.type,
+        discountDisplay,
+        finalTotal,
+        totalMonthsPaid,
+        effectiveMonths,
+        perMonthEffective: finalTotal / numMonths
+    };
+
+    const meta = {
+        calculation_type: 'with_discount',
+        settings_enabled: true,
+        discount_applied: discountAmount > 0,
+        discount_percentage: selectedDiscount.type === 'percentage' ? selectedDiscount.value : null,
+        savings_percentage: ((discountAmount / originalTotal) * 100).toFixed(2)
+    };
+
+    return res.sendSuccess(calculationData, meta);
+}));
+
+
+module.exports = router;

@@ -23,7 +23,6 @@ import {
   EyeOff,
   Edit,
   Trash2,
-  Plus,
   Download,
   Upload,
   Clock,
@@ -33,6 +32,7 @@ import {
   Filter,
   X
 } from 'lucide-react'
+import { toast } from 'react-hot-toast'
 import { EditSSIDModal } from './components/EditSSIDModal'
 import { DeviceDetailModal } from './components/DeviceDetailModal'
 import { DeviceStats } from './components/DeviceStats'
@@ -73,6 +73,7 @@ export default function GenieACSPage() {
     showPassword: false
   })
   const [editLoading, setEditLoading] = useState(false)
+  const [actionLoading, setActionLoading] = useState<string | null>(null)
 
   // Settings modal state
   const [showSettings, setShowSettings] = useState(false)
@@ -174,6 +175,7 @@ export default function GenieACSPage() {
   }, [])
 
   const handleDeviceAction = async (deviceId: string, action: string) => {
+    setActionLoading(action)
     try {
       const response = await adminApi.post('/api/v1/genieacs/action', {
         deviceId,
@@ -181,10 +183,27 @@ export default function GenieACSPage() {
       })
 
       if (response.data.success) {
-        await fetchDevices() // Refresh devices list
+        if (action === 'diagnostics') {
+          const d = response.data.data
+          const statusIcon = d.isOnline ? '✅' : '❌'
+          const statusText = d.isOnline ? 'Online' : 'Offline'
+          const healthColor = d.healthScore >= 80 ? 'Baik' : d.healthScore >= 50 ? 'Kurang' : 'Buruk'
+          toast.success(
+            `${statusIcon} Diagnostics ${deviceId.slice(-6)}\n` +
+            `Status: ${statusText} (${d.minutesSinceLastInform}m since last inform)\n` +
+            `Parameters: ${d.parameterCount} | Health: ${d.healthScore}% (${healthColor})`,
+            { duration: 8000 }
+          )
+        } else {
+          toast.success(`Perintah ${action} berhasil dikirim ke device`)
+        }
+        await fetchDevices()
       }
     } catch (err: any) {
       console.error('Error performing device action:', err)
+      toast.error(err.response?.data?.message || `Gagal melakukan aksi ${action}`)
+    } finally {
+      setActionLoading(null)
     }
   }
 
@@ -327,10 +346,6 @@ export default function GenieACSPage() {
                 <Settings className="h-4 w-4 mr-2" />
                 Setting API
               </Button>
-              <Button>
-                <Plus className="h-4 w-4 mr-2" />
-                Tambah Device
-              </Button>
             </>
           )}
         </div>
@@ -361,9 +376,6 @@ export default function GenieACSPage() {
                 <option value="offline">Offline</option>
                 <option value="warning">Warning</option>
               </select>
-              <Button variant="outline" size="icon">
-                <Filter className="h-4 w-4" />
-              </Button>
             </div>
           </div>
         </CardContent>
@@ -686,6 +698,9 @@ export default function GenieACSPage() {
           device={selectedDevice}
           isOpen={showDetails}
           onClose={() => setShowDetails(false)}
+          onAction={(id, action) => handleDeviceAction(id, action)}
+          onEditSSID={(device) => handleEditSSID(device)}
+          actionLoading={actionLoading}
         />
       )}
 

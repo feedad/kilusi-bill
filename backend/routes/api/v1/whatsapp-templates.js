@@ -162,7 +162,7 @@ router.post('/', jwtAuth, async (req, res) => {
   const client = await getPool().connect();
 
   try {
-    const { template_id, name, content, category, variables, meta_name } = req.body;
+    const { template_id, name, content, category, variables, meta_name, buttons } = req.body;
     const tid = template_id || req.body.id; // Accept both template_id (API) and id (frontend)
 
     // Validation
@@ -201,10 +201,10 @@ router.post('/', jwtAuth, async (req, res) => {
     await client.query('BEGIN');
 
     const result = await client.query(`
-      INSERT INTO whatsapp_templates (template_id, name, content, category, variables, created_by, meta_name)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      INSERT INTO whatsapp_templates (template_id, name, content, category, variables, created_by, meta_name, buttons)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING *
-    `, [tid, name, content, category || 'billing', JSON.stringify(templateVariables), req.user?.id, meta_name || null]);
+    `, [tid, name, content, category || 'billing', JSON.stringify(templateVariables), req.user?.id, meta_name || null, buttons ? JSON.stringify(buttons) : '[]']);
 
     await client.query('COMMIT');
 
@@ -239,7 +239,7 @@ router.put('/:id', jwtAuth, async (req, res) => {
 
   try {
     const { id } = req.params;
-    const { name, content, category, enabled, meta_name } = req.body;
+    const { name, content, category, enabled, meta_name, buttons } = req.body;
 
     // Check if template exists
     const existingCheck = await client.query(
@@ -283,14 +283,13 @@ router.put('/:id', jwtAuth, async (req, res) => {
     }
 
     // If content or meta_name changed AND previous status was approved/rejected/pending,
-    // reset to local so user can resubmit. Also clear meta_template_id.
+    // reset to local so user can resubmit.
+    // Keep meta_template_id intact so existing notifications continue working during review.
     const contentChanged = content && content !== existing.content;
     const metaNameChanged = meta_name !== undefined && meta_name !== (existing.meta_name || '');
     if ((contentChanged || metaNameChanged) && existing.meta_status !== 'local') {
       updates.push(`meta_status = $${paramCount++}`);
       values.push('local');
-      updates.push(`meta_template_id = $${paramCount++}`);
-      values.push(null);
     }
 
     if (category) {
@@ -312,6 +311,11 @@ router.put('/:id', jwtAuth, async (req, res) => {
     if (meta_name !== undefined) {
       updates.push(`meta_name = $${paramCount++}`);
       values.push(meta_name || null);
+    }
+
+    if (buttons !== undefined) {
+      updates.push(`buttons = $${paramCount++}`);
+      values.push(JSON.stringify(buttons));
     }
 
     values.push(id);
@@ -573,14 +577,42 @@ router.post('/:id/submit-meta', jwtAuth, async (req, res) => {
       }
     });
 
-    // If there are more complex components, they would be added here
-    // For now, we're keeping it simple with just body content
+    // Add BUTTONS component dynamically from template.buttons DB config
+    const buttonConfig = template.buttons;
+    if (Array.isArray(buttonConfig) && buttonConfig.length > 0) {
+      const variables = template.variables || [];
+      const varToSample = {};
+      variables.forEach((v, i) => { if (i < samples.length) varToSample[v] = samples[i]; });
+      components.push({
+        type: 'BUTTONS',
+        buttons: buttonConfig.map(btn => {
+          let example = varToSample[btn.variable];
+          if (!example) {
+            const vl = (btn.variable || '').toLowerCase();
+            if (vl.includes('token') || vl.includes('portal'))
+              example = 'ABCDEF1234567890ABCDEF1234567890ABCDEF';
+            else if (vl.includes('invoice') || vl.includes('inv'))
+              example = 'INV/2026/0501';
+            else if (vl.includes('phone') || vl.includes('support'))
+              example = 'https://wa.me/62812345678901';
+            else
+              example = 'sample';
+          }
+          return {
+            type: 'URL',
+            text: btn.text,
+            url: btn.url,
+            example: [example]
+          };
+        })
+      });
+    }
 
     // Submit to Omnichat API for Meta approval
     // Use meta_name if set, otherwise fallback to template_id
     const metaTemplateName = template.meta_name || template.template_id;
     const kilusiOmnichat = require('../../../config/kilusi-whatsapp');
-    const result = await kilusiOmnichat.sendTemplate({
+    const result = await kilusiOmnichat.submitTemplate({
       name: metaTemplateName,
       category: meta_category || 'UTILITY',
       language: meta_language || 'id',

@@ -543,9 +543,9 @@ Terima kasih telah menggunakan layanan kami.
 
         // === SERVICE ===
         serviceNumber: (ctx) =>
+            ctx.invoice?.service_number ||
             ctx.service?.service_number ||
             ctx.customer?.service_number ||
-            ctx.invoice?.service_number ||
             ctx.customData?.serviceNumber ||
             ctx.customData?.service_number ||
             "",
@@ -704,6 +704,13 @@ Terima kasih telah menggunakan layanan kami.
         supportPhone: (ctx) => ctx.company?.support_phone || "",
         customerPortal: (ctx) => ctx.company?.customer_portal || "",
         paymentAccounts: (ctx) => ctx.company?.payment_accounts || "",
+        paymentUrl: (ctx) => {
+            const inv = ctx.invoice?.invoice_number ||
+                ctx.customData?.invoiceNumber ||
+                ctx.customData?.invoice_number || "";
+            return inv ? `https://billing.kilusi.id/pay/${inv}` : "";
+        },
+        customerToken: (ctx) => ctx.company?.customer_token || "",
 
         // === PACKAGE CHANGE ===
         oldPackageName: (ctx) =>
@@ -896,8 +903,9 @@ Terima kasih telah menggunakan layanan kami.
             }
 
             // If customerId provided, get token and create direct login link
+            let customerToken = null;
             if (customerId && customerPortal) {
-                const customerToken =
+                customerToken =
                     await this.getCustomerPortalToken(customerId);
                 if (customerToken) {
                     const baseUrl = customerPortal.replace(/\/customer$/, "");
@@ -912,6 +920,7 @@ Terima kasih telah menggunakan layanan kami.
                 email: company?.email || "",
                 website: website,
                 customer_portal: customerPortal,
+                customer_token: customerToken,
                 support_phone: waLink,
                 support_contacts: supportContacts,
             };
@@ -1029,7 +1038,7 @@ Terima kasih telah menggunakan layanan kami.
             const result = await query(
                 `
                 SELECT template_id, name, content, variables, enabled,
-                       meta_status, meta_template_id, meta_name
+                       meta_status, meta_template_id, meta_name, meta_components
                 FROM whatsapp_templates
                 WHERE template_id = $1 AND enabled = true
                 LIMIT 1
@@ -1053,14 +1062,20 @@ Terima kasih telah menggunakan layanan kami.
      * Get service data for a customer (active_date, billing_type, siklus)
      * Used by notification functions to populate activeDate/billingType params
      */
-    async getServiceForCustomer(customerId) {
+    async getServiceForCustomer(customerId, serviceNumber) {
         try {
-            const result = await query(
-                `SELECT active_date, billing_type, siklus, service_number
-                 FROM services WHERE customer_id = $1
-                 ORDER BY created_at DESC LIMIT 1`,
-                [customerId],
-            );
+            let queryStr, params;
+            if (serviceNumber) {
+                queryStr = `SELECT active_date, billing_type, siklus, service_number
+                            FROM services WHERE service_number = $1 LIMIT 1`;
+                params = [serviceNumber];
+            } else {
+                queryStr = `SELECT active_date, billing_type, siklus, service_number
+                            FROM services WHERE customer_id = $1
+                            ORDER BY created_at DESC LIMIT 1`;
+                params = [customerId];
+            }
+            const result = await query(queryStr, params);
             return result.rows[0] || null;
         } catch (error) {
             logger.error(
@@ -1186,13 +1201,62 @@ Terima kasih telah menggunakan layanan kami.
                 );
                 if (
                     template &&
-                    template.meta_status === "approved" &&
                     template.meta_template_id
                 ) {
                     const bodyParams = this.buildMetaParamsFromData(
                         template,
                         options.meta_data,
                     );
+
+                    // Build components: body + optional button params from meta_components
+                    const components = [
+                        {
+                            type: "body",
+                            parameters: bodyParams.map((p) => ({
+                                type: "text",
+                                text: p,
+                            })),
+                        },
+                    ];
+
+                    // Add button parameters if template has BUTTONS in meta_components
+                    if (template.meta_components) {
+                        try {
+                            const parsed = typeof template.meta_components === "string"
+                                ? JSON.parse(template.meta_components)
+                                : template.meta_components;
+                            const buttonsComp = Array.isArray(parsed)
+                                ? parsed.find((c) => c.type === "BUTTONS")
+                                : null;
+                            if (buttonsComp && Array.isArray(buttonsComp.buttons)) {
+                                for (let i = 0; i < buttonsComp.buttons.length; i++) {
+                                    const btn = buttonsComp.buttons[i];
+                                    if (btn.type !== "URL") continue;
+                                    let paramValue = "";
+                                    const btnText = (btn.text || "").toLowerCase();
+                                    if (btnText.includes("bayar") || btnText.includes("pay")) {
+                                        paramValue = options.meta_data?.invoiceNumber ||
+                                            options.meta_data?.invoice_number || "";
+                                    } else {
+                                        paramValue = options.meta_data?.customerToken ||
+                                            options.meta_data?.token || "";
+                                        if (!paramValue && options.customer_id) {
+                                            paramValue = await this.getCustomerPortalToken(options.customer_id) || "";
+                                        }
+                                    }
+                                    components.push({
+                                        type: "button",
+                                        sub_type: "url",
+                                        index: i,
+                                        parameters: [{ type: "text", text: paramValue }],
+                                    });
+                                }
+                            }
+                        } catch (e) {
+                            logger.warn("[Omnichat] Failed to parse meta_components for buttons:", e.message);
+                        }
+                    }
+
                     const result = await kilusiOmnichat.sendTemplateMessage(
                         formattedPhone,
                         {
@@ -1202,15 +1266,7 @@ Terima kasih telah menggunakan layanan kami.
                             language: template.meta_language || "id",
                             notification_type: options.notification_type,
                             preview_text: message,
-                            components: [
-                                {
-                                    type: "body",
-                                    parameters: bodyParams.map((p) => ({
-                                        type: "text",
-                                        text: p,
-                                    })),
-                                },
-                            ],
+                            components,
                         },
                     );
                     logger.info(
@@ -1907,7 +1963,7 @@ Terima kasih telah menggunakan layanan kami.
 
             const companyInfo = await this.getCompanyInfo(customerId);
             const paymentAccounts = await this.getPaymentAccounts();
-            const service = await this.getServiceForCustomer(customerId);
+            const service = await this.getServiceForCustomer(customerId, invoice.service_number);
             const template =
                 await this.getTemplateFromDatabase("invoice_created");
 
@@ -1974,7 +2030,7 @@ Terima kasih telah menggunakan layanan kami.
             const companyInfo = await this.getCompanyInfo(invoice.customer_id);
             const paymentAccounts = await this.getPaymentAccounts();
             const service = await this.getServiceForCustomer(
-                invoice.customer_id,
+                invoice.customer_id, invoice.service_number
             );
             const template =
                 await this.getTemplateFromDatabase("due_date_reminder");
@@ -2043,7 +2099,7 @@ Terima kasih telah menggunakan layanan kami.
 
             const companyInfo = await this.getCompanyInfo(invoice.customer_id);
             const service = await this.getServiceForCustomer(
-                invoice.customer_id,
+                invoice.customer_id, invoice.service_number
             );
             const packageData = await billingManager.getPackageById(
                 invoice.package_id,
@@ -2377,7 +2433,7 @@ Terima kasih telah menggunakan layanan kami.
             }
 
             const service = await this.getServiceForCustomer(
-                customer.id || customer.customer_id,
+                customer.id || customer.customer_id, customer.service_number
             );
             const companyInfo = await this.getCompanyInfo(
                 customer.id || customer.customer_id,
@@ -2386,12 +2442,13 @@ Terima kasih telah menggunakan layanan kami.
 
             // Query latest unpaid invoice to populate invoice/package params
             const customerId = customer.id || customer.customer_id;
+            const serviceNumber = customer.service_number;
             let invoice = null;
             let packageData = null;
-            if (customerId) {
+            if (serviceNumber) {
                 const invResult = await query(
-                    "SELECT id, invoice_number, amount, due_date, package_id FROM invoices WHERE customer_id = $1 AND status IN ('unpaid','sent','overdue') ORDER BY due_date ASC LIMIT 1",
-                    [customerId],
+                    "SELECT id, invoice_number, amount, due_date, package_id FROM invoices WHERE service_number = $1 AND status IN ('unpaid','sent','overdue') ORDER BY due_date ASC LIMIT 1",
+                    [serviceNumber],
                 );
                 invoice = invResult.rows[0] || null;
                 if (invoice && invoice.package_id) {
@@ -3263,7 +3320,7 @@ Terima kasih.
                 };
             }
 
-            const service = await this.getServiceForCustomer(customerId);
+            const service = await this.getServiceForCustomer(customerId, invoice?.service_number);
 
             const templateContent = template
                 ? template.content

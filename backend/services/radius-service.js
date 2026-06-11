@@ -83,7 +83,7 @@ class RadiusService {
         `;
 
         const result = await query(insertQuery, [
-            nasname, shortname, nasname, secret, type, description,
+            nasname?.toUpperCase(), shortname?.toUpperCase(), nasname, secret, type, description?.toUpperCase(),
             snmp_enabled, snmp_community, snmp_community_trap, snmp_version, snmp_port,
             snmp_username, snmp_auth_protocol, snmp_auth_password, snmp_priv_protocol, snmp_priv_password, snmp_security_level
         ]);
@@ -99,10 +99,12 @@ class RadiusService {
         if (!current) throw { code: 'NOT_FOUND', message: 'NAS not found' };
 
         // Duplicate check if changing unique fields
-        if (data.shortname || data.nasname) {
+        const normalizedShortname = data.shortname?.toUpperCase();
+        const normalizedNasname = data.nasname?.toUpperCase();
+        if (normalizedShortname || normalizedNasname) {
             const check = await query(
                 'SELECT id FROM nas WHERE (shortname = $1 OR nasname = $2) AND id != $3',
-                [data.shortname || current.shortname, data.nasname || current.nasname, id]
+                [normalizedShortname || current.shortname, normalizedNasname || current.nasname, id]
             );
             if (check.rows.length > 0) throw { code: 'CONFLICT', message: 'NAS with this name or IP already exists' };
         }
@@ -132,7 +134,7 @@ class RadiusService {
         `;
 
         const result = await query(updateQuery, [
-            data.shortname, data.nasname, data.secret, data.type, data.description,
+            normalizedShortname, normalizedNasname, data.secret, data.type, data.description?.toUpperCase(),
             data.snmp_enabled, data.snmp_community, data.snmp_community_trap, data.snmp_version, data.snmp_port,
             data.snmp_username, data.snmp_auth_protocol, data.snmp_auth_password, data.snmp_priv_protocol, data.snmp_priv_password, data.snmp_security_level,
             id

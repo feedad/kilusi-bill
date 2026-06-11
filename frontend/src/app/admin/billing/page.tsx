@@ -110,7 +110,7 @@ export default function BillingPage() {
   const [showRapel, setShowRapel] = useState(false)
   const [showPayModal, setShowPayModal] = useState(false)
   const [showDetail, setShowDetail] = useState(false)
-  const [selectedRecord, setSelectedRecord] = useState<BillingRecord | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [payForm, setPayForm] = useState(() => {
     const now = new Date()
@@ -240,8 +240,10 @@ export default function BillingPage() {
     setPaidSelectedIds(paidSelectedIds.size === paidRecords.length ? new Set() : new Set(paidRecords.map(r => r.id)))
   }
 
-  const openPayModal = (record: BillingRecord) => {
-    setSelectedRecord(record)
+  const openPayModal = (id: string) => {
+    const record = records.find(r => r.id === id)
+    if (!record) return
+    setSelectedId(id)
     const now = new Date()
     const pad = (n: number) => String(n).padStart(2, '0')
     setPayForm({ amount: record.total || record.amount, payment_method: '', payment_date: `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:00`, notes: '' })
@@ -249,20 +251,21 @@ export default function BillingPage() {
   }
 
   const handlePay = async () => {
-    if (!selectedRecord) return
+    const sel = records.find(r => r.id === selectedId) || paidRecords.find(r => r.id === selectedId)
+    if (!sel) return
     setPaying(true)
     try {
       const res = await adminApi.post(`${endpoints.admin.billing}/payments`, {
-        invoice_id: selectedRecord.id,
-        amount: payForm.amount || selectedRecord.amount,
+        invoice_id: sel.id,
+        amount: payForm.amount || sel.amount,
         payment_method: payForm.payment_method,
         payment_date: payForm.payment_date,
         notes: payForm.notes
       })
       if (res.data?.success) {
         toast.success('Pembayaran berhasil dicatat')
-        setShowPayModal(false); setSelectedRecord(null)
-        fetchUnpaid()
+        setShowPayModal(false); setSelectedId(null)
+        fetchUnpaid(); fetchPaid()
       } else { toast.error(res.data?.message || 'Gagal') }
     } catch (e: any) { toast.error(e.response?.data?.message || 'Gagal') }
     finally { setPaying(false) }
@@ -413,7 +416,7 @@ export default function BillingPage() {
         }
       }
       toast.success(`Rollback: ${success} berhasil, ${failed} gagal`)
-      setPaidSelectedIds(new Set()); fetchPaid()
+      setPaidSelectedIds(new Set()); fetchPaid(); fetchUnpaid()
     } catch (e: any) { toast.error(e.response?.data?.message || 'Gagal rollback') }
   }
 
@@ -467,7 +470,11 @@ export default function BillingPage() {
             <CardContent className="pt-4 space-y-3">
               {/* Row 1: Action buttons */}
               <div className="flex items-center gap-2 flex-wrap">
-                <Button size="sm" variant="outline" onClick={() => { records.length > 0 && openPayModal(records[0]) }}>
+                <Button size="sm" variant="outline" onClick={() => {
+                  if (selectedIds.size === 0) { toast.error('Pilih invoice dulu'); return }
+                  if (selectedIds.size > 1) { toast.error('Pilih 1 invoice saja'); return }
+                  openPayModal([...selectedIds][0])
+                }}>
                   <Wallet className="h-4 w-4 mr-1" />BAYAR
                 </Button>
                 <Button size="sm" variant="outline" onClick={() => window.print()}>
@@ -505,7 +512,7 @@ export default function BillingPage() {
 
           <Card>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm uppercase">
                 <thead>
                   <tr className="border-b bg-muted/30">
                     <th className="text-left p-3 w-8"><input type="checkbox" onChange={toggleSelectAll} checked={selectedIds.size === records.length && records.length > 0} /></th>
@@ -544,7 +551,7 @@ export default function BillingPage() {
                     const sc = STATUS_CONFIG[effectiveStatus] || STATUS_CONFIG.unpaid
                     const isSent = record.sent_at != null
                     return (
-                      <tr key={record.id} className="border-b hover:bg-muted/50 cursor-pointer" onClick={() => { setSelectedRecord(record); setShowDetail(true) }}>
+                      <tr key={record.id} className="border-b hover:bg-muted/50 cursor-pointer" onClick={() => { setSelectedId(record.id); setShowDetail(true) }}>
                         <td className="p-3"><input type="checkbox" checked={selectedIds.has(record.id)} onClick={(e) => e.stopPropagation()} onChange={() => toggleSelect(record.id)} /></td>
                         <td className="p-3"><span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium border ${sc.color}`}>{sc.label}</span></td>
                         <td className="p-3"><p className="font-medium">{record.invoice_number}</p></td>
@@ -560,6 +567,15 @@ export default function BillingPage() {
                        <td className="p-3 text-right font-mono text-xs text-blue-600">{record.unique_code != null ? String(record.unique_code).padStart(3, '0') : '-'}</td>
                         <td className="p-3 text-right font-medium text-xs">{formatCurrency(record.payment_source === 'autopay' ? (record.amount_with_code || record.total || record.amount) : (record.payment_source === 'tripay' ? ((record.total || record.amount) + (record.adm || 0)) : (record.total || record.amount)))}</td>
                         <td className="p-3 text-xs max-w-[100px] truncate" title={record.notes || ''}>{record.notes?.slice(0, 25) || '-'}</td>
+                        <td className="p-3 text-center">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleSendWA(record.id) }}
+                            className={`p-1.5 rounded-md transition-colors ${isSent ? 'text-green-500 hover:bg-green-50' : 'text-gray-400 hover:bg-gray-50'}`}
+                            title={isSent ? 'Notifikasi sudah dikirim' : 'Kirim ulang notifikasi'}
+                          >
+                            <Send className="h-3.5 w-3.5" />
+                          </button>
+                        </td>
                       </tr>
                     )
                   })}
@@ -641,7 +657,7 @@ export default function BillingPage() {
 
           <Card>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm uppercase">
                 <thead>
                   <tr className="border-b bg-muted/30">
                     <th className="text-left p-3 w-8"><input type="checkbox" onChange={togglePaidSelectAll} checked={paidSelectedIds.size === paidRecords.length && paidRecords.length > 0} /></th>
@@ -670,7 +686,7 @@ export default function BillingPage() {
                   ) : paidRecords.length === 0 ? (
                     <tr><td colSpan={18} className="p-8 text-center text-muted-foreground">Tidak ada invoice lunas</td></tr>
                   ) : paidRecords.map(record => (
-                    <tr key={record.id} className="border-b hover:bg-muted/50 cursor-pointer" onClick={() => { setSelectedRecord(record); setShowDetail(true) }}>
+                    <tr key={record.id} className="border-b hover:bg-muted/50 cursor-pointer" onClick={() => { setSelectedId(record.id); setShowDetail(true) }}>
                       <td className="p-3"><input type="checkbox" checked={paidSelectedIds.has(record.id)} onClick={(e) => e.stopPropagation()} onChange={() => togglePaidSelect(record.id)} /></td>
                       <td className="p-3"><span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium border bg-green-500/10 text-green-600 border-green-500/30">{record.status === 'cancelled' ? 'CANCELLED' : 'PAID'}</span></td>
                       <td className="p-3"><p className="font-medium">{record.invoice_number}</p><p className="text-xs text-muted-foreground">{formatDate(record.created_at)}</p></td>
@@ -706,15 +722,18 @@ export default function BillingPage() {
       )}
 
       {/* Pay Modal */}
-      {showPayModal && selectedRecord && (
+      {showPayModal && selectedId && (() => {
+        const sel = records.find(r => r.id === selectedId) || paidRecords.find(r => r.id === selectedId)
+        if (!sel) return null
+        return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowPayModal(false)}>
           <div className="bg-card border rounded-xl shadow-xl w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-6 pb-0"><h2 className="text-lg font-semibold">BAYAR</h2><Button variant="ghost" size="icon" onClick={() => setShowPayModal(false)}><span className="text-xl">&times;</span></Button></div>
             <div className="p-6 space-y-4">
               <div className="bg-muted/50 rounded-lg p-3 space-y-2 text-sm">
-                <div className="flex justify-between"><span className="text-muted-foreground">Invoice:</span><span className="font-medium">{selectedRecord.invoice_number}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">No. Layanan:</span><span className="font-mono">{selectedRecord.service_number || '-'}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Pelanggan:</span><span>{selectedRecord.customer_name}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Invoice:</span><span className="font-medium">{sel.invoice_number}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">No. Layanan:</span><span className="font-mono">{sel.service_number || '-'}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Pelanggan:</span><span>{sel.customer_name}</span></div>
                 <div className="flex justify-between font-bold"><span>Jumlah:</span><span>{formatCurrency(payForm.amount)}</span></div>
               </div>
               <div><label className="text-sm font-medium">Metode Bayar</label>
@@ -731,10 +750,14 @@ export default function BillingPage() {
             </div>
           </div>
         </div>
-      )}
+        )
+      })()}
 
       {/* Detail Modal */}
-      {showDetail && selectedRecord && (
+      {showDetail && selectedId && (() => {
+        const sel = records.find(r => r.id === selectedId) || paidRecords.find(r => r.id === selectedId)
+        if (!sel) return null
+        return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowDetail(false)}>
           <div className="bg-card border rounded-xl shadow-xl w-full max-w-lg mx-4 max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-6 pb-0 sticky top-0 bg-card">
@@ -743,50 +766,51 @@ export default function BillingPage() {
             </div>
             <div className="p-6 space-y-2 text-sm">
               <div className="bg-muted/30 rounded-lg p-3 space-y-1.5">
-                <div className="flex justify-between"><span className="text-muted-foreground">Invoice:</span><span className="font-medium">{selectedRecord.invoice_number}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Status:</span><span className="font-medium">{selectedRecord.status?.toUpperCase() || '-'}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Kategori:</span><span>{selectedRecord.kategori || 'OTOMATIS'}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Invoice:</span><span className="font-medium">{sel.invoice_number}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Status:</span><span className="font-medium">{sel.status?.toUpperCase() || '-'}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Kategori:</span><span>{sel.kategori || 'OTOMATIS'}</span></div>
               </div>
               <div className="bg-muted/30 rounded-lg p-3 space-y-1.5">
-                <div className="flex justify-between"><span className="text-muted-foreground">No. Layanan:</span><span className="font-mono text-xs">{selectedRecord.service_number || '-'}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Pelanggan:</span><span>{selectedRecord.customer_name}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Telepon:</span><span>{selectedRecord.customer_phone || '-'}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Profile:</span><span>{selectedRecord.package_name || '-'}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Mitra:</span><span>{selectedRecord.mitra || selectedRecord.area || '-'}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Area:</span><span>{selectedRecord.region_name || selectedRecord.area || '-'}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">No. Layanan:</span><span className="font-mono text-xs">{sel.service_number || '-'}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Pelanggan:</span><span>{sel.customer_name}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Telepon:</span><span>{sel.customer_phone || '-'}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Profile:</span><span>{sel.package_name || '-'}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Mitra:</span><span>{sel.mitra || sel.area || '-'}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Area:</span><span>{sel.region_name || sel.area || '-'}</span></div>
               </div>
               <div className="bg-muted/30 rounded-lg p-3 space-y-1.5">
-                <div className="flex justify-between"><span className="text-muted-foreground">Tgl Terbit:</span><span>{formatDate(selectedRecord.created_at)}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Jatuh Tempo:</span><span className={(() => { const d = new Date(selectedRecord.due_date); d.setHours(0,0,0,0); const t = new Date(); t.setHours(0,0,0,0); return selectedRecord.due_date && d < t ? 'text-red-500 font-medium' : '' })()}>{formatDate(selectedRecord.due_date)}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Subtotal:</span><span className="font-mono">{formatCurrency(selectedRecord.amount)}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Diskon:</span><span className={selectedRecord.diskon > 0 ? 'text-green-600' : ''}>{selectedRecord.diskon > 0 ? formatCurrency(selectedRecord.diskon) : '0'}</span></div>
-                <div className="flex justify-between">{selectedRecord.diskon > 0 && <><span className="text-muted-foreground">Diskon:</span><span className="text-green-600">{formatCurrency(selectedRecord.diskon)}</span></>}</div>
-                <div className="flex justify-between font-bold"><span>Total:</span><span className="font-mono">{formatCurrency(selectedRecord.payment_source === 'autopay' ? (selectedRecord.amount_with_code || selectedRecord.total || selectedRecord.amount) : (selectedRecord.total || selectedRecord.amount))}</span></div>
-                {selectedRecord.payment_source === 'autopay' && selectedRecord.unique_code != null && (
+                <div className="flex justify-between"><span className="text-muted-foreground">Tgl Terbit:</span><span>{formatDate(sel.created_at)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Jatuh Tempo:</span><span className={(() => { const d = new Date(sel.due_date); d.setHours(0,0,0,0); const t = new Date(); t.setHours(0,0,0,0); return sel.due_date && d < t ? 'text-red-500 font-medium' : '' })()}>{formatDate(sel.due_date)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Subtotal:</span><span className="font-mono">{formatCurrency(sel.amount)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Diskon:</span><span className={sel.diskon > 0 ? 'text-green-600' : ''}>{sel.diskon > 0 ? formatCurrency(sel.diskon) : '0'}</span></div>
+                <div className="flex justify-between">{sel.diskon > 0 && <><span className="text-muted-foreground">Diskon:</span><span className="text-green-600">{formatCurrency(sel.diskon)}</span></>}</div>
+                <div className="flex justify-between font-bold"><span>Total:</span><span className="font-mono">{formatCurrency(sel.payment_source === 'autopay' ? (sel.amount_with_code || sel.total || sel.amount) : (sel.total || sel.amount))}</span></div>
+                {sel.payment_source === 'autopay' && sel.unique_code != null && (
                   <>
-                    <div className="flex justify-between"><span className="text-muted-foreground">Kode Unik:</span><span className="font-mono text-blue-600">{String(selectedRecord.unique_code).padStart(3, '0')}</span></div>
-                    <div className="flex justify-between"><span className="text-muted-foreground">Total Transfer:</span><span className="font-mono font-bold">{formatCurrency(selectedRecord.payment_source === 'autopay' ? (selectedRecord.amount_with_code || selectedRecord.total || selectedRecord.amount) : selectedRecord.amount)}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Kode Unik:</span><span className="font-mono text-blue-600">{String(sel.unique_code).padStart(3, '0')}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Total Transfer:</span><span className="font-mono font-bold">{formatCurrency(sel.payment_source === 'autopay' ? (sel.amount_with_code || sel.total || sel.amount) : sel.amount)}</span></div>
                   </>
                 )}
               </div>
-              {selectedRecord.status === 'paid' && (
+              {sel.status === 'paid' && (
                 <div className="bg-green-500/5 rounded-lg p-3 space-y-1.5 border border-green-500/20">
-                  <div className="flex justify-between"><span className="text-muted-foreground">Tgl Bayar:</span><span className="text-green-600">{formatDateTime(selectedRecord.paid_at)}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Channel:</span><span>{selectedRecord.payment_method_display || selectedRecord.payment_method || '-'}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">CABAR:</span><span>{selectedRecord.cabar || (selectedRecord.payment_source === 'tripay' ? 'TRIPAY' : selectedRecord.payment_source === 'autopay' ? 'AUTOPAY' : 'TRANSFER')}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Admin:</span><span>{selectedRecord.processed_by || '-'}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Biaya Admin:</span><span>{formatCurrency(selectedRecord.adm || selectedRecord.payment_fee_amount || 0)}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Tgl Bayar:</span><span className="text-green-600">{formatDateTime(sel.paid_at)}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Channel:</span><span>{sel.payment_method_display || sel.payment_method || '-'}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">CABAR:</span><span>{sel.cabar || (sel.payment_source === 'tripay' ? 'TRIPAY' : sel.payment_source === 'autopay' ? 'AUTOPAY' : 'TRANSFER')}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Admin:</span><span>{sel.processed_by || '-'}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Biaya Admin:</span><span>{formatCurrency(sel.adm || sel.payment_fee_amount || 0)}</span></div>
                 </div>
               )}
-              {selectedRecord.notes && (
+              {sel.notes && (
                 <div className="bg-muted/30 rounded-lg p-3 space-y-1.5">
-                  <div className="flex justify-between"><span className="text-muted-foreground">Note:</span><span>{selectedRecord.notes}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Note:</span><span>{sel.notes}</span></div>
                 </div>
               )}
             </div>
           </div>
         </div>
-      )}
+        )
+      })()}
 
       {/* Rekap Harian Modal */}
       {showRekapHarian && (

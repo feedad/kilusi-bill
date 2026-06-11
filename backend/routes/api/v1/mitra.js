@@ -71,7 +71,7 @@ router.post('/', async (req, res) => {
 
     const result = await query(
       `INSERT INTO mitra (name, phone, email, address, notes) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [name.trim(), phone || null, email || null, address || null, notes || null]
+      [name.trim().toUpperCase(), phone || null, email || null, address || null, notes || null]
     );
 
     res.status(201).json({ success: true, data: result.rows[0], message: 'Mitra berhasil dibuat' });
@@ -103,7 +103,7 @@ router.put('/:id', async (req, res) => {
 
     const result = await query(
       `UPDATE mitra SET name=$1, phone=$2, email=$3, address=$4, notes=$5, updated_at=NOW() WHERE id=$6 RETURNING *`,
-      [name.trim(), phone || null, email || null, address || null, notes || null, id]
+      [name.trim().toUpperCase(), phone || null, email || null, address || null, notes || null, id]
     );
 
     res.json({ success: true, data: result.rows[0], message: 'Mitra berhasil diperbarui' });

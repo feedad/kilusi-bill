@@ -447,12 +447,20 @@ router.get('/invoices/:id', async (req, res) => {
         // Get service info for masa aktif display
         let serviceInfo = null;
         try {
-            serviceInfo = await query(
-                `SELECT active_date, isolir_date, status
-                 FROM services WHERE customer_id = $1
-                 ORDER BY created_at DESC LIMIT 1`,
-                [customerId]
-            );
+            if (invoice.service_number) {
+                serviceInfo = await query(
+                    `SELECT active_date, isolir_date, status
+                     FROM services WHERE service_number = $1 LIMIT 1`,
+                    [invoice.service_number]
+                );
+            } else {
+                serviceInfo = await query(
+                    `SELECT active_date, isolir_date, status
+                     FROM services WHERE customer_id = $1
+                     ORDER BY created_at DESC LIMIT 1`,
+                    [customerId]
+                );
+            }
             serviceInfo = serviceInfo.rows[0] || null;
         } catch (e) { /* ignore */ }
 

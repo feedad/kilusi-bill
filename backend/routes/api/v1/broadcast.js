@@ -94,6 +94,7 @@ router.post('/', async (req, res) => {
       send_push_notification,
       send_whatsapp_notification,
       whatsapp_template_id, // Use template instead of custom message
+      info_tambahan,
       expires_at,
       content // Destructure content from request body
     } = req.body;
@@ -150,7 +151,8 @@ router.post('/', async (req, res) => {
           target_all,
           target_areas,
           target_mitra,
-          whatsapp_template_id
+          whatsapp_template_id,
+          info_tambahan
         });
 
         logger.info(`📱 WhatsApp broadcast completed: ${result.sent} sent, ${result.failed} failed`);

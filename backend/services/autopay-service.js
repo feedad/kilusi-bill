@@ -135,6 +135,61 @@ class AutopayService {
   }
 
   /**
+   * Notify autopay gateway that an invoice has been rolled back (unpaid).
+   * Called after payment rollback to restore invoice to autopay monitoring.
+   * @param {object} invoice - { invoice_number, customer_name, amount }
+   */
+  async notifyAutopayInvoiceUnpaid(invoiceData) {
+    if (!this.isEnabled()) return null;
+    try {
+      const result = await query(`
+        SELECT i.*, c.name as customer_name
+        FROM invoices i
+        JOIN customers c ON c.id = i.customer_id
+        WHERE (i.id = $1 OR i.invoice_number = $1)
+        LIMIT 1
+      `, [invoiceData.invoice_id || invoiceData.invoice_number]);
+
+      if (result.rows.length === 0) {
+        logger.warn(`[Autopay] Invoice not found for rollback notification`);
+        return null;
+      }
+
+      const inv = result.rows[0];
+
+      // Try dedicated unpaid endpoint first
+      try {
+        const client = this.getClient();
+        await client.post('/api/v1/invoices/unpaid', {
+          invoice_id: inv.invoice_number,
+          customer_name: inv.customer_name,
+          rolled_back_at: new Date().toISOString(),
+        });
+        logger.info(`[Autopay] Invoice ${inv.invoice_number} marked as unpaid via dedicated endpoint`);
+        return true;
+      } catch (dedicatedError) {
+        // Fallback: re-push invoice for monitoring
+        logger.warn(`[Autopay] Dedicated unpaid endpoint failed for ${inv.invoice_number}, falling back to re-push: ${dedicatedError.message}`);
+      }
+
+      logger.info(`[Autopay] Re-pushing invoice ${inv.invoice_number} to autopay after rollback (fallback)`);
+
+      return await this.pushInvoice({
+        id: inv.id,
+        invoice_number: inv.invoice_number,
+        amount: inv.amount,
+        amount_with_code: inv.amount_with_code,
+        unique_code: inv.unique_code,
+        customer_name: inv.customer_name,
+        due_date: inv.due_date,
+      });
+    } catch (error) {
+      logger.error(`[Autopay] Failed to notify autopay unpaid:`, error.message);
+      return null;
+    }
+  }
+
+  /**
    * Verify HMAC signature from Autopay webhook
    * @param {string} rawBody - Raw request body string
    * @param {string} signature - Value from X-Autopay-Signature header
@@ -242,30 +297,34 @@ class AutopayService {
 
       // Restore service if all invoices paid
       try {
-        const unpaidCheck = await query(
-          `SELECT COUNT(*) as cnt FROM invoices WHERE customer_id = $1 AND status IN ('unpaid','suspended')`,
-          [invoice.customer_id]
-        );
-        if (parseInt(unpaidCheck.rows[0].cnt) === 0) {
-          const serviceSuspension = require('../config/serviceSuspension');
-          const svcData = await query(
-            `SELECT s.id, s.service_number, c.name, p.group as package_group, p.pppoe_profile
-             FROM services s JOIN customers c ON c.id = s.customer_id
-             LEFT JOIN packages p ON p.id = s.package_id
-             WHERE s.customer_id = $1 LIMIT 1`, [invoice.customer_id]
+        const serviceNumber = invoice.service_number;
+        if (!serviceNumber) {
+          logger.warn(`[Autopay] No service_number on invoice ${invoice.id}`);
+        } else {
+          const unpaidCheck = await query(
+            `SELECT COUNT(*) as cnt FROM invoices WHERE service_number = $1 AND status IN ('unpaid','suspended')`,
+            [serviceNumber]
           );
-          if (svcData.rows.length > 0 && svcData.rows[0].id) {
-            await serviceSuspension.restoreServiceByServiceId(
-              svcData.rows[0].id,
-              { name: svcData.rows[0].name, service_number: svcData.rows[0].service_number, package_group: svcData.rows[0].package_group, pppoe_profile: svcData.rows[0].pppoe_profile },
-              'Autopay - full restoration'
+          if (parseInt(unpaidCheck.rows[0].cnt) === 0) {
+            const serviceSuspension = require('../config/serviceSuspension');
+            const svcData = await query(
+              `SELECT s.id, s.service_number, c.name, p.group as package_group, p.pppoe_profile
+               FROM services s JOIN customers c ON c.id = s.customer_id
+               LEFT JOIN packages p ON p.id = s.package_id
+               WHERE s.service_number = $1`, [serviceNumber]
             );
-            await query(`UPDATE services SET status = 'active', updated_at = NOW() WHERE customer_id = $1`, [invoice.customer_id]);
-            logger.info(`[Autopay] Service restored for ${invoice.customer_id}`);
+            if (svcData.rows.length > 0 && svcData.rows[0].id) {
+              await serviceSuspension.restoreServiceByServiceId(
+                svcData.rows[0].id,
+                { name: svcData.rows[0].name, service_number: svcData.rows[0].service_number, package_group: svcData.rows[0].package_group, pppoe_profile: svcData.rows[0].pppoe_profile },
+                'Autopay - full restoration'
+              );
+              logger.info(`[Autopay] Service ${serviceNumber} restored`);
+            }
           }
         }
       } catch (restoreErr) {
-        logger.error(`[Autopay] Service restore failed for ${invoice.customer_id}:`, restoreErr.message);
+        logger.error(`[Autopay] Service restore failed for invoice ${invoice.id}:`, restoreErr.message);
       }
 
       // Send WhatsApp notification

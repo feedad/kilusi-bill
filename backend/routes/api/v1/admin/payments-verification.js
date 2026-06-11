@@ -10,7 +10,6 @@ const { query } = require('../../../../config/database');
 const { jwtAuth } = require('../../../../middleware/jwtAuth');
 const { asyncHandler } = require('../../../../middleware/response');
 const telegramService = require('../../../../services/telegram-service');
-const BillingCycleService = require('../../../../config/billing-cycle-service');
 
 /**
  * GET /api/v1/admin/payments-verification/pending
@@ -34,6 +33,7 @@ router.get('/pending', jwtAuth, asyncHandler(async (req, res) => {
         pt.manual_payment_details,
         pt.created_at,
         pt.updated_at,
+        (pt.is_manual_payment = true AND pt.manual_payment_details IS NOT NULL) as is_from_chatbot,
         i.invoice_number,
         i.due_date,
         c.id as customer_id,
@@ -90,6 +90,7 @@ router.get('/:id', jwtAuth, asyncHandler(async (req, res) => {
     const result = await query(`
       SELECT
         pt.*,
+        (pt.is_manual_payment = true AND pt.manual_payment_details IS NOT NULL) as is_from_chatbot,
         i.invoice_number,
         i.due_date,
         i.status as invoice_status,
@@ -157,35 +158,45 @@ router.post('/:id/approve', jwtAuth, asyncHandler(async (req, res) => {
 
     const transaction = transactionResult.rows[0];
 
-    // Update transaction status
-    await query(`
-      UPDATE payment_transactions
-      SET status = 'paid',
-          verified_by = $1,
-          verified_at = NOW(),
-          verification_notes = $2,
-          paid_at = NOW(),
-          updated_at = NOW()
-      WHERE id = $3
-    `, [adminId, notes || null, id]);
+    // Process payment via shared service (INSERT payments, restore service, WA notif, accounting)
+    const paymentService = require('../../../../services/payment-service');
+    const result = await paymentService.processPaymentAfterVerification({
+        transactionId: id,
+        invoiceId: transaction.invoice_id,
+        amount: transaction.amount,
+        paymentMethod: transaction.payment_method,
+        paymentDate: transaction.created_at,
+        customerId: transaction.customer_id,
+        customerName: transaction.customer_name,
+        customerPhone: transaction.customer_phone,
+        processedBy: `admin_${adminId}`,
+        verifiedBy: adminId,
+    });
 
-    // Update invoice status using transaction creation time as payment date
-    await query(`
-      UPDATE invoices
-      SET status = 'paid',
-          payment_method = $1,
-          payment_date = $3,
-          updated_at = NOW()
-      WHERE id = $2
-    `, [transaction.payment_method, transaction.invoice_id, transaction.created_at]);
+    if (result.skipped) {
+        logger.warn(`[PaymentsVerification] Payment ${id} skipped — invoice already paid`);
+        return res.json({
+            success: true,
+            data: { transaction_id: id, status: 'cancelled', message: 'Invoice sudah dibayar sebelumnya' }
+        });
+    }
 
-    // Update service dates after payment
-    await BillingCycleService.updateServiceDatesAfterPayment(transaction.invoice_id, transaction.created_at);
+    // Notify Omnichat (non-blocking)
+    try {
+        const { notifyOmnichat } = require('../../../../services/payment-service');
+        notifyOmnichat({
+            transaction_id: id,
+            customer_phone: transaction.customer_phone,
+            status: 'approved',
+        });
+    } catch (e) {
+        logger.warn('[PaymentsVerification] Omnichat notify failed:', e.message);
+    }
 
     // Send Telegram notification
     const message = `
 ✅ *PEMBAYARAN DIVERIFIKASI*
-
+ 
 *Customer:* ${transaction.customer_name}
 *Invoice:* ${transaction.invoice_number}
 *Jumlah:* Rp ${parseInt(transaction.amount).toLocaleString('id-ID')}
@@ -273,10 +284,22 @@ router.post('/:id/reject', jwtAuth, asyncHandler(async (req, res) => {
       WHERE id = $3
     `, [adminId, reason, id]);
 
+    // Notify Omnichat (non-blocking)
+    try {
+        const { notifyOmnichat } = require('../../../../services/payment-service');
+        notifyOmnichat({
+            transaction_id: id,
+            customer_phone: transaction.customer_phone,
+            status: 'rejected',
+        });
+    } catch (e) {
+        logger.warn('[PaymentsVerification] Omnichat notify failed:', e.message);
+    }
+
     // Send Telegram notification
     const message = `
 ❌ *PEMBAYARAN DITOLAK*
-
+ 
 *Customer:* ${transaction.customer_name}
 *Invoice:* ${transaction.invoice_number}
 *Jumlah:* Rp ${parseInt(transaction.amount).toLocaleString('id-ID')}

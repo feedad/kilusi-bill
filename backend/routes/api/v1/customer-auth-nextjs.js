@@ -9,6 +9,14 @@ const CustomerTokenService = require('../../../services/customer-token-service')
 const crypto = require('crypto');
 const { query, getOne } = require('../../../config/database');
 
+function formatUptime(seconds) {
+  if (!seconds || seconds <= 0) return '-';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h > 0) return `${h}j ${m}m`;
+  return `${m}m`;
+}
+
 // In-memory session storage (in production, use Redis or database)
 const sessionStore = new Map();
 
@@ -42,13 +50,15 @@ router.post('/login-with-token', async (req, res) => {
     // Get complete customer data with services info and PPPoE details
     const completeCustomer = await query(
       `SELECT c.id, c.name, c.phone, c.email, c.address,
+              s.id as service_id,
               p.name as package_name, p.price as package_price,
               t.pppoe_username, t.pppoe_password, t.mac_address
        FROM customers c
        LEFT JOIN services s ON s.customer_id::text = c.id
        LEFT JOIN packages p ON s.package_id = p.id
        LEFT JOIN technical_details t ON s.id = t.service_id
-       WHERE c.id = $1`,
+       WHERE c.id = $1
+       ORDER BY s.created_at DESC LIMIT 1`,
       [customer.id]
     );
 
@@ -71,7 +81,8 @@ router.post('/login-with-token', async (req, res) => {
         pppoe_password: customerData.pppoe_password || null,
         mac_address: customerData.mac_address || null,
         ssid: null,
-        customer_id: customerData.id
+        customer_id: customerData.id,
+        service_id: customerData.service_id || null
       },
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from token expiry
       loginMethod: 'token'
@@ -280,11 +291,12 @@ router.get('/get-customer-data', async (req, res) => {
     // Get customer from token or session - REAL AUTHENTICATION
     const authHeader = req.headers.authorization;
     let customer = null;
+    let token = null;
 
     console.log('🔍 Backend: Auth header:', authHeader ? 'Present' : 'Missing');
 
     if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.substring(7);
+      token = authHeader.substring(7);
       console.log('🔍 Backend: Token extracted:', token.substring(0, 20) + '...');
 
       // Try to validate as session token first
@@ -347,12 +359,13 @@ router.get('/get-customer-data', async (req, res) => {
     // Attempt to extract serviceId
     try {
       // Verify again to get FULL payload including serviceId
-      const decoded = jwt.verify(token, CUSTOMER_JWT_SECRET);
+      const jwt2 = require('jsonwebtoken');
+      const decoded = jwt2.verify(token, CUSTOMER_JWT_SECRET);
       serviceId = decoded.serviceId;
-      console.log('🔍 Backend: Service ID extracted:', serviceId);
+      console.log('🔍 DEBUG [get-customer-data] JWT decoded OK, serviceId:', serviceId, 'customerId:', decoded.customerId, 'type:', decoded.type);
     } catch (e) {
       // Token might be valid but verify failed here? No, user already validated it.
-      // Just ignore
+      console.log('🔍 DEBUG [get-customer-data] JWT verify FAILED:', e.message, 'token_len:', token?.length, 'first30:', token?.substring(0,30));
     }
 
     if (serviceId) {
@@ -363,7 +376,7 @@ router.get('/get-customer-data', async (req, res) => {
                 c.id as customer_primary_pk,  -- The Person ID
                 c.customer_id, -- Display Customer ID (5 digits)
                 c.name, c.phone, c.email, 
-                s.address_installation as address, s.status, s.active_date, s.isolir_date, s.installation_date, s.period, s.billing_type,
+                 s.address_installation as address, s.status, s.active_date, s.isolir_date, s.installation_date, s.billing_type,
                 c.created_at as customer_created_at,
                 p.name as package_name, p.speed as package_speed, p.price as package_price,
                 td.pppoe_username, td.ip_address_static, td.mac_address
@@ -468,8 +481,7 @@ router.get('/get-customer-data', async (req, res) => {
             radiusStatus = {
               ipAddress: session.framedipaddress,
               onlineTime: session.acctstarttime,
-              nasIP: session.nasipaddress,
-              sessionTime: session.acctsessiontime || 0,
+              uptime: formatUptime(session.acctsessiontime),
               uploadBytes: session.acctinputoctets || 0,
               downloadBytes: session.acctoutputoctets || 0,
               macAddress: session.callingstationid || null
@@ -514,7 +526,7 @@ router.get('/get-customer-data', async (req, res) => {
           COALESCE(SUM(acctoutputoctets), 0) as total_download
         FROM radacct
         WHERE username = $1
-        AND acctstarttime >= DATE_TRUNC('month', CURRENT_DATE)
+        AND (acctstarttime >= DATE_TRUNC('month', CURRENT_DATE) OR acctstoptime IS NULL)
       `;
 
       const usageResult = await db.query(usageQuery, [customerData.pppoe_username]);
@@ -584,6 +596,7 @@ router.get('/get-customer-data', async (req, res) => {
     }
 
     // Query all services for this customer (for account switcher)
+    console.log('🔍 DEBUG [get-customer-data] customer.baseId:', customer?.id, 'customerData.id:', customerData?.id, 'pppoe:', customerData?.pppoe_username, 'serviceId_from_JWT:', serviceId);
     let accounts = [];
     try {
       const accountsQuery = `
@@ -666,14 +679,12 @@ router.get('/get-customer-data', async (req, res) => {
         router: customerData.router,
         isOnline: isOnline,
         hasInvoice: hasInvoice,
+        referral_code: customer.referral_code_used || null,
         calculated_isolir_date: customerData.isolir_date, // Same logic as admin - calculated isolir date
         service_id: customerData.service_id, // Explicitly provide service_id for active state tracking
         accounts: accounts // All services for this customer (for account switcher)
       },
       radiusStatus: radiusStatus || {
-        connected: isOnline,
-        lastSeen: isOnline ? new Date().toISOString() : null,
-        onlineTime: null,
         ipAddress: null,
         uptime: null
       },
@@ -805,13 +816,15 @@ async function validateSessionToken(sessionToken) {
       // Get complete customer data
       const completeCustomer = await query(
         `SELECT c.id, c.name, c.phone, c.email, c.address,
+                s.id as service_id,
                 p.name as package_name, p.price as package_price,
                 t.pppoe_username, t.pppoe_password, t.mac_address
          FROM customers c
          LEFT JOIN services s ON s.customer_id::text = c.id
          LEFT JOIN packages p ON s.package_id = p.id
          LEFT JOIN technical_details t ON s.id = t.service_id
-         WHERE c.portal_access_token = $1`,
+         WHERE c.portal_access_token = $1
+         ORDER BY s.created_at DESC LIMIT 1`,
         [sessionToken]
       );
 
@@ -832,7 +845,8 @@ async function validateSessionToken(sessionToken) {
             pppoe_password: customerData.pppoe_password || null,
             mac_address: customerData.mac_address || null,
             ssid: null,
-            customer_id: customerData.id
+            customer_id: customerData.id,
+            service_id: customerData.service_id || null
           }
         };
       }

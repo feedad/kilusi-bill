@@ -22,7 +22,7 @@ const verifyCustomerToken = async (req, res, next) => {
     try {
       const sessionValidation = await validateSessionToken(token);
       if (sessionValidation.valid && sessionValidation.customer) {
-        console.log('✅ Session Token Validated for:', sessionValidation.customer.name);
+        console.log('✅ Session Token Validated for:', sessionValidation.customer.name, 'pppoe:', sessionValidation.customer.pppoe_username, 'service_id:', sessionValidation.customer.service_id);
 
         // Ensure we have the latest data from DB if needed, but session usually has enough
         // Or we can just use the customer object from session
@@ -32,13 +32,26 @@ const verifyCustomerToken = async (req, res, next) => {
         if (!req.customer.pppoe_username) {
           try {
             const { getOne } = require('../../../config/database');
-            const dbCustomer = await getOne(`
-              SELECT t.pppoe_username
-              FROM services s
-              LEFT JOIN technical_details t ON s.id = t.service_id
-              WHERE s.customer_id::text = $1
-              LIMIT 1
-            `, [req.customer.id || req.customer.customer_id]);
+            const serviceId = req.customer.service_id || req.customer.serviceId;
+            let dbQuery, dbParams;
+            if (serviceId) {
+              dbQuery = `
+                SELECT t.pppoe_username
+                FROM services s
+                LEFT JOIN technical_details t ON s.id = t.service_id
+                WHERE s.id = $1 LIMIT 1
+              `;
+              dbParams = [serviceId];
+            } else {
+              dbQuery = `
+                SELECT t.pppoe_username
+                FROM services s
+                LEFT JOIN technical_details t ON s.id = t.service_id
+                WHERE s.customer_id::text = $1 LIMIT 1
+              `;
+              dbParams = [req.customer.id || req.customer.customer_id];
+            }
+            const dbCustomer = await getOne(dbQuery, dbParams);
             if (dbCustomer && dbCustomer.pppoe_username) {
               req.customer.pppoe_username = dbCustomer.pppoe_username;
               console.log(`✅ Fetched pppoe_username from DB: ${dbCustomer.pppoe_username}`);
@@ -56,6 +69,8 @@ const verifyCustomerToken = async (req, res, next) => {
       console.log('Session validation check failed (continuing to JWT):', sessionError.message);
     }
 
+    console.log('🔍 DEBUG [verifyCustomerToken] Session path not taken, trying JWT...');
+
     // Use the database from config
     const pool = getPool();
 
@@ -66,17 +81,41 @@ const verifyCustomerToken = async (req, res, next) => {
       const decoded = jwt.verify(token, CUSTOMER_JWT_SECRET);
 
       if (decoded.type === 'customer' && decoded.customerId) {
-        // Get customer by ID from customers_view to include pppoe_username
-        const query = `
-          SELECT c.*
-          FROM customers_view c
-          WHERE c.id = $1
-        `;
-        const result = await pool.query(query, [decoded.customerId]);
+        // Get customer data scoped to the specific service
+        let query, params;
+        if (decoded.serviceId) {
+          console.log('🔍 DEBUG [JWT Path] serviceId:', decoded.serviceId, 'customerId:', decoded.customerId);
+          query = `
+            SELECT c.id, c.id AS customer_id, c.name, c.phone, c.email, c.address,
+                   c.ssid, c.wifi_password, c.nik, c.created_at, c.updated_at,
+                   c.portal_access_token, c.token_expires_at,
+                   s.id AS service_id, s.service_number,
+                   s.status, s.installation_date, s.active_date, s.isolir_date,
+                   s.siklus, s.billing_type, s.enable_isolir,
+                   s.nas_id AS router, s.region_id, s.area,
+                   s.address_installation AS installation_address, s.latitude, s.longitude,
+                   p.id AS package_id, p.name AS package_name, p.price AS package_price,
+                   t.pppoe_username, t.pppoe_password, t.pppoe_profile,
+                   t.ip_address_static, t.mac_address, t.device_model, t.device_serial_number,
+                   n.odp_code, n.port_number, n.cable_type, n.cable_length_meters, n.onu_signal_dbm
+            FROM customers c
+            JOIN services s ON s.customer_id::text = c.id AND s.id = $2
+            LEFT JOIN packages p ON s.package_id = p.id
+            LEFT JOIN technical_details t ON t.service_id = s.id
+            LEFT JOIN network_infrastructure n ON n.service_id = s.id
+            WHERE c.id = $1
+          `;
+          params = [decoded.customerId, decoded.serviceId];
+        } else {
+          console.log('🔍 DEBUG [JWT Path] NO serviceId — fallback to customers_view');
+          query = `SELECT c.* FROM customers_view c WHERE c.id = $1`;
+          params = [decoded.customerId];
+        }
+        const result = await pool.query(query, params);
 
         if (result.rows.length > 0) {
           req.customer = result.rows[0];
-          console.log('✅ JWT Customer found:', result.rows[0].name, 'Username:', result.rows[0].pppoe_username);
+          console.log('✅ JWT Customer found:', result.rows[0].name, 'Username:', result.rows[0].pppoe_username, 'Status:', result.rows[0].status, 'Service:', result.rows[0].service_number);
           return next();
         } else {
           console.log('Customer not found for JWT ID:', decoded.customerId);
@@ -118,6 +157,30 @@ const verifyCustomerToken = async (req, res, next) => {
 router.get('/info', verifyCustomerToken, async (req, res) => {
   try {
     const customer = req.customer;
+
+    // Support ?service_number=xxx to fetch device info for a specific service
+    if (req.query.service_number) {
+      try {
+        const { getOne } = require('../../../config/database');
+        const svc = await getOne(`
+          SELECT s.service_number, s.status, s.package_id, s.id as service_id,
+                 t.pppoe_username, t.mac_address
+          FROM services s
+          LEFT JOIN technical_details t ON t.service_id = s.id
+          WHERE s.service_number = $1 AND s.customer_id::text = $2
+        `, [req.query.service_number, customer.id || customer.customer_id]);
+        if (svc) {
+          customer.pppoe_username = svc.pppoe_username || customer.pppoe_username;
+          customer.mac_address = svc.mac_address || customer.mac_address;
+          customer.status = svc.status;
+          customer.service_id = svc.service_id;
+          customer.service_number = svc.service_number;
+          console.log('🔍 [info] Override by service_number:', req.query.service_number, 'pppoe:', svc.pppoe_username);
+        }
+      } catch (e) {
+        console.warn('⚠️ [info] service_number lookup failed:', e.message);
+      }
+    }
 
     // Get real RADIUS connection status
     let radiusConnection = { online: false };
