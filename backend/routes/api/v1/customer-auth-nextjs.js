@@ -548,6 +548,28 @@ router.get('/get-customer-data', async (req, res) => {
       console.error('Error calculating usage:', usageError);
     }
 
+    // Get accumulated usage from customer_usage (per billing cycle)
+    let cycleUsage = { bytes_in: 0, bytes_out: 0 };
+    try {
+      const cycleResult = await db.query(`
+        SELECT cu.bytes_in, cu.bytes_out
+        FROM customer_usage cu
+        JOIN services s ON s.id = cu.service_id
+        WHERE s.customer_id = $1
+          AND cu.period_start <= CURRENT_DATE
+          AND cu.period_end > CURRENT_DATE
+        LIMIT 1
+      `, [customer.id]);
+      if (cycleResult.rows.length > 0) {
+        cycleUsage = {
+          bytes_in: parseInt(cycleResult.rows[0].bytes_in) || 0,
+          bytes_out: parseInt(cycleResult.rows[0].bytes_out) || 0
+        };
+      }
+    } catch (cycleError) {
+      console.error('Error fetching customer_usage:', cycleError.message);
+    }
+
     // Check for active invoices (display only - no calculations)
     let hasInvoice = false;
     let billingStats = {
@@ -690,6 +712,7 @@ router.get('/get-customer-data', async (req, res) => {
       },
       billingStats: billingStats,
       usageStats: usageStats,
+      cycleUsage: cycleUsage,
       connectedDevicesCount: connectedDevicesCount
     };
 

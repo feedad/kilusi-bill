@@ -574,6 +574,7 @@ export default function OnlineCustomersPage() {
                     <th className="text-left py-2 px-3 font-medium text-foreground text-xs">Signal</th>
                     <th className="text-left py-2 px-3 font-medium text-foreground text-xs">Uptime</th>
                     <th className="text-left py-2 px-3 font-medium text-foreground text-xs">Traffic (Session)</th>
+                    <th className="text-left py-2 px-3 font-medium text-foreground text-xs">Usage (Cycle)</th>
                     <th className="text-left py-2 px-3 font-medium text-foreground text-xs">Aksi</th>
                   </tr>
                 </thead>
@@ -654,6 +655,13 @@ export default function OnlineCustomersPage() {
                           <span className="text-muted-foreground">↓</span> {formatBytes(customer.data_used?.download || 0)}
                           <span className="text-muted-foreground mx-1">|</span>
                           <span className="text-muted-foreground">↑</span> {formatBytes(customer.data_used?.upload || 0)}
+                        </div>
+                      </td>
+                      <td className="py-2 px-3">
+                        <div className="text-xs font-mono">
+                          {customer.usage_bytes_in !== undefined
+                            ? formatBytes((customer.usage_bytes_in || 0) + (customer.usage_bytes_out || 0))
+                            : '-'}
                         </div>
                       </td>
                       <td className="py-2 px-3">

@@ -556,11 +556,16 @@ router.get('/online-customers', async (req, res) => {
                     p.price as package_price,
                     p.speed as package_speed,
                     td.mac_address,
-                    td.device_serial_number
+                    td.device_serial_number,
+                    cu.bytes_in as usage_bytes_in,
+                    cu.bytes_out as usage_bytes_out
                 FROM customers_view c
                 LEFT JOIN packages p ON c.package_id = p.id
                 LEFT JOIN services s ON s.customer_id = c.id
                 LEFT JOIN technical_details td ON td.service_id = s.id
+                LEFT JOIN customer_usage cu ON cu.service_id = s.id
+                    AND cu.period_start <= CURRENT_DATE
+                    AND cu.period_end > CURRENT_DATE
                 WHERE c.pppoe_username = ANY($1)
             `;
             const onlineResult = await query(onlineCustomerQuery, [paginatedUsernames]);
@@ -615,7 +620,9 @@ router.get('/online-customers', async (req, res) => {
                         uptime_formatted: formatUptime(uptimeValue),
                         data_used: { upload: session?.upload_bytes || 0, download: session?.download_bytes || 0 },
                         ip_address: session?.ip_address || null,
-                        location: null
+                        location: null,
+                        usage_bytes_in: parseInt(cu?.bytes_in) || 0,
+                        usage_bytes_out: parseInt(cu?.bytes_out) || 0
                     };
                 });
         }

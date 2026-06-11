@@ -81,6 +81,7 @@ export default function CustomerPortal() {
     overdueInvoices: 0
   })
   const [usageStats, setUsageStats] = useState<UsageStats | null>(null)
+  const [cycleUsage, setCycleUsage] = useState({ bytes_in: 0, bytes_out: 0 })
   const [radiusStatus, setRadiusStatus] = useState<RadiusStatus | null>(null)
   const [connectedDevicesCount, setConnectedDevicesCount] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -131,7 +132,7 @@ export default function CustomerPortal() {
         throw new Error(result.message || 'API returned error')
       }
 
-      const { customer: apiCustomer, radiusStatus: apiRadius, billingStats: apiBilling, usageStats: apiUsage, connectedDevicesCount: apiConnectedCount } = result.data
+      const { customer: apiCustomer, radiusStatus: apiRadius, billingStats: apiBilling, usageStats: apiUsage, cycleUsage: apiCycleUsage, connectedDevicesCount: apiConnectedCount } = result.data
 
       const enrichedCustomer: CustomerData = {
         ...apiCustomer,
@@ -147,6 +148,7 @@ export default function CustomerPortal() {
       setBillingStats(apiBilling)
       setRadiusStatus(apiRadius)
       setUsageStats(apiUsage)
+      setCycleUsage(apiCycleUsage || { bytes_in: 0, bytes_out: 0 })
       setConnectedDevicesCount(apiConnectedCount || 0)
 
       // Update available accounts and persistence if API returned new list
@@ -251,8 +253,8 @@ export default function CustomerPortal() {
 
   if (!customerData) return null
 
-  // Calculate usage
-  const totalUsageBytes = usageStats?.total_usage || 0
+  // Calculate usage — prefer cycleUsage (SNMP accumulated per billing cycle)
+  const totalUsageBytes = (cycleUsage.bytes_in + cycleUsage.bytes_out) || usageStats?.total_usage || 0
   const limitBytes = usageStats?.limit || 0
 
   // If unlimited (0), use 100% full ring if usage > 0, else 0%
