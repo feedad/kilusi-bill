@@ -629,6 +629,32 @@ async function createVoucherRadiusEntries(voucher) {
   }
 }
 
+/**
+ * Cleanup stale RADIUS accounting sessions
+ * Closes sessions that haven't received an interim update in 30+ minutes.
+ * This happens after FreeRADIUS restart — NAS keeps sending updates but
+ * they fail to UPDATE radacct (0 rows matched), causing stale entries.
+ * Closing them allows the next NAS update to create a fresh session.
+ */
+async function cleanupStaleSessions() {
+  const { query } = require('./database');
+  try {
+    const result = await query(`
+      UPDATE radacct
+      SET acctstoptime = NOW(),
+          acctterminatecause = 'Stale-Session-Cleared'
+      WHERE acctstoptime IS NULL
+        AND acctupdatetime < NOW() - INTERVAL '30 minutes'
+    `);
+    const count = result?.rowCount || 0;
+    logger.info(`🧹 Cleaned ${count} stale RADIUS session(s)`);
+    return { success: true, cleaned: count };
+  } catch (error) {
+    logger.error(`❌ Failed to clean stale RADIUS sessions: ${error.message}`);
+    return { success: false, cleaned: 0, error: error.message };
+  }
+}
+
 module.exports = {
   syncCustomersToRadius,
   syncCustomerToRadius,
@@ -639,6 +665,7 @@ module.exports = {
   syncPackagesToRadius,
   syncPackageToRadius,
   removePackageFromRadius,
+  cleanupStaleSessions,
   // Voucher support
   addVoucherRadCheck,
   addVoucherRadReply,

@@ -98,6 +98,7 @@ export default function OnlineCustomersPage() {
   const [refreshing, setRefreshing] = useState(false)
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [syncingMac, setSyncingMac] = useState(false)
+  const [syncingRadius, setSyncingRadius] = useState(false)
 
   const fetchCustomers = async (page = pagination.page) => {
     try {
@@ -261,6 +262,35 @@ export default function OnlineCustomersPage() {
     }
   }
 
+  const handleSyncRadius = async () => {
+    if (!confirm(
+      'Sync status online pelanggan?\n\n' +
+      'Ini akan membersihkan sesi RADIUS yang sudah tidak aktif (stale >30 menit).\n' +
+      'Tidak akan memutus koneksi PPPoE yang sedang berjalan.'
+    )) {
+      return
+    }
+
+    try {
+      setSyncingRadius(true)
+      setError(null)
+
+      const response = await adminApi.post('/api/v1/realtime/radius-sync')
+
+      if (response.data.success) {
+        alert(`✅ ${response.data.message}`)
+        fetchCustomers(pagination.page)
+      } else {
+        alert(`⚠️ ${response.data.message}`)
+      }
+    } catch (err: any) {
+      console.error('Error syncing radius:', err)
+      alert(`❌ Gagal sync: ${err.response?.data?.message || err.message}`)
+    } finally {
+      setSyncingRadius(false)
+    }
+  }
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'online':
@@ -346,6 +376,16 @@ export default function OnlineCustomersPage() {
           >
             <RefreshCw className={`h-4 w-4 ${syncingMac ? 'animate-spin' : ''}`} />
             <span className="hidden sm:inline">{syncingMac ? 'Syncing...' : 'Sync MAC'}</span>
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleSyncRadius}
+            disabled={syncingRadius}
+            className="flex items-center space-x-2"
+            title="Sync status online dari RADIUS"
+          >
+            <RefreshCw className={`h-4 w-4 ${syncingRadius ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">{syncingRadius ? 'Syncing...' : 'Sync Status'}</span>
           </Button>
           <div className="flex items-center space-x-2">
             <span className="text-sm text-muted-foreground">Auto Refresh:</span>

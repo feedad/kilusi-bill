@@ -1382,10 +1382,33 @@ router.get('/online-status', asyncHandler(async (req, res) => {
         });
 
     } catch (error) {
-        logger.error('Error fetching online status:', error);
+        logger.error('Error in CoA request:', error);
         res.status(500).json({
             success: false,
-            message: 'Terjadi kesalahan saat mengambil data status'
+            message: `Terjadi kesalahan saat mengirim CoA: ${error.message}`
+        });
+    }
+}));
+
+// POST /api/v1/realtime/radius-sync - Cleanup stale RADIUS sessions
+router.post('/radius-sync', jwtAuth, asyncHandler(async (req, res) => {
+    try {
+        const radiusSync = require('../../../config/radius-sync');
+        const result = await radiusSync.cleanupStaleSessions();
+
+        res.json({
+            success: result.success,
+            cleaned: result.cleaned,
+            message: result.success
+                ? `${result.cleaned} stale session(s) cleaned`
+                : `Cleanup failed: ${result.error}`,
+            timestamp: new Date()
+        });
+    } catch (error) {
+        logger.error('Error in RADIUS sync cleanup:', error);
+        res.status(500).json({
+            success: false,
+            message: `Terjadi kesalahan: ${error.message}`
         });
     }
 }));
