@@ -449,13 +449,6 @@ export default function DeviceSettingsPage() {
     try {
       console.log('🔄 Fetching traffic data...');
 
-      // SOLUTION: Call fetchRadiusData from here since traffic fetch works
-      console.log('🔄 Traffic fetch working - calling fetchRadiusData from here...');
-      await fetchRadiusData().catch(error => {
-        console.error('❌ fetchRadiusData called from traffic failed:', error);
-      });
-      console.log('✅ fetchRadiusData called from traffic function');
-
       // Use standardized customer API - token handling is done by API client
       const result = await customerAPI.getRealtimeTraffic();
 
