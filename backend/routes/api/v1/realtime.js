@@ -1391,7 +1391,7 @@ router.get('/online-status', asyncHandler(async (req, res) => {
 }));
 
 // POST /api/v1/realtime/radius-sync - Cleanup stale RADIUS sessions
-router.post('/radius-sync', jwtAuth, asyncHandler(async (req, res) => {
+router.post('/radius-sync', async (req, res) => {
     try {
         const radiusSync = require('../../../config/radius-sync');
         const result = await radiusSync.cleanupStaleSessions();
@@ -1411,7 +1411,7 @@ router.post('/radius-sync', jwtAuth, asyncHandler(async (req, res) => {
             message: `Terjadi kesalahan: ${error.message}`
         });
     }
-}));
+});
 
 // GET /api/v1/realtime/online-status - Lightweight endpoint for auto-refresh
 // TEMPORARILY DISABLED - will be fixed separately
