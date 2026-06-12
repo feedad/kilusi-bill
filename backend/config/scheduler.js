@@ -80,6 +80,17 @@ class InvoiceScheduler {
         }, { scheduled: true, timezone: "Asia/Jakarta" });
         logger.info('Customer usage poller scheduler initialized - runs every minute');
 
+        // 4d. OLT signal cache poller — every 5 minutes
+        cron.schedule('*/5 * * * *', async () => {
+            try {
+                const poller = require('./olt-signal-poller');
+                await poller.pollOltSignal();
+            } catch (error) {
+                logger.error('Error in OLT signal poller:', error);
+            }
+        }, { scheduled: true, timezone: "Asia/Jakarta" });
+        logger.info('OLT signal cache poller initialized - runs every 5 minutes');
+
         // 5. Voucher usage check every 1 minute
         cron.schedule('* * * * *', async () => {
             try { await this.checkVoucherUsage(); } 

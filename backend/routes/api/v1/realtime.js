@@ -571,14 +571,51 @@ router.get('/online-customers', async (req, res) => {
             const onlineResult = await query(onlineCustomerQuery, [paginatedUsernames]);
             const customerMap = new Map(onlineResult.rows.map(c => [c.pppoe_username, c]));
 
-            // Fetch cached OLT signal data (non-blocking, background)
+            // Read OLT signal from database cache
             let signalByPppoe = {};
             try {
-                const oltsResult = await query('SELECT id, name, host, type, snmp_community, snmp_port, snmp_version FROM olts WHERE status = $1', ['active']);
-                const signalResult = await oltSnmpMonitor.matchSignalToCustomers(onlineSessions, oltsResult.rows);
-                signalByPppoe = Object.fromEntries(signalResult);
+                const cacheResult = await query(`
+                    SELECT pppoe_username, rx_power, tx_power, distance, olt_name, onu_index
+                    FROM olt_signal_cache
+                    WHERE polled_at > NOW() - INTERVAL '10 minutes'
+                `);
+                for (const row of cacheResult.rows) {
+                    signalByPppoe[row.pppoe_username] = {
+                        rx_power: row.rx_power,
+                        tx_power: row.tx_power,
+                        distance: row.distance,
+                        olt_name: row.olt_name,
+                        onu_index: row.onu_index
+                    };
+                }
+
+                // Refresh cache in background if stale
+                if (cacheResult.rows.length === 0 && onlineSessions.length > 0) {
+                    setImmediate(async () => {
+                        try {
+                            const oltsResult = await query(
+                                'SELECT id, name, host, type, snmp_community, snmp_port, snmp_version FROM olts WHERE status = $1',
+                                ['active']
+                            );
+                            const signalResult = await oltSnmpMonitor.matchSignalToCustomers(onlineSessions, oltsResult.rows);
+                            for (const [uname, signal] of signalResult) {
+                                await query(`
+                                    INSERT INTO olt_signal_cache (pppoe_username, rx_power, tx_power, distance, olt_name, onu_index, polled_at)
+                                    VALUES ($1, $2, $3, $4, $5, $6, NOW())
+                                    ON CONFLICT (pppoe_username) DO UPDATE SET
+                                        rx_power = EXCLUDED.rx_power, tx_power = EXCLUDED.tx_power,
+                                        distance = EXCLUDED.distance, olt_name = EXCLUDED.olt_name,
+                                        onu_index = EXCLUDED.onu_index, polled_at = NOW()
+                                `, [uname, signal.rx_power, signal.tx_power, signal.distance, signal.olt_name, signal.onu_index]);
+                            }
+                            logger.info('OLT signal cache refreshed in background');
+                        } catch (e) {
+                            logger.warn('OLT signal background refresh failed:', e.message);
+                        }
+                    });
+                }
             } catch (e) {
-                logger.warn('Failed to get cached OLT signal data:', e.message);
+                logger.warn('Failed to read OLT signal cache:', e.message);
             }
 
             // Build customer objects in the sorted order
