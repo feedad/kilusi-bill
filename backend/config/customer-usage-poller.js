@@ -10,11 +10,15 @@ async function pollCustomerUsage() {
         CACHE.lastPoll = Date.now();
 
         // 1. Get all active services with PPPoE + billing period
+        //    Join NAS via radacct active session (primary) or services.nas_id (fallback)
         const services = await query(`
             SELECT s.id as service_id, td.pppoe_username,
                    s.active_date, s.isolir_date, s.siklus,
-                   r.nasname, r.snmp_community, r.snmp_port,
-                   r.snmp_version, r.snmp_enabled
+                   COALESCE(r.nasname, r2.nasname) as nasname,
+                   COALESCE(r.snmp_community, r2.snmp_community) as snmp_community,
+                   COALESCE(r.snmp_port, r2.snmp_port) as snmp_port,
+                   COALESCE(r.snmp_version, r2.snmp_version) as snmp_version,
+                   COALESCE(r.snmp_enabled, r2.snmp_enabled) as snmp_enabled
             FROM services s
             JOIN technical_details td ON td.service_id = s.id
             LEFT JOIN (
@@ -23,7 +27,8 @@ async function pollCustomerUsage() {
                 WHERE r2.acctstoptime IS NULL
                 ORDER BY r2.username, r2.acctstarttime DESC
             ) act ON act.username = td.pppoe_username
-            LEFT JOIN nas r ON r.nasname::text = act.nasipaddress
+            LEFT JOIN nas r ON r.nasname::text = act.nasipaddress::text
+            LEFT JOIN nas r2 ON r2.nasname::text = s.nas_id
             WHERE s.status = 'active'
               AND td.pppoe_username IS NOT NULL
               AND td.pppoe_username != ''
