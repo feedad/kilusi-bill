@@ -621,8 +621,8 @@ router.get('/online-customers', async (req, res) => {
                         data_used: { upload: session?.upload_bytes || 0, download: session?.download_bytes || 0 },
                         ip_address: session?.ip_address || null,
                         location: null,
-                        usage_bytes_in: parseInt(cu?.bytes_in) || 0,
-                        usage_bytes_out: parseInt(cu?.bytes_out) || 0
+                        usage_bytes_in: parseInt(customer.usage_bytes_in) || 0,
+                        usage_bytes_out: parseInt(customer.usage_bytes_out) || 0
                     };
                 });
         }

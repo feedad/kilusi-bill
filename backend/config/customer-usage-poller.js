@@ -23,7 +23,7 @@ async function pollCustomerUsage() {
                 WHERE r2.acctstoptime IS NULL
                 ORDER BY r2.username, r2.acctstarttime DESC
             ) act ON act.username = td.pppoe_username
-            LEFT JOIN nas r ON r.nasname = act.nasipaddress
+            LEFT JOIN nas r ON r.nasname::text = act.nasipaddress
             WHERE s.status = 'active'
               AND td.pppoe_username IS NOT NULL
               AND td.pppoe_username != ''
