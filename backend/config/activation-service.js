@@ -99,6 +99,17 @@ class ActivationService {
             logger.warn(`Failed to trigger technician fee for ${customerId}: ${e.message}`);
         }
 
+        // 7b. Process cash reward + referred discount (non-blocking)
+        try {
+            const ReferralService = require('../services/referral-service');
+            await ReferralService.processFixedCodeCashReward(customerId);
+            if (invoice) {
+                await ReferralService.applyReferredFirstInvoiceDiscount(invoice.id, customerId);
+            }
+        } catch (e) {
+            logger.warn(`Failed to process referral rewards for ${customerId}: ${e.message}`);
+        }
+
         // 8. If prepaid, set trial timer (non-blocking)
         if (billingType === 'prepaid') {
             try {

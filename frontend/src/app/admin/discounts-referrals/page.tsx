@@ -90,12 +90,10 @@ export default function DiscountsReferralsPage() {
     referral_enabled: true,
     referrer_discount_enabled: true,
     referrer_cash_enabled: true,
-    referred_installation_discount_enabled: true,
-    referred_service_discount_enabled: true,
     referrer_discount_fixed: '0',
     referrer_cash_amount: '0',
-    referred_installation_discount_fixed: '0',
-    referred_service_discount_fixed: '0',
+    referred_reward_enabled: true,
+    referred_reward_fixed: '0',
     referral_code_expiry_days: '365',
     referral_max_uses: '50'
   });
@@ -1241,56 +1239,29 @@ export default function DiscountsReferralsPage() {
                     </div>
                   </div>
 
-                  {/* Diskon Instalasi */}
+                  {/* Reward Pelanggan Baru */}
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3">
                       <input
                         type="checkbox"
-                        id="referred_installation_discount_enabled"
-                        checked={referralForm.referred_installation_discount_enabled}
-                        onChange={(e) => setReferralForm({...referralForm, referred_installation_discount_enabled: e.target.checked})}
+                        id="referred_reward_enabled"
+                        checked={referralForm.referred_reward_enabled}
+                        onChange={(e) => setReferralForm({...referralForm, referred_reward_enabled: e.target.checked})}
                         className="h-4 w-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800"
                       />
                       <div>
-                        <Label htmlFor="referred_installation_discount_enabled" className="text-sm font-medium">Diskon Instalasi</Label>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">Potongan untuk biaya instalasi pelanggan baru</p>
+                        <Label htmlFor="referred_reward_enabled" className="text-sm font-medium">Reward Pelanggan Baru</Label>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Diskon langsung pada invoice pertama</p>
                       </div>
                     </div>
                     <div className="flex items-center space-x-2">
                       <span className="text-sm text-gray-500 dark:text-gray-400">Rp</span>
                       <Input
                         type="number"
-                        value={referralForm.referred_installation_discount_fixed}
-                        onChange={(e) => setReferralForm({...referralForm, referred_installation_discount_fixed: e.target.value})}
-                        disabled={!referralForm.referred_installation_discount_enabled}
-                        className={`w-32 ${!referralForm.referred_installation_discount_enabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Diskon Layanan */}
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
-                      <input
-                        type="checkbox"
-                        id="referred_service_discount_enabled"
-                        checked={referralForm.referred_service_discount_enabled}
-                        onChange={(e) => setReferralForm({...referralForm, referred_service_discount_enabled: e.target.checked})}
-                        className="h-4 w-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800"
-                      />
-                      <div>
-                        <Label htmlFor="referred_service_discount_enabled" className="text-sm font-medium">Diskon Layanan</Label>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">Potongan untuk bulan pertama layanan</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <span className="text-sm text-gray-500 dark:text-gray-400">Rp</span>
-                      <Input
-                        type="number"
-                        value={referralForm.referred_service_discount_fixed}
-                        onChange={(e) => setReferralForm({...referralForm, referred_service_discount_fixed: e.target.value})}
-                        disabled={!referralForm.referred_service_discount_enabled}
-                        className={`w-32 ${!referralForm.referred_service_discount_enabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        value={referralForm.referred_reward_fixed}
+                        onChange={(e) => setReferralForm({...referralForm, referred_reward_fixed: e.target.value})}
+                        disabled={!referralForm.referred_reward_enabled}
+                        className={`w-32 ${!referralForm.referred_reward_enabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                       />
                     </div>
                   </div>
@@ -1350,8 +1321,7 @@ export default function DiscountsReferralsPage() {
                 <div className="space-y-2">
                   <h4 className="font-semibold">Bagi Direferensikan (Penerima)</h4>
                   <ul className="text-sm space-y-1 text-muted-foreground">
-                    <li>• Diskon instalasi: Rp {parseInt(referralForm.referred_installation_discount_fixed).toLocaleString('id-ID')}</li>
-                    <li>• Diskon layanan: Rp {parseInt(referralForm.referred_service_discount_fixed).toLocaleString('id-ID')}</li>
+                    <li>• Potongan invoice pertama: Rp {parseInt(referralForm.referred_reward_fixed).toLocaleString('id-ID')}</li>
                     <li>• Otomatis diterapkan saat menggunakan kode referral</li>
                   </ul>
                 </div>

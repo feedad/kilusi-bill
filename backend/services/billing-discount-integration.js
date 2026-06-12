@@ -1,7 +1,6 @@
 const { query, transaction } = require('../config/database');
 const { logger } = require('../config/logger');
 const DiscountService = require('./discount-service');
-const ReferralService = require('./referral-service');
 
 class BillingDiscountIntegration {
   /**
@@ -13,15 +12,7 @@ class BillingDiscountIntegration {
       let appliedDiscounts = [];
       let finalAmount = originalAmount;
 
-      // 1. Apply referral discounts
-      const referralDiscount = await this.applyReferralDiscounts(customerId, originalAmount);
-      if (referralDiscount.amount > 0) {
-        totalDiscount += referralDiscount.amount;
-        finalAmount -= referralDiscount.amount;
-        appliedDiscounts.push(referralDiscount);
-      }
-
-      // 2. Apply compensation discounts
+      // 1. Apply compensation discounts (referral discounts handled via marketing balance)
       const compensationDiscounts = await this.applyCompensationDiscounts(customerId, originalAmount, invoiceData);
       for (const discount of compensationDiscounts) {
         totalDiscount += discount.amount;
@@ -48,29 +39,6 @@ class BillingDiscountIntegration {
         appliedDiscounts: [],
         discountPercentage: 0
       };
-    }
-  }
-
-  /**
-   * Apply referral discounts
-   */
-  static async applyReferralDiscounts(customerId, invoiceAmount) {
-    try {
-      const referralBenefits = await ReferralService.applyReferralBenefits(customerId, invoiceAmount);
-
-      if (referralBenefits > 0) {
-        return {
-          type: 'referral',
-          amount: referralBenefits,
-          description: 'Diskon Referral',
-          source: 'referral_system'
-        };
-      }
-
-      return { type: 'referral', amount: 0, description: '', source: 'referral_system' };
-    } catch (error) {
-      logger.error('Error applying referral discounts:', error);
-      return { type: 'referral', amount: 0, description: '', source: 'referral_system' };
     }
   }
 

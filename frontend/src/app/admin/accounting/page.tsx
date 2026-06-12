@@ -25,7 +25,6 @@ import {
   Settings,
   Tag,
   Wrench,
-  Megaphone,
   Trash
 } from 'lucide-react'
 import { adminApi, endpoints, handleApiError } from '@/lib/api-clients'
@@ -114,9 +113,7 @@ export default function AccountingPage() {
   // Auto expense states
   const [autoExpenseSettings, setAutoExpenseSettings] = useState({
     technicianFee: 0,
-    marketingFee: 0,
     technicianFeeEnabled: false,
-    marketingFeeEnabled: false,
     recurringExpenses: [] as Array<{
       id: string
       name: string
@@ -386,8 +383,7 @@ export default function AccountingPage() {
           ...prev,
           technicianFeeEnabled: s.technician_fee_enabled?.isActive && s.technician_fee_enabled?.value === 'true',
           technicianFee: parseInt(s.technician_fee_amount?.value) || 0,
-          marketingFeeEnabled: s.marketing_fee_enabled?.isActive && s.marketing_fee_enabled?.value === 'true',
-          marketingFee: parseInt(s.marketing_fee_amount?.value) || 0
+
         }))
       }
 
@@ -1503,9 +1499,8 @@ export default function AccountingPage() {
           </DialogHeader>
 
           <Tabs defaultValue="technician" className="mt-4">
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="technician">Fee Teknisi</TabsTrigger>
-              <TabsTrigger value="marketing">Fee Marketing</TabsTrigger>
               <TabsTrigger value="recurring">Pengeluaran Berjadwal</TabsTrigger>
             </TabsList>
 
@@ -1551,54 +1546,6 @@ export default function AccountingPage() {
                   <div className="bg-blue-50 p-3 rounded-lg">
                     <p className="text-sm text-blue-800">
                       💡 Fee akan otomatis dicatat sebagai pengeluaran saat status instalasi pelanggan berubah menjadi &quot;selesai&quot;
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            <TabsContent value="marketing" className="space-y-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Megaphone className="h-5 w-5" />
-                    Fee Marketing/Referral
-                  </CardTitle>
-                  <CardDescription>
-                    Pengeluaran otomatis untuk marketing atau referral pelanggan baru
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="marketingFeeEnabled">Aktifkan Fee Marketing</Label>
-                    <input
-                      id="marketingFeeEnabled"
-                      type="checkbox"
-                      checked={autoExpenseSettings.marketingFeeEnabled}
-                      onChange={(e) => setAutoExpenseSettings(prev => ({
-                        ...prev,
-                        marketingFeeEnabled: e.target.checked
-                      }))}
-                      className="h-4 w-4"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="marketingFee">Nominal Fee (Rp)</Label>
-                    <Input
-                      id="marketingFee"
-                      type="number"
-                      value={autoExpenseSettings.marketingFee}
-                      onChange={(e) => setAutoExpenseSettings(prev => ({
-                        ...prev,
-                        marketingFee: parseInt(e.target.value) || 0
-                      }))}
-                      placeholder="100000"
-                      disabled={!autoExpenseSettings.marketingFeeEnabled}
-                    />
-                  </div>
-                  <div className="bg-green-50 p-3 rounded-lg">
-                    <p className="text-sm text-green-800">
-                      💡 Fee akan otomatis dicatat saat pelanggan baru mendaftar dengan kode referral
                     </p>
                   </div>
                 </CardContent>
@@ -1794,16 +1741,6 @@ export default function AccountingPage() {
                 })
                 await adminApi.put('/api/v1/auto-expenses/settings/technician_fee_amount', {
                   value: autoExpenseSettings.technicianFee.toString(),
-                  isActive: true
-                })
-
-                // Update marketing fee settings
-                await adminApi.put('/api/v1/auto-expenses/settings/marketing_fee_enabled', {
-                  value: autoExpenseSettings.marketingFeeEnabled.toString(),
-                  isActive: true
-                })
-                await adminApi.put('/api/v1/auto-expenses/settings/marketing_fee_amount', {
-                  value: autoExpenseSettings.marketingFee.toString(),
                   isActive: true
                 })
 

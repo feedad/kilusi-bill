@@ -21,16 +21,12 @@ exports.up = async () => {
     await query(`
       INSERT INTO auto_expense_settings (setting_key, setting_value, description) VALUES
       ('referral_enabled', 'true', 'Enable referral system'),
-      ('referrer_discount_fixed', '25000', 'Fixed discount amount for referrer'),
-      ('referrer_cash_amount', '30000', 'Fixed cash amount for referrer'),
-      ('referred_installation_discount_fixed', '50000', 'Fixed installation discount for referred customer'),
-      ('referred_service_discount_fixed', '25000', 'Fixed service discount for referred customer'),
-      ('marketing_min_fee', '100000', 'Minimum marketing fee'),
-      ('marketing_max_fee', '500000', 'Maximum marketing fee'),
+      ('referrer_discount_fixed', '50000', 'Saldo marketing untuk referrer (customer aktif)'),
+      ('referrer_cash_amount', '50000', 'Cash reward untuk non-pelanggan (fixed marketing code)'),
+      ('referred_reward_enabled', 'true', 'Enable reward for referred customer'),
+      ('referred_reward_fixed', '25000', 'Diskon langsung invoice pertama untuk referred'),
       ('referral_code_expiry_days', '365', 'Referral code expiry in days'),
-      ('referral_max_uses', '50', 'Maximum uses per referral code'),
-      ('referral_benefit_type', 'discount', 'Default benefit type: discount or cash'),
-      ('referral_cash_enabled', 'true', 'Enable cash referral option')
+      ('referral_max_uses', '50', 'Maximum uses per referral code')
       ON CONFLICT (setting_key) DO NOTHING
     `)
 
@@ -52,6 +48,8 @@ exports.down = async () => {
         'referral_enabled',
         'referrer_discount_fixed',
         'referrer_cash_amount',
+        'referred_reward_enabled',
+        'referred_reward_fixed',
         'referred_installation_discount_fixed',
         'referred_service_discount_fixed',
         'marketing_min_fee',

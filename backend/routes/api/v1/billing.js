@@ -1282,6 +1282,15 @@ router.post('/invoices', asyncHandler(async (req, res) => {
         // Don't fail invoice creation if Autopay push fails
     }
 
+    // Auto-apply marketing balance (non-blocking)
+    try {
+        const ReferralService = require('../../../services/referral-service');
+        ReferralService.autoApplyMarketingBalance(customer_id)
+            .catch(e => logger.warn(`Auto-apply marketing balance failed for ${customer_id}: ${e.message}`));
+    } catch (e) {
+        logger.warn(`Failed to init auto-apply marketing balance: ${e.message}`);
+    }
+
     const meta = {
         invoice_number: invoiceNumber,
         customer_id,
@@ -1500,6 +1509,17 @@ router.post('/payments', asyncHandler(async (req, res) => {
         'payment',
         payment.id
     );
+
+    // Trigger referral credit for referrer + referred (non-blocking)
+    try {
+        const ReferralService = require('../../../services/referral-service');
+        ReferralService.addReferrerMarketingCredit(invoice.customer_id)
+            .catch(e => logger.warn(`Referrer credit failed: ${e.message}`));
+        ReferralService.addReferredMarketingCredit(invoice.customer_id)
+            .catch(e => logger.warn(`Referred credit failed: ${e.message}`));
+    } catch (e) {
+        logger.warn(`Failed to process referral credits: ${e.message}`);
+    }
 
     const meta = {
         invoice_id,

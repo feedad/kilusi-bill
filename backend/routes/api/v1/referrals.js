@@ -500,4 +500,32 @@ router.delete('/fixed-marketing-code/:code', jwtAuth, async (req, res) => {
   }
 });
 
+// ============================================
+// MARKETING BALANCE (Saldo Marketing)
+// ============================================
+
+// GET /api/v1/referrals/marketing-balance/:customerId - Get marketing balance
+router.get('/marketing-balance/:customerId', asyncHandler(async (req, res) => {
+  try {
+    const ReferralService = require('../../../services/referral-service');
+    const balance = await ReferralService.getMarketingBalance(req.params.customerId);
+    res.json({ success: true, data: balance });
+  } catch (error) {
+    logger.error('Error getting marketing balance:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+}));
+
+// GET /api/v1/referrals/marketing-balance/:customerId/history - Get balance history
+router.get('/marketing-balance/:customerId/history', asyncHandler(async (req, res) => {
+  try {
+    const ReferralService = require('../../../services/referral-service');
+    const history = await ReferralService.getMarketingBalanceHistory(req.params.customerId);
+    res.json({ success: true, data: history });
+  } catch (error) {
+    logger.error('Error getting marketing balance history:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+}));
+
 module.exports = router;

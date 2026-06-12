@@ -197,6 +197,17 @@ webhookRouter.post('/:gateway', asyncHandler(async (req, res) => {
                     'payment', payResult.rows[0].id);
             } catch (acctErr) { logger.warn('Tripay accounting transaction failed:', acctErr.message); }
 
+            // Trigger referral credit for referrer + referred (non-blocking)
+            try {
+                const ReferralService = require('../../../services/referral-service');
+                const invInfo = await query('SELECT customer_id FROM invoices WHERE id = $1', [invoiceId]);
+                if (invInfo.rows.length > 0) {
+                    const cid = invInfo.rows[0].customer_id;
+                    ReferralService.addReferrerMarketingCredit(cid).catch(e => logger.warn(`[Webhook] Referrer credit failed: ${e.message}`));
+                    ReferralService.addReferredMarketingCredit(cid).catch(e => logger.warn(`[Webhook] Referred credit failed: ${e.message}`));
+                }
+            } catch (e) { logger.warn('Tripay referral credit failed:', e.message); }
+
             // Send Telegram Notification
           if (invoiceCheck.rows.length > 0) {
             const inv = invoiceCheck.rows[0];

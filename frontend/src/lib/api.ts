@@ -312,7 +312,7 @@ export const endpoints = {
     settings: '/api/v1/auto-expenses/settings',
     recurring: '/api/v1/auto-expenses/recurring',
     triggerTechnicianFee: '/api/v1/auto-expenses/trigger-technician-fee',
-    triggerMarketingFee: '/api/v1/auto-expenses/trigger-marketing-fee',
+
   },
 
   // Broadcast Messages

@@ -588,6 +588,10 @@ Terima kasih telah menggunakan layanan kami.
                 );
                 return this.formatCurrency(fee > 0 ? base + fee : base);
             }
+            // Prefer final_amount if differs from amount (saldo marketing / referral discount applied)
+            if (ctx.invoice?.final_amount != null && ctx.invoice?.amount != null
+                && parseFloat(ctx.invoice.final_amount) !== parseFloat(ctx.invoice.amount))
+                return this.formatCurrency(ctx.invoice.final_amount);
             if (ctx.invoice?.amount != null)
                 return this.formatCurrency(ctx.invoice.amount);
             if (ctx.customData?.amount) return ctx.customData.amount;
