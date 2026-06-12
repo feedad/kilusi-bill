@@ -3,6 +3,7 @@ const router = express.Router();
 const { logger } = require('../../../config/logger');
 const { query } = require('../../../config/database');
 const { jwtAuth } = require('../../../middleware/jwtAuth');
+const { asyncHandler } = require('../../../middleware/response');
 const ReferralService = require('../../../services/referral-service');
 
 // GET /api/v1/referrals/codes - Get all referral codes (admin)
