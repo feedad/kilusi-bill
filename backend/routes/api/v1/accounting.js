@@ -256,6 +256,17 @@ router.post('/transactions', async (req, res) => {
       })
     }
 
+    // Validate category_id exists if provided
+    if (category_id) {
+      const catCheck = await query('SELECT id FROM accounting_categories WHERE id = $1', [category_id])
+      if (catCheck.rows.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Kategori akunting tidak ditemukan'
+        })
+      }
+    }
+
     const insertQuery = `
       INSERT INTO accounting_transactions (
         category_id, type, amount, description, reference_type,
@@ -336,6 +347,23 @@ router.post('/transactions', async (req, res) => {
       body: req.body,
       user: req.user
     })
+
+    // Handle foreign key violation (category_id not found)
+    if (error.code === '23503') {
+      return res.status(400).json({
+        success: false,
+        message: 'Kategori akunting tidak valid atau telah dihapus'
+      })
+    }
+
+    // Handle invalid date format
+    if (error.code === '22007' || error.code === '22008') {
+      return res.status(400).json({
+        success: false,
+        message: 'Format tanggal tidak valid. Gunakan format YYYY-MM-DD'
+      })
+    }
+
     res.status(500).json({
       success: false,
       message: 'Terjadi kesalahan saat membuat transaksi akunting',

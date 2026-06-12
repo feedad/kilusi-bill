@@ -206,6 +206,17 @@ router.put('/:id', jwtAuth, asyncHandler(async (req, res) => {
             SET completed_date = CURRENT_TIMESTAMP
             WHERE id = $1
         `, [installationId]);
+
+        // Trigger technician fee (non-blocking)
+        try {
+            const autoExpenseService = require('../../../config/auto-expense-service');
+            const installation = result.rows[0];
+            if (installation.customer_id && installation.technician_id) {
+                await autoExpenseService.triggerTechnicianFee(installation.customer_id, installation.technician_id);
+            }
+        } catch (e) {
+            logger.warn(`Failed to trigger technician fee for installation ${installationId}: ${e.message}`);
+        }
     }
 
     return res.sendSuccess({ installation: result.rows[0] });

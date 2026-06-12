@@ -85,7 +85,21 @@ class ActivationService {
             logger.error(`Failed to send activation notifications for ${customerId}:`, e.message);
         }
 
-        // 7. If prepaid, set trial timer (non-blocking)
+        // 7. Trigger technician fee if enabled (non-blocking)
+        try {
+            const autoExpenseService = require('./auto-expense-service');
+            const installResult = await getOne(
+                'SELECT technician_id FROM installations WHERE customer_id = $1 AND status = \'completed\' ORDER BY completed_date DESC LIMIT 1',
+                [customerId]
+            );
+            if (installResult && installResult.technician_id) {
+                await autoExpenseService.triggerTechnicianFee(customerId, installResult.technician_id);
+            }
+        } catch (e) {
+            logger.warn(`Failed to trigger technician fee for ${customerId}: ${e.message}`);
+        }
+
+        // 8. If prepaid, set trial timer (non-blocking)
         if (billingType === 'prepaid') {
             try {
                 await this.setPrepaidTrial(customerId, invoice, serviceResult.id);

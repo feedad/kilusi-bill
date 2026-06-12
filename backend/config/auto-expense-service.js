@@ -150,7 +150,7 @@ class AutoExpenseService {
 
       // Get customer and technician details
       const customerResult = await query('SELECT name FROM customers WHERE id = $1', [customerId])
-      const technicianResult = await query('SELECT name FROM technicians WHERE id = $1', [technicianId])
+      const technicianResult = await query('SELECT username as name FROM users WHERE id = $1 AND role = \'technician\'', [technicianId])
 
       const customerName = customerResult.rows[0]?.name || `Customer #${customerId}`
       const technicianName = technicianResult.rows[0]?.name || `Technician #${technicianId}`
@@ -216,7 +216,7 @@ class AutoExpenseService {
 
       // Get customer and marketer details
       const customerResult = await query('SELECT name FROM customers WHERE id = $1', [customerId])
-      const marketerResult = await query('SELECT name FROM technicians WHERE id = $1', [marketerId])
+      const marketerResult = await query('SELECT username as name FROM users WHERE id = $1 AND role = \'marketing\'', [marketerId])
 
       const customerName = customerResult.rows[0]?.name || `Customer #${customerId}`
       const marketerName = marketerResult.rows[0]?.name || `Marketer #${marketerId}`
