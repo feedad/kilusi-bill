@@ -35,7 +35,7 @@ async function pollOltSignal() {
                     rx_power = EXCLUDED.rx_power, tx_power = EXCLUDED.tx_power,
                     distance = EXCLUDED.distance, olt_name = EXCLUDED.olt_name,
                     onu_index = EXCLUDED.onu_index, polled_at = NOW()
-            `, [uname, signal.rx_power, signal.tx_power, signal.distance, signal.olt_name, signal.onu_index]);
+            `, [uname, signal.rx_power, signal.tx_power, null, signal.olt_name, signal.onu_index]);
             saved++;
         }
 
