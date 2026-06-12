@@ -135,25 +135,30 @@ class AutoExpenseService {
 
       const amount = parseFloat(amountResult.rows[0].setting_value)
 
-      // Get default expense category
+      // Get Fee Teknisi category
       const categoryResult = await query(`
         SELECT id FROM accounting_categories
-        WHERE type = 'expense' AND is_active = true
-        ORDER BY name LIMIT 1
+        WHERE name = 'Fee Teknisi' AND is_active = true
+        LIMIT 1
       `)
 
       if (categoryResult.rows.length === 0) {
-        return { success: false, message: 'No default expense category found' }
+        return { success: false, message: 'Fee Teknisi category not found' }
       }
 
       const categoryId = categoryResult.rows[0].id
 
       // Get customer and technician details
       const customerResult = await query('SELECT name FROM customers WHERE id = $1', [customerId])
-      const technicianResult = await query('SELECT username as name FROM users WHERE id = $1 AND role = \'technician\'', [technicianId])
 
       const customerName = customerResult.rows[0]?.name || `Customer #${customerId}`
-      const technicianName = technicianResult.rows[0]?.name || `Technician #${technicianId}`
+      let feeDescription = `Fee Teknisi - Instalasi ${customerName}`
+
+      if (technicianId) {
+        const technicianResult = await query('SELECT username as name FROM users WHERE id = $1 AND role = \'technician\'', [technicianId])
+        const technicianName = technicianResult.rows[0]?.name || `Technician #${technicianId}`
+        feeDescription += ` oleh ${technicianName}`
+      }
 
       // Create accounting transaction
       await query(`
@@ -164,12 +169,12 @@ class AutoExpenseService {
         categoryId,
         'expense',
         amount,
-        `Fee Teknisi - Instalasi ${customerName} oleh ${technicianName}`,
+        feeDescription,
         'technician_fee',
-        technicianId
+        technicianId || null
       ])
 
-      logger.info(`Technician fee recorded: Rp ${amount} for ${technicianName}`)
+      logger.info(`Technician fee recorded: Rp ${amount} for customer ${customerId}`)
       return { success: true, message: 'Technician fee recorded successfully' }
     } catch (error) {
       logger.error('Error triggering technician fee:', error)
@@ -201,25 +206,30 @@ class AutoExpenseService {
 
       const amount = parseFloat(amountResult.rows[0].setting_value)
 
-      // Get default expense category
+      // Get Fee Marketing category
       const categoryResult = await query(`
         SELECT id FROM accounting_categories
-        WHERE type = 'expense' AND is_active = true
-        ORDER BY name LIMIT 1
+        WHERE name = 'Fee Marketing' AND is_active = true
+        LIMIT 1
       `)
 
       if (categoryResult.rows.length === 0) {
-        return { success: false, message: 'No default expense category found' }
+        return { success: false, message: 'Fee Marketing category not found' }
       }
 
       const categoryId = categoryResult.rows[0].id
 
       // Get customer and marketer details
       const customerResult = await query('SELECT name FROM customers WHERE id = $1', [customerId])
-      const marketerResult = await query('SELECT username as name FROM users WHERE id = $1 AND role = \'marketing\'', [marketerId])
 
       const customerName = customerResult.rows[0]?.name || `Customer #${customerId}`
-      const marketerName = marketerResult.rows[0]?.name || `Marketer #${marketerId}`
+      let feeDescription = `Fee Marketing - Aktivasi ${customerName}`
+
+      if (marketerId) {
+        const marketerResult = await query('SELECT username as name FROM users WHERE id = $1 AND role = \'marketing\'', [marketerId])
+        const marketerName = marketerResult.rows[0]?.name || `Marketer #${marketerId}`
+        feeDescription += ` oleh ${marketerName}`
+      }
 
       // Create accounting transaction
       await query(`
@@ -230,12 +240,12 @@ class AutoExpenseService {
         categoryId,
         'expense',
         amount,
-        `Fee Marketing - Referral ${customerName} oleh ${marketerName}`,
+        feeDescription,
         'marketing_fee',
-        marketerId
+        marketerId || null
       ])
 
-      logger.info(`Marketing fee recorded: Rp ${amount} for ${marketerName}`)
+      logger.info(`Marketing fee recorded: Rp ${amount} for customer ${customerId}`)
       return { success: true, message: 'Marketing fee recorded successfully' }
     } catch (error) {
       logger.error('Error triggering marketing fee:', error)

@@ -29,7 +29,7 @@ router.get('/categories', async (req, res) => {
       queryParams.push(type)
     }
 
-    queryText += ' ORDER BY type, name'
+    queryText += " AND name NOT IN ('Fee Teknisi', 'Fee Marketing') ORDER BY type, name"
 
     const result = await query(queryText, queryParams)
 
@@ -348,19 +348,11 @@ router.post('/transactions', async (req, res) => {
       user: req.user
     })
 
-    // Handle foreign key violation (category_id not found)
+    // Handle foreign key violation
     if (error.code === '23503') {
       return res.status(400).json({
         success: false,
         message: 'Kategori akunting tidak valid atau telah dihapus'
-      })
-    }
-
-    // Handle invalid date format
-    if (error.code === '22007' || error.code === '22008') {
-      return res.status(400).json({
-        success: false,
-        message: 'Format tanggal tidak valid. Gunakan format YYYY-MM-DD'
       })
     }
 
