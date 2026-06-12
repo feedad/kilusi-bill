@@ -579,6 +579,7 @@ router.get('/online-customers', async (req, res) => {
                     FROM olt_signal_cache
                     WHERE polled_at > NOW() - INTERVAL '10 minutes'
                 `);
+
                 for (const row of cacheResult.rows) {
                     signalByPppoe[row.pppoe_username] = {
                         rx_power: row.rx_power,
@@ -589,33 +590,32 @@ router.get('/online-customers', async (req, res) => {
                     };
                 }
 
-                // Refresh cache in background if stale
+                // If cache is empty, refresh synchronously so signal appears immediately
                 if (cacheResult.rows.length === 0 && onlineSessions.length > 0) {
-                    setImmediate(async () => {
-                        try {
-                            const oltsResult = await query(
-                                'SELECT id, name, host, type, snmp_community, snmp_port, snmp_version FROM olts WHERE status = $1',
-                                ['active']
-                            );
-                            const signalResult = await oltSnmpMonitor.matchSignalToCustomers(onlineSessions, oltsResult.rows);
-                            for (const [uname, signal] of signalResult) {
-                                await query(`
-                                    INSERT INTO olt_signal_cache (pppoe_username, rx_power, tx_power, distance, olt_name, onu_index, polled_at)
-                                    VALUES ($1, $2, $3, $4, $5, $6, NOW())
-                                    ON CONFLICT (pppoe_username) DO UPDATE SET
-                                        rx_power = EXCLUDED.rx_power, tx_power = EXCLUDED.tx_power,
-                                        distance = EXCLUDED.distance, olt_name = EXCLUDED.olt_name,
-                                        onu_index = EXCLUDED.onu_index, polled_at = NOW()
-                                `, [uname, signal.rx_power, signal.tx_power, signal.distance, signal.olt_name, signal.onu_index]);
-                            }
-                            logger.info('OLT signal cache refreshed in background');
-                        } catch (e) {
-                            logger.warn('OLT signal background refresh failed:', e.message);
-                        }
-                    });
+                    const oltsResult = await query(
+                        'SELECT id, name, host, type, snmp_community, snmp_port, snmp_version FROM olts WHERE status = $1',
+                        ['active']
+                    );
+                    const signalResult = await oltSnmpMonitor.matchSignalToCustomers(onlineSessions, oltsResult.rows);
+                    for (const [uname, signal] of signalResult) {
+                        await query(`
+                            INSERT INTO olt_signal_cache (pppoe_username, rx_power, tx_power, distance, olt_name, onu_index, polled_at)
+                            VALUES ($1, $2, $3, $4, $5, $6, NOW())
+                            ON CONFLICT (pppoe_username) DO UPDATE SET
+                                rx_power = EXCLUDED.rx_power, tx_power = EXCLUDED.tx_power,
+                                distance = EXCLUDED.distance, olt_name = EXCLUDED.olt_name,
+                                onu_index = EXCLUDED.onu_index, polled_at = NOW()
+                        `, [uname, signal.rx_power, signal.tx_power, signal.distance, signal.olt_name, signal.onu_index]);
+                        signalByPppoe[uname] = {
+                            rx_power: signal.rx_power, tx_power: signal.tx_power,
+                            distance: signal.distance, olt_name: signal.olt_name,
+                            onu_index: signal.onu_index
+                        };
+                    }
+                    logger.info(`OLT signal cache refreshed: ${signalResult.size} customers`);
                 }
             } catch (e) {
-                logger.warn('Failed to read OLT signal cache:', e.message);
+                logger.warn('Failed to read/refresh OLT signal cache:', e.message);
             }
 
             // Build customer objects in the sorted order
