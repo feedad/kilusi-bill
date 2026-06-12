@@ -132,6 +132,13 @@ async function pollCustomerUsage() {
                                 (service_id, period_start, period_end, bytes_in, bytes_out,
                                  last_poll_bytes_in, last_poll_bytes_out, last_polled_at)
                             VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+                            ON CONFLICT (service_id, period_start)
+                            DO UPDATE SET
+                                bytes_in = EXCLUDED.bytes_in,
+                                bytes_out = EXCLUDED.bytes_out,
+                                last_poll_bytes_in = EXCLUDED.last_poll_bytes_in,
+                                last_poll_bytes_out = EXCLUDED.last_poll_bytes_out,
+                                last_polled_at = NOW()
                         `, [
                             cust.service_id,
                             periodStart instanceof Date ? periodStart.toISOString().split('T')[0] : periodStart,
