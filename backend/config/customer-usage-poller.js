@@ -118,10 +118,13 @@ async function pollCustomerUsage() {
                         updated++;
                     } else {
                         // Check if billing period available from service dates
-                        let periodStart = cust.active_date || now;
-                        let periodEnd = cust.isolir_date;
+                    let periodStart = cust.active_date || now;
+                    let periodEnd = cust.isolir_date;
 
-                        if (!periodEnd || periodEnd <= now) {
+                    // If active_date is in the future, use today as start
+                    if (periodStart > now) periodStart = now;
+
+                    if (!periodEnd || periodEnd <= now) {
                             // Past due or no invoicing yet — use smart defaults
                             periodEnd = new Date(periodStart);
                             periodEnd.setMonth(periodEnd.getMonth() + 1);
