@@ -450,9 +450,8 @@ router.put('/tickets/:id', asyncHandler(async (req, res) => {
 
     // Check if ticket exists with full details
     const existingTicket = await query(`
-        SELECT st.*, u.name as admin_name
+        SELECT st.*
         FROM support_tickets st
-        LEFT JOIN users u ON u.id = st.created_by
         WHERE st.id = $1
     `, [ticketId]);
 
@@ -482,7 +481,7 @@ router.put('/tickets/:id', asyncHandler(async (req, res) => {
     }
     if (taken_over_reason) {
         updates.push(`taken_over_reason = $${paramIndex++}`);
-        updates.push(taken_over_reason);
+        values.push(taken_over_reason);
         updates.push(`taken_over_by = $${paramIndex++}`);
         values.push(adminId);
         updates.push(`taken_over_at = $${paramIndex++}`);
