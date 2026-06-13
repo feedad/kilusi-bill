@@ -38,6 +38,29 @@ function getPhoneVariants(raw) {
     return [...new Set(variants)];
 }
 
+// Generate unique ticket number (SUP-YYYYMM-NNN)
+async function generateTicketNumber() {
+    const prefix = 'SUP';
+    const date = new Date();
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+
+    const result = await query(`
+        SELECT ticket_number FROM support_tickets
+        WHERE ticket_number LIKE '${prefix}-${year}${month}%'
+        ORDER BY ticket_number DESC LIMIT 1
+    `);
+
+    let sequence = 1;
+    if (result.rows.length > 0) {
+        const lastTicket = result.rows[0].ticket_number;
+        const lastSequence = parseInt(lastTicket.split('-')[2]);
+        sequence = lastSequence + 1;
+    }
+
+    return `${prefix}-${year}${month}-${String(sequence).padStart(3, '0')}`;
+}
+
 /**
  * GET /billing/:phone
  * Return billing summary for chatbot
@@ -297,13 +320,17 @@ router.post('/support', chatbotAuth, async (req, res) => {
 
         // Subject = first 100 chars of message
         const subject = message.substring(0, 100);
+        const description = message;
+
+        // Generate proper ticket number
+        const ticketNumber = await generateTicketNumber();
 
         // Create ticket
         const ticketResult = await query(
-            `INSERT INTO support_tickets (customer_id, customer_name, customer_phone, subject, status, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, 'open', NOW(), NOW())
+            `INSERT INTO support_tickets (ticket_number, customer_id, customer_name, customer_phone, subject, description, category, priority, status, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'open', NOW(), NOW())
              RETURNING id, status, created_at`,
-            [customer.id, customer.name, phoneVariants[0], subject]
+            [ticketNumber, customer.id, customer.name, phoneVariants[0], subject, description, 'general', 'normal']
         );
 
         const ticket = ticketResult.rows[0];
@@ -315,9 +342,24 @@ router.post('/support', chatbotAuth, async (req, res) => {
             [ticket.id, customer.name, message]
         );
 
-        const ticketNumber = `#${ticket.id}`;
-
         logger.info(`[Chatbot] Ticket ${ticketNumber} created for ${customer.name}`);
+
+        // Send WhatsApp notification to customer
+        try {
+            const whatsappNotifications = require('../../../config/whatsapp-notifications');
+            await whatsappNotifications.sendTicketCreatedNotification(phoneVariants[0], {
+                customer_id: customer.id,
+                customer_name: customer.name,
+                ticket_number: ticketNumber,
+                subject: subject,
+                category: 'general',
+                priority: 'normal',
+                description: description
+            });
+            logger.info(`📱 Ticket created WA notification sent to ${phone}`);
+        } catch (notifError) {
+            logger.error(`Failed to send ticket WA notification:`, notifError.message);
+        }
 
         return res.json({
             success: true,
