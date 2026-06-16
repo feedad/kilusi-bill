@@ -1473,7 +1473,36 @@ router.post('/payments', asyncHandler(async (req, res) => {
                             await query(`UPDATE services SET status = 'active', updated_at = NOW() WHERE service_number = $1`, [serviceNumber]);
                         }
                     } else {
-                        logger.info(`ℹ️ Service ${serviceNumber} already active, no restoration needed`);
+                        // Status active — cek RADIUS consistency
+                        // Trigger update_invoice_status_after_payment sudah set status=active
+                        // Tapi radusergroup mungkin masih ISOLIR
+                        try {
+                            const radiusUsername = await serviceSuspension.findRadiusUsername(
+                                serviceData.service_id,
+                                serviceData.service_number
+                            );
+                            if (radiusUsername) {
+                                const radGroup = await getOne(
+                                    `SELECT groupname FROM radusergroup WHERE username = $1 LIMIT 1`,
+                                    [radiusUsername]
+                                );
+                                if (!radGroup || radGroup.groupname !== serviceData.package_group) {
+                                    logger.warn(`RADIUS mismatch for ${serviceNumber}: ${radGroup?.groupname || 'NONE'} != ${serviceData.package_group} — restoring RADIUS only`);
+                                    await serviceSuspension.restoreServiceByServiceId(
+                                        serviceData.service_id,
+                                        {
+                                            name: serviceData.customer_name,
+                                            service_number: serviceData.service_number,
+                                            package_group: serviceData.package_group,
+                                            pppoe_profile: serviceData.pppoe_profile
+                                        },
+                                        'RADIUS sync after payment (trigger already set status=active)'
+                                    );
+                                }
+                            }
+                        } catch (e) {
+                            logger.warn(`RADIUS consistency check failed for ${serviceNumber}: ${e.message}`);
+                        }
                         customerReactivated = true;
                     }
                 } else {
