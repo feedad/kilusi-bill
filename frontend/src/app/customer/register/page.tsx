@@ -93,7 +93,12 @@ export default function RegisterPage() {
         try {
             const payload = {
                 ...formData,
-                ...(coordinates ? { latitude: coordinates.lat, longitude: coordinates.lng } : {})
+                ...(coordinates
+                    ? {
+                        latitude: parseFloat(coordinates.lat.toFixed(7)),
+                        longitude: parseFloat(coordinates.lng.toFixed(7))
+                    }
+                    : {})
             };
             const res = await fetch(`${CONFIG.API_BASE_URL}/api/v1/public/register`, {
                 method: 'POST',
@@ -137,7 +142,7 @@ export default function RegisterPage() {
 
             <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-2xl">
                 <div className="bg-white dark:bg-slate-800 py-8 px-4 shadow sm:rounded-lg sm:px-10 border border-slate-200 dark:border-slate-700">
-                    <form className="space-y-6" onSubmit={handleSubmit}>
+                    <form className="space-y-6" onSubmit={handleSubmit} noValidate>
 
                         {/* Package Selection Display */}
                         <div className="mb-6">

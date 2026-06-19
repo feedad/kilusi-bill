@@ -47,10 +47,16 @@ router.post('/register', async (req, res) => {
 
         // 3. Save coordinates if provided
         if (data.latitude && data.longitude) {
-            await query(
-                'UPDATE customers SET latitude = $1, longitude = $2 WHERE id = $3',
-                [data.latitude, data.longitude, customer.id]
-            );
+            const lat = parseFloat(data.latitude);
+            const lng = parseFloat(data.longitude);
+            if (!isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+                await query(
+                    'UPDATE customers SET latitude = $1, longitude = $2 WHERE id = $3',
+                    [lat, lng, customer.id]
+                );
+            } else {
+                logger.warn(`Invalid coordinates for customer ${customer.id}: ${data.latitude}, ${data.longitude}`);
+            }
         }
 
         // 3. Handle Referral if code provided

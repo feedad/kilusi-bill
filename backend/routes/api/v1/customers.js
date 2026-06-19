@@ -301,7 +301,7 @@ router.post('/:id/process', jwtAuth, asyncHandler(async (req, res) => {
         await query("DELETE FROM services WHERE customer_id = $1 AND status = 'waiting'", [req.params.id]);
 
         // Create service with defaults
-        const serviceData = await CustomerService.createService(req.params.id, {
+        const serviceId = await CustomerService.createService(req.params.id, {
             package_id: customer.selected_package_id,
             billing_type: defMap.billing_type || 'prepaid',
             siklus: defMap.billing_cycle || 'tetap',
@@ -309,6 +309,14 @@ router.post('/:id/process', jwtAuth, asyncHandler(async (req, res) => {
             pppoe_password: defMap.pppoe_password || '1234567',
             status: 'pending'
         });
+
+        // Copy coordinates from customers table to new service
+        if (customer.latitude || customer.longitude) {
+            await query(
+                'UPDATE services SET latitude = $1, longitude = $2 WHERE id = $3',
+                [customer.latitude, customer.longitude, serviceId]
+            );
+        }
 
         // Create installation record
         const { technician_id, scheduled_date, notes } = req.body;

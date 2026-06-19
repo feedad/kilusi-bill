@@ -162,41 +162,37 @@ const CoordinateMap = ({
   const handleMapClick = (lat: number, lng: number) => {
     if (readOnly) return
 
-    // Ensure we have valid numbers
-    const validLat = typeof lat === 'number' && !isNaN(lat) ? lat : safeLatitude
-    const validLng = typeof lng === 'number' && !isNaN(lng) ? lng : safeLongitude
+    // Ensure we have valid numbers, round to 7 dp for step validation
+    const validLat = typeof lat === 'number' && !isNaN(lat) ? parseFloat(lat.toFixed(7)) : safeLatitude
+    const validLng = typeof lng === 'number' && !isNaN(lng) ? parseFloat(lng.toFixed(7)) : safeLongitude
     
     console.log('📍 Map Clicked:', { lat, lng, validLat, validLng })
 
     setCurrentLat(validLat)
     setCurrentLng(validLng)
     setMarkerPosition([validLat, validLng])
-    // Don't center map on every click to allow easier adjustments
-    // setMapCenter([validLat, validLng]) 
     
     // Call parent callback immediately
     onCoordinatesChange(validLat, validLng)
   }
 
-  // Handle marker drag end
-  // Handle marker drag end
-  const handleMarkerDragEnd = (e: any) => {
-    if (readOnly) return
-    const lat = e.target.getLatLng().lat
-    const lng = e.target.getLatLng().lng
-    
-    // Validate
-    const validLat = typeof lat === 'number' && !isNaN(lat) ? lat : safeLatitude
-    const validLng = typeof lng === 'number' && !isNaN(lng) ? lng : safeLongitude
+    // Handle marker drag end
+    const handleMarkerDragEnd = (e: any) => {
+        if (readOnly) return
+        const lat = e.target.getLatLng().lat
+        const lng = e.target.getLatLng().lng
+        
+        // Validate, round to 7 dp
+        const validLat = typeof lat === 'number' && !isNaN(lat) ? parseFloat(lat.toFixed(7)) : safeLatitude
+        const validLng = typeof lng === 'number' && !isNaN(lng) ? parseFloat(lng.toFixed(7)) : safeLongitude
 
-    console.log('📍 Map Dragged:', { lat, lng, validLat, validLng })
+        console.log('📍 Map Dragged:', { lat, lng, validLat, validLng })
 
-    setCurrentLat(validLat)
-    setCurrentLng(validLng)
-    setMarkerPosition([validLat, validLng])
-    // setMapCenter([validLat, validLng]) // Don't auto center on drag
+        setCurrentLat(validLat)
+        setCurrentLng(validLng)
+        setMarkerPosition([validLat, validLng])
 
-    onCoordinatesChange(validLat, validLng)
+        onCoordinatesChange(validLat, validLng)
   }
 
   // Get current location using browser GPS
@@ -211,8 +207,8 @@ const CoordinateMap = ({
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        const lat = position.coords.latitude
-        const lng = position.coords.longitude
+        const lat = parseFloat(position.coords.latitude.toFixed(7))
+        const lng = parseFloat(position.coords.longitude.toFixed(7))
         setCurrentLat(typeof lat === 'number' && !isNaN(lat) ? lat : safeLatitude)
         setCurrentLng(typeof lng === 'number' && !isNaN(lng) ? lng : safeLongitude)
         setMarkerPosition([lat, lng])
@@ -267,8 +263,8 @@ const CoordinateMap = ({
       const data = await response.json()
 
       if (data && data.length > 0) {
-        const lat = parseFloat(data[0].lat)
-        const lng = parseFloat(data[0].lon)
+        const lat = parseFloat(parseFloat(data[0].lat).toFixed(7))
+        const lng = parseFloat(parseFloat(data[0].lon).toFixed(7))
         setCurrentLat(typeof lat === 'number' && !isNaN(lat) ? lat : safeLatitude)
         setCurrentLng(typeof lng === 'number' && !isNaN(lng) ? lng : safeLongitude)
         setMarkerPosition([lat, lng])
