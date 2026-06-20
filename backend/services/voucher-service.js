@@ -212,7 +212,7 @@ class VoucherService {
       `, [
         code, username, password, packageId, pkg.price, durationValue,
         pkg.speed_limit, customerName, customerPhone, customerEmail,
-        pkg.mikrotik_profile || 'default', expiresAt
+        pkg.radius_group || pkg.mikrotik_profile || 'HOTSPOT_DEFAULT', expiresAt
       ]);
 
       // Store session timeout for RADIUS
