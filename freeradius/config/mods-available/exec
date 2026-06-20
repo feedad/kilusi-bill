@@ -1,7 +1,8 @@
 # Execute external commands
 exec {
     wait = yes
-    program = "/usr/bin/bash -c %{Exec-Program}"
-    input_pairs = "%{Acct-Session-Time} %{Acct-Terminate-Cause} %{Acct-Start-Time} %{Acct-Session-Time}"
+    program = "/bin/bash /etc/freeradius/voucher-mark-used.sh"
+    input_pairs = request
     shell_escape = yes
+    timeout = 10
 }

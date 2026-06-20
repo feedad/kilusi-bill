@@ -1076,11 +1076,11 @@ router.post('/admin/hotspot/update-used-vouchers', jwtAuth, async (req, res) => 
 /**
  * POST /api/v1/hotspot/voucher/session-end
  * Webhook from FreeRADIUS Exec-Module when session ends
- * Marks voucher as used automatically
+ * Marks voucher as used automatically if session_time >= 95% of duration
  */
 router.post('/voucher/session-end', async (req, res) => {
   try {
-    const { username, session_duration, terminate_cause, start_time, stop_time } = req.body;
+    const { username, session_duration, acct_session_time, terminate_cause, start_time, stop_time } = req.body;
 
     if (!username) {
       return res.status(400).json({
@@ -1089,23 +1089,39 @@ router.post('/voucher/session-end', async (req, res) => {
       });
     }
 
-    logger.info(`📥 Received session-end webhook: user=${username}, cause=${terminate_cause}, duration=${session_duration}s`);
+    const sessionTime = parseInt(session_duration || acct_session_time || 0);
+    logger.info(`📥 Received session-end webhook: user=${username}, cause=${terminate_cause || '?'}, duration=${sessionTime}s`);
 
-    // Update voucher to used status
+    // Only mark as used if session was long enough (>= 95% of voucher duration)
+    const voucher = await getOne(
+      'SELECT code, duration_hours, status FROM vouchers WHERE username = $1 AND status = \'active\' AND payment_status = \'paid\'',
+      [username]
+    );
+
+    if (!voucher) {
+      logger.info(`ℹ️ No active voucher found for user: ${username} (already used or not found)`);
+      return res.json({ success: true, message: 'No voucher to update' });
+    }
+
+    const allowedSeconds = (voucher.duration_hours || 0) * 3600;
+    const threshold = Math.floor(allowedSeconds * 0.95);
+
+    if (sessionTime < threshold && sessionTime > 0) {
+      logger.info(`⏳ Voucher ${voucher.code} session only ${sessionTime}s of ${allowedSeconds}s — keeping active`);
+      return res.json({ success: true, message: 'Session ended but voucher still valid' });
+    }
+
+    // Mark as used
     const updated = await query(`
       UPDATE vouchers
       SET status = 'used', used_at = NOW()
-      WHERE username = $1
-        AND status = 'active'
-        AND payment_status = 'paid'
-      RETURNING code, customer_name, customer_phone
-    `, [username]);
+      WHERE code = $1 AND status = 'active'
+      RETURNING code, customer_name
+    `, [voucher.code]);
 
     if (updated.rowCount > 0) {
-      const voucher = updated.rows[0];
-      logger.info(`✅ Voucher marked as used via webhook: ${voucher.code} for ${voucher.customer_name}`);
+      logger.info(`✅ Voucher ${voucher.code} marked as used via webhook`);
 
-      // Remove from RADIUS to prevent re-login
       try {
         await radiusSync.deleteVoucherUser(username);
         logger.info(`🗑️ Removed from RADIUS: ${username}`);
@@ -1113,17 +1129,10 @@ router.post('/voucher/session-end', async (req, res) => {
         logger.warn(`Failed to remove from RADIUS: ${radiusError.message}`);
       }
 
-      res.json({
-        success: true,
-        message: 'Voucher marked as used'
-      });
-    } else {
-      logger.info(`ℹ️ No active voucher found for user: ${username} (may already be used)`);
-      res.json({
-        success: true,
-        message: 'No voucher to update'
-      });
+      return res.json({ success: true, message: 'Voucher marked as used' });
     }
+
+    res.json({ success: true, message: 'No voucher to update' });
   } catch (error) {
     logger.error('Error processing voucher session-end webhook:', error);
     res.status(500).json({

@@ -456,7 +456,7 @@ class VoucherService {
    */
   static async checkAndUpdateExpiredVouchers() {
     try {
-      // Get vouchers that are active but have exhausted their duration in RADIUS accounting
+      // 1. Mark vouchers from radacct that have exhausted their duration
       const exhaustedVouchers = await query(`
         SELECT DISTINCT
           v.code,
@@ -473,10 +473,8 @@ class VoucherService {
           AND v.payment_status = 'paid'
           AND ra.acctstoptime IS NOT NULL
           AND (
-            -- Session terminated (user logged out or was kicked)
             ra.acctterminatecause IN ('User-Request', 'Admin-Reset', 'Session-Timeout', 'Idle-Timeout')
             OR
-            -- Session time exceeded or close to duration (in seconds)
             EXTRACT(EPOCH FROM (ra.acctstoptime - ra.acctstarttime)) >= v.duration_hours * 3600 * 0.95
           )
         ORDER BY ra.acctstoptime DESC
@@ -486,13 +484,34 @@ class VoucherService {
         await this.markAsUsed(
           voucher.code,
           voucher.username,
-          null, // IP not available in radacct
-          null, // MAC not available in radacct
+          null, null,
           voucher.acctsessiontime
         );
       }
 
-      return exhaustedVouchers.rows.length;
+      // 2. Fallback: vouchers with expired_at passed but no radacct record (crash/offline)
+      const expiredNoSession = await query(`
+        SELECT code, username FROM vouchers
+        WHERE status = 'active'
+          AND payment_status = 'paid'
+          AND expires_at IS NOT NULL
+          AND expires_at < NOW()
+          AND NOT EXISTS (
+            SELECT 1 FROM radacct ra
+            WHERE ra.username = vouchers.username
+              AND ra.acctstoptime IS NULL
+          )
+      `);
+
+      for (const voucher of expiredNoSession.rows) {
+        await this.markAsUsed(
+          voucher.code,
+          voucher.username,
+          null, null, null
+        );
+      }
+
+      return exhaustedVouchers.rows.length + expiredNoSession.rows.length;
     } catch (error) {
       logger.error(`Error checking expired vouchers: ${error.message}`);
       return 0;

@@ -142,6 +142,15 @@ async function initializeRadiusTables() {
             ON CONFLICT DO NOTHING
         `);
 
+        // Insert default group attributes for 'HOTSPOT_DEFAULT' group
+        await query(`
+            INSERT INTO radgroupreply (groupname, attribute, op, value) VALUES
+            ('HOTSPOT_DEFAULT', 'Service-Type', ':=', 'Login-User'),
+            ('HOTSPOT_DEFAULT', 'Idle-Timeout', ':=', '600'),
+            ('HOTSPOT_DEFAULT', 'Mikrotik-Rate-Limit', ':=', '1M/1M')
+            ON CONFLICT DO NOTHING
+        `);
+
         initialized = true;
         logger.info('✅ RADIUS PostgreSQL tables initialized successfully');
         return true;
