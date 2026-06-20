@@ -43,6 +43,7 @@ interface HotspotPackage {
   duration_hours: number
   speed_limit: string
   mikrotik_profile: string
+  server_profile?: string
   is_active: boolean
 }
 
@@ -117,7 +118,7 @@ export default function HotspotAdminPage() {
     price: '',
     duration_hours: '',
     speed_limit: '',
-    mikrotik_profile: 'default',
+    server_profile: 'default',
     is_active: true
   })
   const [savingPackage, setSavingPackage] = useState(false)
@@ -302,7 +303,7 @@ export default function HotspotAdminPage() {
         price: pkg.price.toString(),
         duration_hours: pkg.duration_hours.toString(),
         speed_limit: pkg.speed_limit || '',
-        mikrotik_profile: pkg.mikrotik_profile || 'default',
+        server_profile: pkg.server_profile || pkg.mikrotik_profile || 'default',
         is_active: pkg.is_active
       })
     } else {
@@ -314,7 +315,7 @@ export default function HotspotAdminPage() {
         price: '',
         duration_hours: '',
         speed_limit: '',
-        mikrotik_profile: 'default',
+        server_profile: 'default',
         is_active: true
       })
     }
@@ -336,7 +337,7 @@ export default function HotspotAdminPage() {
         price: parseInt(packageForm.price),
         duration_hours: parseInt(packageForm.duration_hours),
         speed_limit: packageForm.speed_limit,
-        mikrotik_profile: packageForm.mikrotik_profile,
+        server_profile: packageForm.server_profile,
         is_active: packageForm.is_active
       }
 
@@ -1165,7 +1166,7 @@ export default function HotspotAdminPage() {
                           <Zap className="h-4 w-4 mr-1 flex-shrink-0" />
                           {pkg.speed_limit || '-'}
                         </div>
-                        <p className="text-xs text-gray-400 dark:text-gray-500 text-center truncate">Profile: {pkg.mikrotik_profile}</p>
+                        <p className="text-xs text-gray-400 dark:text-gray-500 text-center truncate">Profile: {pkg.server_profile || pkg.mikrotik_profile}</p>
                       </div>
                       <div className="flex gap-2 pt-2 border-t">
                         <Button size="sm" variant="outline" className="flex-1" onClick={() => openPackageDialog(pkg)}>
@@ -1271,14 +1272,15 @@ export default function HotspotAdminPage() {
                 </div>
 
                 <div>
-                  <Label htmlFor="package-profile">Mikrotik Profile</Label>
+                  <Label htmlFor="package-profile">Server Profile (User Profile MikroTik)</Label>
                   <Input
                     id="package-profile"
-                    value={packageForm.mikrotik_profile}
-                    onChange={(e) => setPackageForm({ ...packageForm, mikrotik_profile: e.target.value })}
-                    placeholder="default"
+                    value={packageForm.server_profile}
+                    onChange={(e) => setPackageForm({ ...packageForm, server_profile: e.target.value })}
+                    placeholder="HOTSPOT_DEFAULT"
                     disabled={savingPackage}
                   />
+                  <p className="text-xs text-gray-500 mt-1">Nama User Profile hotspot di MikroTik. Harus sama persis.</p>
                 </div>
 
                 <div className="flex items-center gap-2">

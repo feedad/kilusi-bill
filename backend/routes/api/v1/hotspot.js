@@ -38,7 +38,7 @@ function formatDuration(seconds) {
 router.get('/packages', async (req, res) => {
   try {
     const result = await query(`
-      SELECT id, name_display as name, description, price, duration_hours, speed_limit
+      SELECT id, name_display as name, description, price, duration_hours, speed_limit, mikrotik_profile as server_profile
       FROM hotspot_packages
       WHERE is_active = true
       ORDER BY display_order ASC
@@ -576,7 +576,8 @@ router.get('/admin/hotspot/packages', jwtAuth, async (req, res) => {
  */
 router.post('/admin/hotspot/packages', jwtAuth, async (req, res) => {
   try {
-    const { name, name_display, description, price, duration_hours, speed_limit, mikrotik_profile, display_order } = req.body;
+    const { name, name_display, description, price, duration_hours, speed_limit, mikrotik_profile, server_profile, display_order } = req.body;
+    const finalProfile = server_profile || mikrotik_profile || 'default';
 
     if (!name || !name_display || !price || !duration_hours) {
       return res.status(400).json({
@@ -589,7 +590,7 @@ router.post('/admin/hotspot/packages', jwtAuth, async (req, res) => {
       INSERT INTO hotspot_packages (name, name_display, description, price, duration_hours, speed_limit, mikrotik_profile, display_order)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING *
-    `, [name, name_display, description, price, duration_hours, speed_limit, mikrotik_profile || 'default', display_order || 0]);
+    `, [name, name_display, description, price, duration_hours, speed_limit, finalProfile, display_order || 0]);
 
     logger.info(`✅ Hotspot package created: ${name}`);
 
@@ -613,7 +614,7 @@ router.post('/admin/hotspot/packages', jwtAuth, async (req, res) => {
  */
 router.put('/admin/hotspot/packages/:id', jwtAuth, async (req, res) => {
   try {
-    const { name, name_display, description, price, duration_hours, speed_limit, mikrotik_profile, display_order, is_active } = req.body;
+    const { name, name_display, description, price, duration_hours, speed_limit, mikrotik_profile, server_profile, display_order, is_active } = req.body;
 
     const updates = [];
     const params = [];
@@ -646,6 +647,10 @@ router.put('/admin/hotspot/packages/:id', jwtAuth, async (req, res) => {
     if (mikrotik_profile !== undefined) {
       updates.push(`mikrotik_profile = $${paramIndex++}`);
       params.push(mikrotik_profile);
+    }
+    if (server_profile !== undefined) {
+      updates.push(`mikrotik_profile = $${paramIndex++}`);
+      params.push(server_profile);
     }
     if (display_order !== undefined) {
       updates.push(`display_order = $${paramIndex++}`);
