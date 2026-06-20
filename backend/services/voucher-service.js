@@ -524,7 +524,7 @@ class VoucherService {
   static async getVoucherByCode(code) {
     try {
       const voucher = await getOne(`
-        SELECT code, status, payment_status, created_at, paid_at, activated_at,
+        SELECT code, username, password, status, payment_status, created_at, paid_at, activated_at,
                expires_at, duration_hours, speed_limit, customer_name, customer_phone
         FROM vouchers WHERE code = $1
       `, [code]);

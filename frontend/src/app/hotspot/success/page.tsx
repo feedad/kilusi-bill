@@ -2,8 +2,9 @@
 
 import { useSearchParams } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/card'
-import { CheckCircle, Wifi } from 'lucide-react'
+import { CheckCircle, Wifi, Eye, EyeOff, Copy, Check } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { toast } from 'react-hot-toast'
 
 interface VoucherStatus {
   code: string
@@ -11,6 +12,8 @@ interface VoucherStatus {
   payment_status: string
   duration_hours: number
   speed_limit: string
+  username?: string
+  password?: string
 }
 
 export default function HotspotSuccessPage() {
@@ -18,6 +21,8 @@ export default function HotspotSuccessPage() {
   const code = searchParams.get('code')
   const [voucherStatus, setVoucherStatus] = useState<VoucherStatus | null>(null)
   const [loading, setLoading] = useState(true)
+  const [showPassword, setShowPassword] = useState(false)
+  const [copiedField, setCopiedField] = useState<string | null>(null)
 
   useEffect(() => {
     if (code) {
@@ -31,9 +36,19 @@ export default function HotspotSuccessPage() {
       const result = await response.json()
       if (result.success) {
         setVoucherStatus(result.data)
+        // Save to localStorage for retrieval
+        if (result.data.username && result.data.password) {
+          const saved = JSON.parse(localStorage.getItem('hotspot_vouchers') || '[]')
+          const existing = saved.findIndex((v: any) => v.code === result.data.code)
+          if (existing >= 0) {
+            saved[existing] = { ...saved[existing], ...result.data }
+          } else {
+            saved.push(result.data)
+          }
+          localStorage.setItem('hotspot_vouchers', JSON.stringify(saved.slice(-10)))
+        }
       }
 
-      // If still pending, poll again
       if (result.data?.payment_status === 'unpaid' || result.data?.payment_status === 'pending') {
         setTimeout(checkVoucherStatus, 3000)
       }
@@ -42,6 +57,13 @@ export default function HotspotSuccessPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const copyToClipboard = (text: string, field: string) => {
+    navigator.clipboard.writeText(text)
+    setCopiedField(field)
+    toast.success('Disalin!')
+    setTimeout(() => setCopiedField(null), 2000)
   }
 
   return (
@@ -63,12 +85,46 @@ export default function HotspotSuccessPage() {
 
               {voucherStatus?.payment_status === 'paid' ? (
                 <div className="space-y-4">
-                  <p className="text-gray-600">
-                    Voucher hotspot telah dikirim ke WhatsApp Anda
+                  <p className="text-green-600 font-medium">
+                    ✓ Voucher berhasil diaktivasi
                   </p>
-                  <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-                    <p className="text-sm text-gray-700">Kode Voucher:</p>
-                    <p className="text-2xl font-bold text-green-700 mt-1">{code}</p>
+                  <div className="bg-green-50 p-4 rounded-lg border border-green-200 space-y-3">
+                    <div>
+                      <p className="text-xs text-gray-500">Kode Voucher</p>
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-lg font-bold text-green-700">{code}</p>
+                        <button onClick={() => copyToClipboard(code || '', 'code')} className="p-1 hover:bg-green-100 rounded">
+                          {copiedField === 'code' ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4 text-gray-500" />}
+                        </button>
+                      </div>
+                    </div>
+                    {voucherStatus.username && (
+                      <div>
+                        <p className="text-xs text-gray-500">Username</p>
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-mono font-medium">{voucherStatus.username}</p>
+                          <button onClick={() => copyToClipboard(voucherStatus.username!, 'user')} className="p-1 hover:bg-green-100 rounded">
+                            {copiedField === 'user' ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4 text-gray-500" />}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {voucherStatus.password && (
+                      <div>
+                        <p className="text-xs text-gray-500">Password</p>
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-mono font-medium">{showPassword ? voucherStatus.password : '••••••••'}</p>
+                          <div className="flex gap-1">
+                            <button onClick={() => setShowPassword(!showPassword)} className="p-1 hover:bg-green-100 rounded">
+                              {showPassword ? <EyeOff className="h-4 w-4 text-gray-500" /> : <Eye className="h-4 w-4 text-gray-500" />}
+                            </button>
+                            <button onClick={() => copyToClipboard(voucherStatus.password!, 'pass')} className="p-1 hover:bg-green-100 rounded">
+                              {copiedField === 'pass' ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4 text-gray-500" />}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {voucherStatus.duration_hours && (

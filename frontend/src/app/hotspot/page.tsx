@@ -35,6 +35,13 @@ export default function HotspotLandingPage() {
   const [paymentStatus, setPaymentStatus] = useState<'pending' | 'success'>('pending')
   const [paymentAmount, setPaymentAmount] = useState(0)
 
+  // Cek Voucher state
+  const [checkCode, setCheckCode] = useState('')
+  const [checkingVoucher, setCheckingVoucher] = useState(false)
+  const [voucherInfo, setVoucherInfo] = useState<any>(null)
+  const [checkError, setCheckError] = useState('')
+  const [showCheckPass, setShowCheckPass] = useState(false)
+
   useEffect(() => {
     fetchPackages()
   }, [])
@@ -120,6 +127,26 @@ export default function HotspotLandingPage() {
     setPaymentStatus('pending')
     setQrCodeUrl('')
     setPaymentAmount(0)
+  }
+
+  const handleCheckVoucher = async () => {
+    if (!checkCode) return
+    setCheckingVoucher(true)
+    setCheckError('')
+    setVoucherInfo(null)
+    try {
+      const response = await fetch(`/api/v1/hotspot/status/${checkCode}`)
+      const result = await response.json()
+      if (result.success) {
+        setVoucherInfo(result.data)
+      } else {
+        setCheckError(result.message || 'Voucher tidak ditemukan')
+      }
+    } catch (error) {
+      setCheckError('Gagal memeriksa voucher')
+    } finally {
+      setCheckingVoucher(false)
+    }
   }
 
   if (showPayment) {
@@ -318,12 +345,74 @@ export default function HotspotLandingPage() {
                 )}
               </Button>
 
-              <p className="text-xs text-center text-gray-500">
+                <p className="text-xs text-center text-gray-500">
                 <strong>QRIS Only</strong> - Scan dengan GoPay, OVO, Dana, ShopeePay, atau Mobile Banking
               </p>
             </CardContent>
           </Card>
         )}
+
+        {/* Cek Voucher */}
+        <div className="mt-12 max-w-md mx-auto">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Cek / Lihat Voucher</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <input
+                type="text"
+                value={checkCode}
+                onChange={(e) => setCheckCode(e.target.value)}
+                placeholder="Masukkan kode voucher"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+              />
+              <Button
+                onClick={handleCheckVoucher}
+                disabled={checkingVoucher || !checkCode}
+                className="w-full"
+                variant="outline"
+              >
+                {checkingVoucher ? (
+                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Memeriksa...</>
+                ) : (
+                  'Cek Voucher'
+                )}
+              </Button>
+              {voucherInfo && (
+                <div className="bg-gray-50 p-3 rounded-lg space-y-2 text-sm">
+                  <p><strong>Status:</strong>{' '}
+                    <span className={voucherInfo.status === 'active' ? 'text-green-600' : 'text-gray-500'}>
+                      {voucherInfo.status === 'active' ? 'Aktif' : voucherInfo.status}
+                    </span>
+                  </p>
+                  {voucherInfo.status === 'active' && (
+                    <>
+                      {voucherInfo.username && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-600">Username:</span>
+                          <span className="font-mono font-medium">{voucherInfo.username}</span>
+                        </div>
+                      )}
+                      {voucherInfo.password && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-600">Password:</span>
+                          <span className="font-mono font-medium">{showCheckPass ? voucherInfo.password : '••••••••'}</span>
+                          <button onClick={() => setShowCheckPass(!showCheckPass)} className="text-blue-600 text-xs">
+                            {showCheckPass ? 'Sembunyikan' : 'Lihat'}
+                          </button>
+                        </div>
+                      )}
+                      {voucherInfo.expires_at && (
+                        <p className="text-xs text-gray-500">Berlaku hingga: {new Date(voucherInfo.expires_at).toLocaleString('id-ID')}</p>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+              {checkError && <p className="text-xs text-red-500">{checkError}</p>}
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   )

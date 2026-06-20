@@ -91,6 +91,7 @@ export default function Footer() {
                         <ul className="space-y-4">
                             <li><Link href="/customer/register" className="text-slate-600 dark:text-slate-400 hover:text-blue-600 transition-colors">Paket Rumah</Link></li>
                             <li><Link href="/customer/register" className="text-slate-600 dark:text-slate-400 hover:text-blue-600 transition-colors">Paket Bisnis</Link></li>
+                            <li><Link href="/hotspot" className="text-slate-600 dark:text-slate-400 hover:text-blue-600 transition-colors">Voucher Hotspot</Link></li>
                             <li><Link href="#coverage" className="text-slate-600 dark:text-slate-400 hover:text-blue-600 transition-colors">Cek Area</Link></li>
                         </ul>
                     </div>

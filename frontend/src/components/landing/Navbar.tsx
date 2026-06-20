@@ -12,6 +12,7 @@ export default function Navbar() {
                     <Link href="/" className="hover:text-blue-600 transition-colors">Beranda</Link>
                     <Link href="/#pricing" className="hover:text-blue-600 transition-colors">Paket</Link>
                     <Link href="/#coverage" className="hover:text-blue-600 transition-colors">Jangkauan</Link>
+                    <Link href="/hotspot" className="hover:text-blue-600 transition-colors">Hotspot</Link>
                     <Link href="/blog" className="hover:text-blue-600 transition-colors">Blog</Link>
                     <Link href="/customer/login" className="px-5 py-2 rounded-full border border-slate-200 dark:border-slate-700 hover:border-blue-500 hover:text-blue-500 transition-all">
                         Login Portal
