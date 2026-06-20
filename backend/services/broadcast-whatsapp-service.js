@@ -185,9 +185,10 @@ async function sendBroadcastNotification(options) {
             text: String(varMap[v] || '-').replace(/[\r\n]+/g, ' ').trim()
           }));
 
+          const templateName = template.meta_name || whatsapp_template_id;
           await kilusiOmnichat.sendTemplate(
             customer.phone,
-            whatsapp_template_id,
+            templateName,
             'id',
             parameters,
             {

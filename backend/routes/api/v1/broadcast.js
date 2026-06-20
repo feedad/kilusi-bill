@@ -142,9 +142,10 @@ router.post('/', async (req, res) => {
     const newMessage = result.rows[0];
 
     // Send WhatsApp Notifications if enabled
+    let waResult = null;
     if (send_whatsapp_notification && is_active) {
       try {
-        const result = await sendBroadcastNotification({
+        waResult = await sendBroadcastNotification({
           title,
           message: messageContent,
           type,
@@ -155,10 +156,10 @@ router.post('/', async (req, res) => {
           info_tambahan
         });
 
-        logger.info(`📱 WhatsApp broadcast completed: ${result.sent} sent, ${result.failed} failed`);
+        logger.info(`📱 WhatsApp broadcast completed: ${waResult.sent} sent, ${waResult.failed} failed`);
       } catch (waError) {
         logger.error('WhatsApp broadcast error:', waError);
-        // Don't fail the request if WhatsApp fails
+        waResult = { sent: 0, failed: 0, error: waError.message };
       }
     }
 
@@ -184,7 +185,8 @@ router.post('/', async (req, res) => {
       success: true,
       message: 'Pesan broadcast berhasil dibuat',
       data: {
-        message: newMessage
+        message: newMessage,
+        whatsapp: waResult ? { sent: waResult.sent, failed: waResult.failed } : null
       }
     });
   } catch (error) {

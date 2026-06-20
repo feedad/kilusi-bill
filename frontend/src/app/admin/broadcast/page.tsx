@@ -78,7 +78,7 @@ export default function BroadcastPage() {
         target_all: true,
         target_areas: [] as string[],
         target_mitra: [] as string[],
-        sendWhatsAppNotification: false,
+        sendWhatsAppNotification: true,
         infoTambahan: '',
     })
 
@@ -163,7 +163,7 @@ export default function BroadcastPage() {
             target_all: true,
             target_areas: [],
             target_mitra: [],
-            sendWhatsAppNotification: false,
+            sendWhatsAppNotification: true,
             infoTambahan: '',
         })
         setEditingId(null)
@@ -194,8 +194,8 @@ export default function BroadcastPage() {
                         ? ((broadcast as any).target_mitra as string).replace(/[\[\]"]/g, '').split(',').map((s: string) => s.trim()).filter(Boolean)
                         : [])
                 : [],
-            sendWhatsAppNotification: false,
-            infoTambahan: '',
+            sendWhatsAppNotification: broadcast.sendWhatsAppNotification || true,
+            infoTambahan: broadcast.infoTambahan || '',
         })
         setEditingId(broadcast.id)
         setShowForm(true)
@@ -241,19 +241,8 @@ export default function BroadcastPage() {
             }
         } catch (error) {
             console.error('Error saving broadcast:', error)
-            // Demo: add locally
-            const newBroadcast: Broadcast = {
-                id: Date.now().toString(),
-                ...form,
-                createdAt: new Date().toISOString(),
-            }
-            if (editingId) {
-                setBroadcasts(prev => prev.map(b => b.id === editingId ? { ...newBroadcast, id: editingId } : b))
-            } else {
-                setBroadcasts(prev => [...prev, newBroadcast])
-            }
-            toast.success(editingId ? 'Broadcast diperbarui' : 'Broadcast dibuat')
-            resetForm()
+            toast.error('❌ ' + (error?.response?.data?.message || error?.message || 'Gagal menyimpan broadcast'))
+            // Don't swallow errors — no fake local data
         } finally {
             setSaving(false)
         }
@@ -267,9 +256,7 @@ export default function BroadcastPage() {
             toast.success('Broadcast dihapus')
             fetchBroadcasts()
         } catch (error) {
-            // Demo: remove locally
-            setBroadcasts(prev => prev.filter(b => b.id !== id))
-            toast.success('Broadcast dihapus')
+            toast.error('❌ ' + (error?.response?.data?.message || error?.message || 'Gagal menghapus broadcast'))
         }
     }
 
