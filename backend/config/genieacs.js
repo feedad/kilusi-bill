@@ -323,8 +323,11 @@ const genieacsApi = {
     async getDevice(deviceId) {
         try {
             const axiosInstance = getAxiosInstance();
-            const response = await axiosInstance.get(`/devices/${encodeURIComponent(deviceId)}`);
-            return response.data;
+            const response = await axiosInstance.get('/devices', {
+                params: { query: JSON.stringify({ _id: deviceId }) }
+            });
+            const devices = response.data;
+            return devices.length > 0 ? devices[0] : null;
         } catch (error) {
             console.error(`Error getting device ${deviceId}:`, error.response?.data || error.message);
             throw error;
@@ -1187,6 +1190,7 @@ module.exports = {
     factoryReset: genieacsApi.factoryReset,
     getVirtualParameters: genieacsApi.getVirtualParameters,
     getDevicesByUsername: genieacsApi.getDevicesByUsername,
+    findDeviceByPPPoE: genieacsApi.getDevicesByUsername,
     getWifiSSID: genieacsApi.getWifiSSID,
     monitorRXPower,
     monitorOfflineDevices,
