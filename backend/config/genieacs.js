@@ -128,7 +128,9 @@ function detectONUType(device) {
             'f680', 'f668', 'f822', 'f663n', 'f650',         // More models
             'zxont',         // ZX ONT series
             'zxa10',         // ZTE ZXA10 series
-            'zxv10'          // ZTE ZXV10 series
+            'zxv10',         // ZTE ZXV10 series
+            'cmdc',          // CMDC (H1s-3, clone ZTE-based)
+            'h1s'            // H1S series
         ];
 
         for (const pattern of zteInfoPatterns) {

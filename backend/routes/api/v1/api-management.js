@@ -2,7 +2,11 @@ const express = require('express');
 const router = express.Router();
 const fs = require('fs');
 const path = require('path');
+const dgram = require('dgram');
+const http = require('http');
+const crypto = require('crypto');
 const { query } = require('../../../config/database');
+const { getSetting } = require('../../../config/settingsManager');
 
 // Simple logger fallback
 const logger = {
@@ -10,6 +14,24 @@ const logger = {
   error: (msg, err) => console.error('ERROR:', msg, err?.message || err),
   warn: (msg, err) => console.warn('WARN:', msg, err?.message || err)
 };
+
+// Check FreeRADIUS health via radclient (Status-Server packet)
+function checkFreeRadiusStatus() {
+  return new Promise((resolve) => {
+    const { exec } = require('child_process');
+    const cmd = 'echo "Message-Authenticator = 0x00, User-Name = \\"status\\"" | timeout 5 radclient -s 172.22.10.101:18121 status adminsecret 2>&1';
+    exec(cmd, (err, stdout) => {
+      const out = stdout || '';
+      if (out.includes('Accepted') || out.includes('Access-Accept')) {
+        resolve({ status: 'connected', message: 'Status server responding' });
+      } else if (err && (err.code === 124 || out.includes('timeout'))) {
+        resolve({ status: 'disconnected', message: 'No response (server down?)' });
+      } else {
+        resolve({ status: 'unknown', message: out.trim() || 'radclient failed' });
+      }
+    });
+  });
+}
 
 // Note: adminAuth middleware removed for development access
 
@@ -106,55 +128,10 @@ router.get('/stats', async (req, res) => {
       dbStatus = 'disconnected';
     }
 
-    // Get FreeRADIUS status
+    // Get FreeRADIUS status (RADIUS Status-Server to Server 1)
     let freeradiusStatus = { status: 'unknown', message: 'Unable to check' };
     try {
-      const { exec } = require('child_process');
-
-      // Check Docker container (try without sudo first, then with sudo)
-      freeradiusStatus = await new Promise((resolve) => {
-        // Try without sudo first
-        exec('docker ps --filter name=kilusi-freeradius --format "{{.Status}}"', (error, stdout) => {
-          if (!error && stdout.trim()) {
-            const status = stdout.trim();
-            if (status.includes('healthy') || status.includes('Up')) {
-              resolve({ status: 'connected', message: 'Docker container running' });
-            } else if (status.includes('unhealthy')) {
-              resolve({ status: 'warning', message: 'Docker container unhealthy' });
-            } else {
-              resolve({ status: 'connected', message: `Docker: ${status}` });
-            }
-          } else {
-            // Try with sudo
-            exec('sudo docker ps --filter name=kilusi-freeradius --format "{{.Status}}"', (err2, stdout2) => {
-              if (!err2 && stdout2.trim()) {
-                const status = stdout2.trim();
-                if (status.includes('healthy') || status.includes('Up')) {
-                  resolve({ status: 'connected', message: 'Docker container running' });
-                } else if (status.includes('unhealthy')) {
-                  resolve({ status: 'warning', message: 'Docker container unhealthy' });
-                } else {
-                  resolve({ status: 'connected', message: `Docker: ${status}` });
-                }
-              } else {
-                // Fall back to systemctl check
-                exec('systemctl is-active freeradius', (err, out) => {
-                  const systemctlStatus = out ? out.trim() : '';
-                  if (systemctlStatus === 'active') {
-                    resolve({ status: 'connected', message: 'FreeRADIUS running (systemd)' });
-                  } else if (systemctlStatus === 'activating') {
-                    resolve({ status: 'warning', message: 'Restarting...' });
-                  } else if (systemctlStatus === 'failed') {
-                    resolve({ status: 'error', message: 'Service failed' });
-                  } else {
-                    resolve({ status: 'disconnected', message: 'Service stopped' });
-                  }
-                });
-              }
-            });
-          }
-        });
-      });
+      freeradiusStatus = await checkFreeRadiusStatus();
     } catch (error) {
       freeradiusStatus = { status: 'unknown', message: 'Check failed' };
     }
@@ -174,9 +151,9 @@ router.get('/stats', async (req, res) => {
     // Get GenieACS status
     let genieacsStatus = { status: 'unknown', message: 'Unable to check' };
     try {
-      const http = require('http');
+      const genieacsUrl = getSetting('genieacs_url', 'http://localhost:7557');
       genieacsStatus = await new Promise((resolve) => {
-        const req = http.get('http://localhost:7557/devices?projection=_id&limit=1', { timeout: 3000 }, (res) => {
+        const req = http.get(genieacsUrl + '/devices?projection=_id&limit=1', { timeout: 3000 }, (res) => {
           if (res.statusCode === 200) {
             resolve({ status: 'connected', message: 'NBI API running' });
           } else {
@@ -482,20 +459,9 @@ router.get('/services', async (req, res) => {
       message: 'Service running normally'
     };
 
-    // Check FreeRADIUS status
+    // Check FreeRADIUS status (RADIUS Status-Server to Server 1)
     try {
-      const { exec } = require('child_process');
-      const radiusStatus = await new Promise((resolve) => {
-        exec('systemctl is-active freeradius', (error, stdout) => {
-          const status = stdout.trim();
-          if (status === 'active') {
-            resolve({ status: 'connected', message: 'FreeRADIUS is running' });
-          } else {
-            resolve({ status: 'disconnected', message: `FreeRADIUS status: ${status || 'not found'}` });
-          }
-        });
-      });
-      services.freeradius = radiusStatus;
+      services.freeradius = await checkFreeRadiusStatus();
     } catch (error) {
       services.freeradius = {
         status: 'unknown',
@@ -519,9 +485,9 @@ router.get('/services', async (req, res) => {
 
     // Check GenieACS status (via NBI API)
     try {
-      const http = require('http');
+      const genieacsUrl = getSetting('genieacs_url', 'http://localhost:7557');
       const genieacsStatus = await new Promise((resolve) => {
-        const req = http.get('http://localhost:7557/devices?projection=_id&limit=1', { timeout: 3000 }, (res) => {
+        const req = http.get(genieacsUrl + '/devices?projection=_id&limit=1', { timeout: 3000 }, (res) => {
           if (res.statusCode === 200) {
             resolve({ status: 'connected', message: 'GenieACS NBI API running' });
           } else {

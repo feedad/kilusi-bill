@@ -630,7 +630,7 @@ export default function GenieACSPage() {
                                     <Eye className="h-3 w-3 mr-1" />
                                     Detail
                                   </Button>
-                                  {user?.role === 'admin' && (
+          {['admin', 'superadmin'].includes(user?.role) && (
                                     <>
                                       <Button
                                         variant="outline"

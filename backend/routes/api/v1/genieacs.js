@@ -10,7 +10,8 @@ const parameterPaths = {
     pppUsername: [
         'VirtualParameters.pppoeUsername',
         'VirtualParameters.pppUsername',
-        'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Username'
+        'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Username',
+        'Device.PPP.Interface.1.Username'
     ],
     rxPower: [
         'VirtualParameters.RXPower',
@@ -66,17 +67,18 @@ function getParameterWithPaths(device, paths) {
     for (const path of paths) {
         const parts = path.split('.');
         let value = device;
+        let reachedLeaf = true;
         for (const part of parts) {
             if (value && typeof value === 'object' && part in value) {
                 value = value[part];
                 if (value && typeof value === 'object' && value._value !== undefined) value = value._value;
-                if (value && typeof value === 'object' && value._object !== undefined) { value = undefined; break; }
             } else {
                 value = undefined;
+                reachedLeaf = false;
                 break;
             }
         }
-        if (value !== undefined && value !== null && value !== '' && typeof value === 'string') return value;
+        if (reachedLeaf && typeof value === 'string' && value !== '') return value;
     }
     return '-';
 }
@@ -120,16 +122,18 @@ router.get('/devices', asyncHandler(async (req, res) => {
     // Process devices dengan format yang sama seperti adminGenieacs.js
     const processedDevices = devicesRaw.map((device, i) => {
         // Extract basic info
-        const id = device._id || device.DeviceID?.SerialNumber || '-';
-        const serialNumber = device.DeviceID?.SerialNumber || device._id || '-';
-        const model = device.DeviceID?.ProductClass || device.InternetGatewayDevice?.DeviceInfo?.ModelName?._value || '-';
+        const id = device._id || device._deviceId?._SerialNumber || '-';
+        const serialNumber = device._deviceId?._SerialNumber || device._id || '-';
+        const model = device._deviceId?._ProductClass || device.InternetGatewayDevice?.DeviceInfo?.ModelName?._value || '-';
         const lastInform = device._lastInform ? new Date(device._lastInform).toISOString() : new Date().toISOString();
 
-        // Extract PPPoE username (try paths, then search tree, then default)
+        // Extract PPPoE username (try paths, then search under WAN, then default)
         const pppoeUsername = (() => {
             const v = getParameterWithPaths(device, parameterPaths.pppUsername);
             if (v !== '-') return v;
-            return searchParam(device, 'Username') || '-';
+            const wan = device?.InternetGatewayDevice?.WANDevice;
+            if (wan) return searchParam(wan, 'Username') || '-';
+            return '-';
         })();
 
         // Extract WiFi info (try paths, then search tree, then default)
@@ -179,8 +183,8 @@ router.get('/devices', asyncHandler(async (req, res) => {
             serialNumber: serialNumber,
             model: model,
             productClass: model,
-            manufacturer: device.DeviceID?.Manufacturer || device.InternetGatewayDevice?.DeviceInfo?.Manufacturer?._value || 'Unknown',
-            oui: device.DeviceID?.OUI || '-',
+            manufacturer: device._deviceId?._Manufacturer || device.InternetGatewayDevice?.DeviceInfo?.Manufacturer?._value || 'Unknown',
+            oui: device._deviceId?._OUI || '-',
             lastInform: lastInform,
             pppoeUsername: pppoeUsername,
             ssid: ssid,

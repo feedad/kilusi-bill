@@ -862,3 +862,36 @@ Both query paths now return ALL needed fields:
 - "Diterbitkan oleh": dynamic from company settings
 - PDF: `window.print()` → Save as PDF
 - "Aksi Cepat" Card: `className="no-print"` added
+
+---
+
+## Server 3 Deployment Fixes (June 21, 2026)
+
+### Fixed: PPPoE Username "acs" di halaman GenieACS
+- **Bug**: `getParameterWithPaths()` di `backend/routes/api/v1/genieacs.js:73` — `_object` check nge-break traversal di setiap step path. Fallback `searchParam(device, 'Username')` via BFS nemu `ManagementServer.Username` = "acs" duluan.
+- **Fix**: Pindahin `_object` check ke setelah loop selesai. `searchParam` di-scope cari di `WANDevice` aja. Tambah path TR-181: `Device.PPP.Interface.1.Username`.
+
+### Fixed: Manufacturer/Model "Unknown"
+- **Bug**: Kode pake `device.DeviceID?.Manufacturer` tapi data asli GenieACS pake `_deviceId._Manufacturer`.
+- **Fix**: Ganti semua referensi `DeviceID` → `_deviceId`.
+
+### Fixed: FreeRADIUS disconnected di dashboard
+- **Masalah**: `systemctl is-active freeradius` jalan di Server 3 (localhost), padahal FreeRADIUS di Server 1.
+- **Fix**: Ganti ke UDP Status-Server pake `radclient` (freeradius-utils) ke `172.22.10.101:18121` secret `adminsecret`. Juga buka UFW port 18121/udp di Server 1.
+
+### Fixed: GenieACS disconnected di dashboard  
+- **Masalah**: Endpoint hardcode `http://localhost:7557` padahal GenieACS di Server 2.
+- **Fix**: Ganti pake `getSetting('genieacs_url', 'http://localhost:7557')`. Set `genieacs_url = http://172.22.10.102:7557` di `app_config` database.
+
+### Fixed: H1S (CMDC) tidak punya VirtualParameters
+- **Masalah**: VirtualParameters di MongoDB (`virtualParameters` collection) butuh device inform cycle untuk execute. H1S `_timestamp` undefined → provision belum jalan.
+- **Fix**: Set `_timestamp`, `_lastBootstrap`, `_lastBoot` di MongoDB langsung. Juga set VirtualParameters via MongoDB update untuk immediate fix.
+- **Catatan**: VirtualParameters scripts ada di MongoDB collection `virtualParameters` — bukan di ext scripts atau provision scripts.
+
+### Key Configs
+- **FreeRADIUS status server**: `172.22.10.101:18121` UDP, secret `adminsecret`. Aktif via `sites-available/status` symlink.
+- **GenieACS NBI**: `http://172.22.10.102:7557` (tanpa auth)
+- **GenieACS CWMP**: `http://172.22.10.102:7547`
+- **GenieACS UI**: `http://172.22.10.102:3000`
+- **GenieACS ext dir**: `/opt/genieacs/ext/` (kosong, tidak dipakai)
+- **Server 3 → Server 1 PostgreSQL**: `172.22.10.101:5432`, user `kilusi_user`
