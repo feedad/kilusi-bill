@@ -1,7 +1,7 @@
 {
   "admin_username": "admin",
   "admin_password": "admin",
-  "genieacs_url": "http://172.22.10.30:7557",
+  "genieacs_url": "http://172.22.10.102:7557",
   "genieacs_username": "admin",
   "genieacs_password": "admin",
   "mikrotik_host": "192.168.1.1",
