@@ -91,13 +91,48 @@ func main() {
 		if err := store.UpsertDevice(device); err != nil {
 			log.Printf("CWMP: upsert device error for %s: %v", data.SN, err)
 		}
+
+		// Auto-GPV on BOOT events (0=BOOTSTRAP, 1=BOOT) or on first PERIODIC
+		// for devices without any WAN data yet
+		shouldGPV := isBootEvent(data.Events)
+		if !shouldGPV {
+			hasWANData, _ := store.HasWANConnections(data.SN)
+			if !hasWANData {
+				shouldGPV = true
+			}
+		}
+		if shouldGPV {
+			paramNames := buildAutoGPVPaths(v)
+			log.Printf("CWMP: enqueuing auto-GPV for %s (vendor=%s, %d paths)",
+				data.SN, vendorName, len(paramNames))
+			handler.TaskQueue.Enqueue(data.SN, &cwmp.Task{
+				ID:         "boot-gpv-" + data.SN,
+				Type:       cwmp.CmdGetParameterValues,
+				ParamNames: paramNames,
+			})
+		}
+
 		return nil
 	}
 
 	handler.OnSaveParams = func(sn string, params []cwmp.ParameterValueStruct) error {
+		var pppoeUsername string
 		for _, p := range params {
 			if len(p.Value) > 0 && len(p.Value) < 100 {
 				log.Printf("  PARAM %s: %s = %s", sn, p.Name, p.Value)
+			}
+			// Extract PPPoE username from periodic Inform params
+			if strings.HasSuffix(p.Name, "Username") &&
+				!strings.Contains(p.Name, "ManagementServer") &&
+				p.Value != "" {
+				pppoeUsername = p.Value
+			}
+		}
+		if pppoeUsername != "" {
+			if err := store.UpdateDeviceField(sn, "pppoe_username", pppoeUsername); err != nil {
+				log.Printf("CWMP: error updating PPPoE for %s: %v", sn, err)
+			} else {
+				log.Printf("CWMP: updated PPPoE username for %s: %s", sn, pppoeUsername)
 			}
 		}
 		return nil
@@ -219,13 +254,36 @@ func main() {
 
 var startTime = time.Now()
 
+func isBootEvent(events []cwmp.Event) bool {
+	for _, e := range events {
+		if e.EventCode == "0" || e.EventCode == "1" {
+			return true
+		}
+	}
+	return false
+}
+
+func buildAutoGPVPaths(v *vendor.VendorConfig) []string {
+	paths := []string{
+		"DeviceInfo.",
+		"InternetGatewayDevice.WANDevice.1.",
+		"InternetGatewayDevice.LANDevice.1.",
+	}
+	if v != nil {
+		// Add vendor-specific optical paths
+		if v.Optical.RXPower != "" {
+			paths = append(paths, v.Optical.RXPower)
+		}
+		if v.Optical.Temperature != "" {
+			paths = append(paths, v.Optical.Temperature)
+		}
+	}
+	return paths
+}
+
 func handleDeviceDetail(w http.ResponseWriter, r *http.Request, store *db.Store, id string) {
 	device, err := store.GetDeviceByID(id)
-	if err != nil {
-		writeJSON(w, map[string]string{"error": err.Error()})
-		return
-	}
-	if device == nil {
+	if err != nil || device == nil {
 		device, err = store.GetDeviceBySN(id)
 		if err != nil {
 			writeJSON(w, map[string]string{"error": err.Error()})

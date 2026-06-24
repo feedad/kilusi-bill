@@ -27,9 +27,12 @@ type Handler struct {
 
 type Store interface {
 	GetDeviceIDBySN(sn string) (string, error) // returns device_id or ""
+	HasWANConnections(sn string) (bool, error)
 	RecordOpticalStats(deviceID string, rx, tx, temp float64, pon string) error
 	UpsertWiFiConfig(deviceID string, ssidIndex int, ssid, password, security string, enabled bool, channel, clients int) error
 	UpsertWANConnection(deviceID string, wanIndex int, connType, username, ip, mac string, vlanID int, uptime int64) error
+	UpsertLANConfig(deviceID string, gateway, subnet string, dhcpEnabled bool, dhcpStart, dhcpEnd string, leaseTime int, dns string) error
+	RecordConnectedHost(deviceID, ip, mac, hostname, iface string) error
 }
 
 type InformData struct {
@@ -152,8 +155,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case env.Body.GetParameterNamesResp != nil:
 		h.handleGPNResponse(w, r, env)
 	default:
-		log.Printf("CWMP: unsupported message from %s", r.RemoteAddr)
-		h.writeXML(w, BuildEmptyResponse(env.Header.ID))
+		bodyStr := string(body)
+		if len(bodyStr) > 800 {
+			bodyStr = bodyStr[:800]
+		}
+		if env.Body.Fault != nil {
+			log.Printf("CWMP: Fault from %s: code=%s msg=%s", r.RemoteAddr, env.Body.Fault.FaultCode, env.Body.Fault.FaultString)
+		} else {
+			log.Printf("CWMP: unsupported message from %s: body=%s", r.RemoteAddr, bodyStr)
+		}
 	}
 }
 
@@ -184,42 +194,37 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, env *Enve
 		}
 	}
 
-	// Check for pending tasks — if any, piggyback command in this response
-	pending := h.TaskQueue.Dequeue(data.SN)
-	if pending != nil {
-		resp := BuildInformResponse(env.Header.ID)
+	resp := BuildInformResponse(env.Header.ID)
+
+	// Check for pending urgent tasks — piggyback non-GPV commands on InformResponse
+	pending := h.TaskQueue.Peek(data.SN)
+	if pending != nil && pending.Type != CmdGetParameterValues {
+		pending = h.TaskQueue.Dequeue(data.SN)
 		var cmdXML string
 		switch pending.Type {
-		case CmdGetParameterValues:
-			cmdXML = BuildGetParameterValues(pending.ID, pending.ParamNames)
 		case CmdSetParameterValues:
 			cmdXML = BuildSetParameterValues(pending.ID, pending.Params, "")
 		case CmdReboot:
 			cmdXML = BuildReboot(pending.ID, pending.ID)
 		case CmdFactoryReset:
 			cmdXML = BuildFactoryReset(pending.ID)
-		default:
-			log.Printf("CWMP: unknown piggyback task type %s for %s", pending.Type, data.SN)
 		}
 		if cmdXML != "" {
-			// Combine InformResponse + command in multipart envelopes
 			combined := resp + "\n" + cmdXML
 			h.writeXMLMulti(w, combined)
 			log.Printf("CWMP: piggybacked %s command on InformResponse for %s", pending.Type, data.SN)
 			return
 		}
-		h.writeXML(w, resp)
-		return
 	}
 
 	// Store the session for empty body (CPE polling)
 	deviceSN := data.SN
 	h.sessions.Store(deviceSN, &Session{
 		DeviceID: deviceSN,
+		IP:       ip,
 		LastSeen: time.Now(),
 	})
 
-	resp := BuildInformResponse(env.Header.ID)
 	h.writeXML(w, resp)
 }
 
@@ -288,13 +293,24 @@ func (h *Handler) handleTransferComplete(w http.ResponseWriter, r *http.Request,
 
 func (h *Handler) handleGPVResponse(w http.ResponseWriter, r *http.Request, env *Envelope) {
 	resp := env.Body.GetParameterValuesResp
-	log.Printf("CWMP: GPV response with %d params", len(resp.ParameterList.Parameters))
+	log.Printf("CWMP: GPV response with %d params from %s", len(resp.ParameterList.Parameters), r.RemoteAddr)
 
 	// Persist the received parameters to DB
 	if h.Store != nil && len(resp.ParameterList.Parameters) > 0 {
-		// Find device by extracting SN from the first parameter path
 		params := resp.ParameterList.Parameters
 		sn := extractDeviceSNFromParams(params)
+		if sn == "" {
+			// Fallback: find device by IP from session
+			ip := strings.Split(r.RemoteAddr, ":")[0]
+			h.sessions.Range(func(key, value interface{}) bool {
+				session := value.(*Session)
+				if session.IP == ip && time.Since(session.LastSeen) < 10*time.Minute {
+					sn = session.DeviceID
+					return false
+				}
+				return true
+			})
+		}
 		if sn != "" {
 			h.persistDeviceParams(sn, params)
 		}
@@ -388,6 +404,7 @@ func (h *Handler) PrintSOAP(env *Envelope) {
 
 type Session struct {
 	DeviceID      string
+	IP            string
 	LastSeen      time.Time
 	PendingResult chan *TaskResult
 }
@@ -407,8 +424,10 @@ func (h *Handler) persistDeviceParams(sn string, params []ParameterValueStruct) 
 	var opticalPON string
 	hasOptical := false
 
+	lan := make(map[string]string)
 	wanConns := make(map[int]map[string]string)
 	wifiConfigs := make(map[int]map[string]string)
+	hosts := make([]map[string]string, 0)
 
 	for _, p := range params {
 		name := p.Name
@@ -429,9 +448,15 @@ func (h *Handler) persistDeviceParams(sn string, params []ParameterValueStruct) 
 			opticalPON = val
 		}
 
-		// WAN connections
+		// WAN connections (PPPoE or DHCP/Static IP)
+		wanPrefix := ""
 		if strings.Contains(name, "WANPPPConnection") {
-			idx := extractIndex(name, "WANPPPConnection.")
+			wanPrefix = "WANPPPConnection."
+		} else if strings.Contains(name, "WANIPConnection") {
+			wanPrefix = "WANIPConnection."
+		}
+		if wanPrefix != "" {
+			idx := extractIndex(name, wanPrefix)
 			if idx >= 0 {
 				if wanConns[idx] == nil {
 					wanConns[idx] = make(map[string]string)
@@ -476,14 +501,63 @@ func (h *Handler) persistDeviceParams(sn string, params []ParameterValueStruct) 
 				}
 			}
 		}
+
+		// LAN config
+		if strings.Contains(name, "LANHostConfigManagement") {
+			switch {
+			case strings.HasSuffix(name, "IPRouters"):
+				lan["gateway"] = val
+			case strings.HasSuffix(name, "SubnetMask"):
+				lan["subnet"] = val
+			case strings.HasSuffix(name, "DHCPServerEnable"):
+				lan["dhcp_enabled"] = val
+			case strings.HasSuffix(name, "MinAddress"):
+				lan["dhcp_start"] = val
+			case strings.HasSuffix(name, "MaxAddress"):
+				lan["dhcp_end"] = val
+			case strings.HasSuffix(name, "DHCPLeaseTime"):
+				lan["lease_time"] = val
+			case strings.HasSuffix(name, "DNSServers"):
+				lan["dns"] = val
+			}
+		}
+
+		// Connected hosts
+		if strings.Contains(name, "Hosts.Host") {
+			hostIdx := extractIndex(name, "Hosts.Host.")
+			if hostIdx >= 0 {
+				// Find or create host entry for this index
+				var hostEntry map[string]string
+				for _, h := range hosts {
+					if h["index"] == fmt.Sprintf("%d", hostIdx) {
+						hostEntry = h
+						break
+					}
+				}
+				if hostEntry == nil {
+					hostEntry = make(map[string]string)
+					hostEntry["index"] = fmt.Sprintf("%d", hostIdx)
+					hosts = append(hosts, hostEntry)
+				}
+				switch {
+				case strings.HasSuffix(name, "IPAddress"):
+					hostEntry["ip"] = val
+				case strings.HasSuffix(name, "MACAddress"):
+					hostEntry["mac"] = val
+				case strings.HasSuffix(name, "HostName"):
+					hostEntry["hostname"] = val
+				case strings.HasSuffix(name, "InterfaceType"):
+					hostEntry["iface"] = val
+				}
+			}
+		}
 	}
 
+	deviceID, _ := h.Store.GetDeviceIDBySN(sn)
+
 	// Save optical stats
-	if hasOptical {
-		deviceID, err := h.Store.GetDeviceIDBySN(sn)
-		if err == nil && deviceID != "" {
-			h.Store.RecordOpticalStats(deviceID, opticalRx, opticalTx, opticalTemp, opticalPON)
-		}
+	if hasOptical && deviceID != "" {
+		h.Store.RecordOpticalStats(deviceID, opticalRx, opticalTx, opticalTemp, opticalPON)
 	}
 
 	// Save WAN connections
@@ -493,10 +567,7 @@ func (h *Handler) persistDeviceParams(sn string, params []ParameterValueStruct) 
 		var uptime int64
 		fmt.Sscanf(conn["uptime"], "%d", &uptime)
 
-		deviceID, err := h.Store.GetDeviceIDBySN(sn)
-		if err == nil && deviceID != "" {
-			h.Store.UpsertWANConnection(deviceID, idx, conn["conn_type"], conn["username"], conn["ip"], conn["mac"], vlanID, uptime)
-		}
+		h.Store.UpsertWANConnection(deviceID, idx, conn["conn_type"], conn["username"], conn["ip"], conn["mac"], vlanID, uptime)
 	}
 
 	// Save WiFi configs
@@ -507,13 +578,26 @@ func (h *Handler) persistDeviceParams(sn string, params []ParameterValueStruct) 
 		var clients int
 		fmt.Sscanf(cfg["clients"], "%d", &clients)
 
-		deviceID, err := h.Store.GetDeviceIDBySN(sn)
-		if err == nil && deviceID != "" {
-			h.Store.UpsertWiFiConfig(deviceID, idx, cfg["ssid"], cfg["password"], cfg["security"], enabled, channel, clients)
+		h.Store.UpsertWiFiConfig(deviceID, idx, cfg["ssid"], cfg["password"], cfg["security"], enabled, channel, clients)
+	}
+
+	// Save LAN config
+	if len(lan) > 0 && deviceID != "" {
+		dhcpEnabled := lan["dhcp_enabled"] == "1" || lan["dhcp_enabled"] == "true"
+		var leaseTime int
+		fmt.Sscanf(lan["lease_time"], "%d", &leaseTime)
+		h.Store.UpsertLANConfig(deviceID, lan["gateway"], lan["subnet"], dhcpEnabled, lan["dhcp_start"], lan["dhcp_end"], leaseTime, lan["dns"])
+	}
+
+	// Save connected hosts
+	for _, host := range hosts {
+		if deviceID != "" && host["mac"] != "" {
+			h.Store.RecordConnectedHost(deviceID, host["ip"], host["mac"], host["hostname"], host["iface"])
 		}
 	}
 
-	log.Printf("CWMP: persisted device data for %s (optical=%v, wan=%d, wifi=%d)", sn, hasOptical, len(wanConns), len(wifiConfigs))
+	log.Printf("CWMP: persisted device data for %s (optical=%v, wan=%d, wifi=%d, lan=%v, hosts=%d)",
+		sn, hasOptical, len(wanConns), len(wifiConfigs), len(lan) > 0, len(hosts))
 }
 
 func extractIndex(name, prefix string) int {

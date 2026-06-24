@@ -212,12 +212,24 @@ func (s *Store) GetDeviceIDBySN(sn string) (string, error) {
 	return id, nil
 }
 
+func (s *Store) HasWANConnections(sn string) (bool, error) {
+	var count int
+	err := s.DB.QueryRow(`
+		SELECT COUNT(*) FROM acs_wan_connections w
+		JOIN acs_devices d ON d.id = w.device_id
+		WHERE d.sn = $1`, sn).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 func (s *Store) GetDeviceBySN(sn string) (*DeviceData, error) {
 	d := &DeviceData{}
 	err := s.DB.QueryRow(`
 		SELECT id, sn, product_class, manufacturer, oui, hardware_version, software_version,
-			spec_version, status, last_inform, last_boot, conn_request_url, periodic_interval,
-			pppoe_username, ip_address, mac_address, created_at, updated_at
+			COALESCE(spec_version,''), status, last_inform, last_boot, conn_request_url, periodic_interval,
+			pppoe_username, COALESCE(ip_address::text,''), COALESCE(mac_address::text,''), created_at, updated_at
 		FROM acs_devices WHERE sn = $1`, sn).Scan(
 		&d.ID, &d.SN, &d.ProductClass, &d.Manufacturer, &d.OUI,
 		&d.HardwareVersion, &d.SoftwareVersion, &d.SpecVersion,
@@ -237,8 +249,8 @@ func (s *Store) GetDeviceByID(id string) (*DeviceData, error) {
 	d := &DeviceData{}
 	err := s.DB.QueryRow(`
 		SELECT id, sn, product_class, manufacturer, oui, hardware_version, software_version,
-			spec_version, status, last_inform, last_boot, conn_request_url, periodic_interval,
-			pppoe_username, ip_address, mac_address, created_at, updated_at
+			COALESCE(spec_version,''), status, last_inform, last_boot, conn_request_url, periodic_interval,
+			pppoe_username, COALESCE(ip_address::text,''), COALESCE(mac_address::text,''), created_at, updated_at
 		FROM acs_devices WHERE id = $1`, id).Scan(
 		&d.ID, &d.SN, &d.ProductClass, &d.Manufacturer, &d.OUI,
 		&d.HardwareVersion, &d.SoftwareVersion, &d.SpecVersion,
@@ -254,6 +266,13 @@ func (s *Store) GetDeviceByID(id string) (*DeviceData, error) {
 	return d, nil
 }
 
+func nilIfEmpty(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
 func (s *Store) UpsertDevice(d *DeviceData) error {
 	_, err := s.DB.Exec(`
 		INSERT INTO acs_devices (sn, product_class, manufacturer, oui, hardware_version, software_version,
@@ -265,12 +284,12 @@ func (s *Store) UpsertDevice(d *DeviceData) error {
 			pppoe_username=$12, ip_address=$13, mac_address=$14, updated_at=NOW()`,
 		d.SN, d.ProductClass, d.Manufacturer, d.OUI, d.HardwareVersion, d.SoftwareVersion,
 		d.Status, d.LastInform, d.LastBoot, d.ConnRequestURL, d.PeriodicInterval,
-		d.PPPoEUsername, d.IPAddress, d.MACAddress)
+		d.PPPoEUsername, nilIfEmpty(d.IPAddress), nilIfEmpty(d.MACAddress))
 	return err
 }
 
 func (s *Store) ListDevices(search, vendorFilter, statusFilter string, limit, offset int) ([]DeviceData, int, error) {
-	query := "SELECT id, sn, product_class, manufacturer, oui, hardware_version, software_version, spec_version, status, last_inform, last_boot, conn_request_url, periodic_interval, pppoe_username, ip_address, mac_address, created_at, updated_at FROM acs_devices WHERE 1=1"
+	query := "SELECT id, sn, product_class, manufacturer, oui, hardware_version, software_version, COALESCE(spec_version,''), status, last_inform, last_boot, conn_request_url, periodic_interval, pppoe_username, COALESCE(ip_address::text,''), COALESCE(mac_address::text,''), created_at, updated_at FROM acs_devices WHERE 1=1"
 	countQuery := "SELECT COUNT(*) FROM acs_devices WHERE 1=1"
 	args := []interface{}{}
 	argIdx := 1
@@ -395,7 +414,7 @@ func (s *Store) UpsertWANConnection(deviceID string, wanIndex int, connType, use
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 		ON CONFLICT (device_id, wan_index) DO UPDATE SET
 			connection_type=$3, username=$4, ip_address=$5, mac_address=$6, vlan_id=$7, uptime=$8`,
-		deviceID, wanIndex, connType, username, ip, mac, vlanID, uptime)
+		deviceID, wanIndex, connType, username, nilIfEmpty(ip), nilIfEmpty(mac), vlanID, uptime)
 	return err
 }
 
@@ -452,7 +471,16 @@ func (s *Store) RecordConnectedHost(deviceID, ip, mac, hostname, iface string) e
 		VALUES ($1,$2,$3,$4,$5)
 		ON CONFLICT (device_id, mac_address) DO UPDATE SET
 			ip_address=$2, hostname=$4, interface_type=$5, last_seen=NOW()`,
-		deviceID, ip, mac, hostname, iface)
+		deviceID, nilIfEmpty(ip), nilIfEmpty(mac), hostname, iface)
+	return err
+}
+
+func (s *Store) UpdateDeviceField(sn, field, value string) error {
+	if value == "" {
+		return nil
+	}
+	q := fmt.Sprintf(`UPDATE acs_devices SET %s = $2, updated_at = NOW() WHERE sn = $1`, field)
+	_, err := s.DB.Exec(q, sn, value)
 	return err
 }
 

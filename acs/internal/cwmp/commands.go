@@ -17,10 +17,10 @@ func BuildGetParameterValues(id string, names []string) string {
 	for _, n := range names {
 		paramXML += fmt.Sprintf("<string>%s</string>", n)
 	}
-	return fmt.Sprintf(`<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+	return fmt.Sprintf(`<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/">
   <soap:Header><cwmp:ID soap:mustUnderstand="1">%s</cwmp:ID></soap:Header>
-  <soap:Body><cwmp:GetParameterValues><ParameterNames>%s</ParameterNames></cwmp:GetParameterValues></soap:Body>
-</soap:Envelope>`, id, paramXML)
+  <soap:Body><cwmp:GetParameterValues><ParameterNames SOAP-ENC:arrayType="xsd:string[%d]">%s</ParameterNames></cwmp:GetParameterValues></soap:Body>
+</soap:Envelope>`, id, len(names), paramXML)
 }
 
 func BuildSetParameterValues(id string, params []ParameterValueStruct, key string) string {

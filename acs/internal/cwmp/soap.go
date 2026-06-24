@@ -35,7 +35,7 @@ type Body struct {
 	AddObjectResp          *AddObjectResponse             `xml:"AddObjectResponse"`
 	DeleteObject           *DeleteObjectRequest           `xml:"DeleteObject"`
 	DeleteObjectResp       *DeleteObjectResponse          `xml:"DeleteObjectResponse"`
-	Fault                  *Fault                        `xml:"Fault"`
+	Fault                  *Fault                        `xml:"http://schemas.xmlsoap.org/soap/envelope/ Fault"`
 }
 
 type Fault struct {
