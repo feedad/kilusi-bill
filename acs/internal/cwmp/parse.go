@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"sync"
 )
 
 var (
@@ -56,59 +55,18 @@ func ParseEnvelope(body []byte) (*Envelope, error) {
 	return &env, nil
 }
 
-type SessionID string
-
-type Session struct {
-	ID         SessionID
-	DeviceID   DeviceID
-	Events     []Event
-	mu         sync.Mutex
-	currentCmd *PendingCommand
-}
-
-type PendingCommand struct {
-	ID        string
-	Type      CommandType
-	XML       string
-	Done      chan *CommandResult
-}
-
 type CommandType string
 
 const (
-	CmdGetParameterValues  CommandType = "GetParameterValues"
-	CmdSetParameterValues  CommandType = "SetParameterValues"
-	CmdGetParameterNames   CommandType = "GetParameterNames"
-	CmdReboot              CommandType = "Reboot"
-	CmdFactoryReset        CommandType = "FactoryReset"
-	CmdDownload            CommandType = "Download"
-	CmdAddObject           CommandType = "AddObject"
-	CmdDeleteObject        CommandType = "DeleteObject"
+	CmdGetParameterValues CommandType = "GetParameterValues"
+	CmdSetParameterValues CommandType = "SetParameterValues"
+	CmdGetParameterNames  CommandType = "GetParameterNames"
+	CmdReboot             CommandType = "Reboot"
+	CmdFactoryReset       CommandType = "FactoryReset"
+	CmdDownload           CommandType = "Download"
+	CmdAddObject          CommandType = "AddObject"
+	CmdDeleteObject       CommandType = "DeleteObject"
 )
-
-type CommandResult struct {
-	Params   []ParameterValueStruct
-	Status   int
-	Err      error
-}
-
-func (s *Session) SetCommand(cmd *PendingCommand) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.currentCmd = cmd
-}
-
-func (s *Session) GetCommand() *PendingCommand {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.currentCmd
-}
-
-func (s *Session) ClearCommand() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.currentCmd = nil
-}
 
 func ReadBody(r io.Reader) ([]byte, error) {
 	return io.ReadAll(r)

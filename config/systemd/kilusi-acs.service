@@ -1,0 +1,22 @@
+[Unit]
+Description=Kilusi ACS Service (TR-069)
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/root/kilusi-bill/acs
+Environment=DATABASE_URL=postgres://kilusi_user:kilusi17!@172.22.10.101:5432/kilusi_bill?sslmode=disable
+ExecStart=/root/kilusi-bill/acs/server -cwmp :7547 -api :7558
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kilusi-acs
+
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

@@ -1,5 +1,4 @@
 import type { Metadata } from 'next'
-import { DM_Sans } from 'next/font/google'
 import './globals.css'
 import 'leaflet/dist/leaflet.css'
 import { ThemeProvider } from '@/contexts/ThemeContext'
@@ -11,12 +10,6 @@ import dynamic from 'next/dynamic'
 // Dynamically import BrandingProvider to prevent SSR issues
 const BrandingProvider = dynamic(() => import('@/components/providers/BrandingProvider').then(mod => ({ default: mod.default })), {
   ssr: false,
-})
-
-const dmSans = DM_Sans({
-  subsets: ['latin'],
-  variable: '--font-dm-sans',
-  display: 'swap',
 })
 
 // Default metadata (will be overridden by BrandingProvider)
@@ -43,7 +36,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="id" suppressHydrationWarning>
-      <body className={dmSans.className}>
+      <body className="font-sans antialiased">
         <ThemeProvider>
           <QueryProvider>
             <AuthProvider>

@@ -107,3 +107,37 @@ export interface DeviceStats {
   offline: number
   vendors: Record<string, number>
 }
+
+// GenieACS-era device format used by list page and detail modal
+export interface GenieACSDevice {
+  _id?: string
+  id: string
+  serial?: string
+  serialNumber?: string
+  model?: string
+  productClass?: string
+  manufacturer?: string
+  oui?: string
+  lastInform?: string
+  pppoeUsername?: string
+  ssid?: string
+  password?: string
+  userKonek?: string
+  rxPower?: string | number
+  tag?: string
+  customerId?: string | number
+  customerName?: string
+  customer?: {
+    name?: string
+    pppoe_username?: string
+    phone?: string
+  }
+  tags?: string[]
+  connectionState?: string
+  device_status?: string
+  parameters?: Record<string, any>
+  customer_name?: string
+  customer_phone?: string
+  service_number?: string
+  isolir_date?: string
+}

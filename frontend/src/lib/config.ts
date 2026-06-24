@@ -31,7 +31,7 @@ function getApiBaseUrl(): string {
   const apiURL = process.env.NEXT_PUBLIC_API_URL
 
   // Fallback to production URL through Cloudflare
-  const fallbackURL = 'https://api.kilusi.id'
+  const fallbackURL = 'http://172.22.10.30:3001'
 
   const finalURL = apiURL && apiURL.trim() !== '' ? apiURL : fallbackURL
 

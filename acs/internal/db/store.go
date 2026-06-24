@@ -121,7 +121,7 @@ func (s *Store) RunMigrations() error {
 	return nil
 }
 
-type Device struct {
+type DeviceData struct {
 	ID               string    `json:"id"`
 	SN               string    `json:"sn"`
 	ProductClass     string    `json:"product_class"`
@@ -129,6 +129,7 @@ type Device struct {
 	OUI              string    `json:"oui"`
 	HardwareVersion  string    `json:"hardware_version"`
 	SoftwareVersion  string    `json:"software_version"`
+	SpecVersion      string    `json:"spec_version"`
 	Status           string    `json:"status"`
 	LastInform       time.Time `json:"last_inform"`
 	LastBoot         time.Time `json:"last_boot"`
@@ -137,9 +138,123 @@ type Device struct {
 	PPPoEUsername    string    `json:"pppoe_username"`
 	IPAddress        string    `json:"ip_address"`
 	MACAddress       string    `json:"mac_address"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
-func (s *Store) UpsertDevice(d *Device) error {
+type OpticalStat struct {
+	ID         string    `json:"id"`
+	DeviceID   string    `json:"device_id"`
+	RXPower    float64   `json:"rx_power"`
+	TXPower    float64   `json:"tx_power"`
+	Temperature float64  `json:"temperature"`
+	Voltage    float64   `json:"supply_voltage"`
+	BiasCurrent float64  `json:"bias_current"`
+	PONMode    string    `json:"pon_mode"`
+	RecordedAt time.Time `json:"recorded_at"`
+}
+
+type WiFiConfig struct {
+	ID           string `json:"id"`
+	DeviceID     string `json:"device_id"`
+	SSIDIndex    int    `json:"ssid_index"`
+	SSID         string `json:"ssid"`
+	Password     string `json:"password"`
+	Enabled      bool   `json:"enabled"`
+	SecurityMode string `json:"security_mode"`
+	Channel      int    `json:"channel"`
+	ActiveClients int   `json:"active_clients"`
+}
+
+type WANConnection struct {
+	ID             string `json:"id"`
+	DeviceID       string `json:"device_id"`
+	WANIndex       int    `json:"wan_index"`
+	ConnectionType string `json:"connection_type"`
+	Username       string `json:"username"`
+	IPAddress      string `json:"ip_address"`
+	MACAddress     string `json:"mac_address"`
+	VLANID         int    `json:"vlan_id"`
+	Uptime         int64  `json:"uptime"`
+}
+
+type LANConfig struct {
+	ID          string `json:"id"`
+	DeviceID    string `json:"device_id"`
+	GatewayIP   string `json:"gateway_ip"`
+	SubnetMask  string `json:"subnet_mask"`
+	DHCPEnabled bool   `json:"dhcp_enabled"`
+	DHCPStartIP string `json:"dhcp_start_ip"`
+	DHCPEndIP   string `json:"dhcp_end_ip"`
+	DHCPLease   int    `json:"dhcp_lease_time"`
+	DNSServers  string `json:"dns_servers"`
+}
+
+type ConnectedHost struct {
+	ID            string    `json:"id"`
+	DeviceID      string    `json:"device_id"`
+	IPAddress     string    `json:"ip_address"`
+	MACAddress    string    `json:"mac_address"`
+	Hostname      string    `json:"hostname"`
+	InterfaceType string    `json:"interface_type"`
+	LastSeen      time.Time `json:"last_seen"`
+}
+
+func (s *Store) GetDeviceIDBySN(sn string) (string, error) {
+	var id string
+	err := s.DB.QueryRow(`SELECT id FROM acs_devices WHERE sn = $1`, sn).Scan(&id)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func (s *Store) GetDeviceBySN(sn string) (*DeviceData, error) {
+	d := &DeviceData{}
+	err := s.DB.QueryRow(`
+		SELECT id, sn, product_class, manufacturer, oui, hardware_version, software_version,
+			spec_version, status, last_inform, last_boot, conn_request_url, periodic_interval,
+			pppoe_username, ip_address, mac_address, created_at, updated_at
+		FROM acs_devices WHERE sn = $1`, sn).Scan(
+		&d.ID, &d.SN, &d.ProductClass, &d.Manufacturer, &d.OUI,
+		&d.HardwareVersion, &d.SoftwareVersion, &d.SpecVersion,
+		&d.Status, &d.LastInform, &d.LastBoot, &d.ConnRequestURL,
+		&d.PeriodicInterval, &d.PPPoEUsername, &d.IPAddress, &d.MACAddress,
+		&d.CreatedAt, &d.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return d, nil
+}
+
+func (s *Store) GetDeviceByID(id string) (*DeviceData, error) {
+	d := &DeviceData{}
+	err := s.DB.QueryRow(`
+		SELECT id, sn, product_class, manufacturer, oui, hardware_version, software_version,
+			spec_version, status, last_inform, last_boot, conn_request_url, periodic_interval,
+			pppoe_username, ip_address, mac_address, created_at, updated_at
+		FROM acs_devices WHERE id = $1`, id).Scan(
+		&d.ID, &d.SN, &d.ProductClass, &d.Manufacturer, &d.OUI,
+		&d.HardwareVersion, &d.SoftwareVersion, &d.SpecVersion,
+		&d.Status, &d.LastInform, &d.LastBoot, &d.ConnRequestURL,
+		&d.PeriodicInterval, &d.PPPoEUsername, &d.IPAddress, &d.MACAddress,
+		&d.CreatedAt, &d.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return d, nil
+}
+
+func (s *Store) UpsertDevice(d *DeviceData) error {
 	_, err := s.DB.Exec(`
 		INSERT INTO acs_devices (sn, product_class, manufacturer, oui, hardware_version, software_version,
 			status, last_inform, last_boot, conn_request_url, periodic_interval, pppoe_username, ip_address, mac_address)
@@ -154,8 +269,8 @@ func (s *Store) UpsertDevice(d *Device) error {
 	return err
 }
 
-func (s *Store) ListDevices(search, vendorFilter, statusFilter string, limit, offset int) ([]Device, int, error) {
-	query := "SELECT id, sn, product_class, manufacturer, oui, hardware_version, software_version, status, last_inform, last_boot, conn_request_url, periodic_interval, pppoe_username, ip_address, mac_address FROM acs_devices WHERE 1=1"
+func (s *Store) ListDevices(search, vendorFilter, statusFilter string, limit, offset int) ([]DeviceData, int, error) {
+	query := "SELECT id, sn, product_class, manufacturer, oui, hardware_version, software_version, spec_version, status, last_inform, last_boot, conn_request_url, periodic_interval, pppoe_username, ip_address, mac_address, created_at, updated_at FROM acs_devices WHERE 1=1"
 	countQuery := "SELECT COUNT(*) FROM acs_devices WHERE 1=1"
 	args := []interface{}{}
 	argIdx := 1
@@ -196,12 +311,14 @@ func (s *Store) ListDevices(search, vendorFilter, statusFilter string, limit, of
 	}
 	defer rows.Close()
 
-	var devices []Device
+	var devices []DeviceData
 	for rows.Next() {
-		var d Device
+		var d DeviceData
 		if err := rows.Scan(&d.ID, &d.SN, &d.ProductClass, &d.Manufacturer, &d.OUI,
-			&d.HardwareVersion, &d.SoftwareVersion, &d.Status, &d.LastInform, &d.LastBoot,
-			&d.ConnRequestURL, &d.PeriodicInterval, &d.PPPoEUsername, &d.IPAddress, &d.MACAddress); err != nil {
+			&d.HardwareVersion, &d.SoftwareVersion, &d.SpecVersion,
+			&d.Status, &d.LastInform, &d.LastBoot,
+			&d.ConnRequestURL, &d.PeriodicInterval, &d.PPPoEUsername,
+			&d.IPAddress, &d.MACAddress, &d.CreatedAt, &d.UpdatedAt); err != nil {
 			return nil, 0, err
 		}
 		devices = append(devices, d)
@@ -217,6 +334,30 @@ func (s *Store) RecordOpticalStats(deviceID string, rx, tx float64, temp float64
 	return err
 }
 
+func (s *Store) GetOpticalStats(deviceID string, limit int) ([]OpticalStat, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.DB.Query(`
+		SELECT id, device_id, rx_power, tx_power, temperature, supply_voltage, bias_current, pon_mode, recorded_at
+		FROM acs_optical_stats WHERE device_id = $1 ORDER BY recorded_at DESC LIMIT $2`, deviceID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var stats []OpticalStat
+	for rows.Next() {
+		var st OpticalStat
+		if err := rows.Scan(&st.ID, &st.DeviceID, &st.RXPower, &st.TXPower, &st.Temperature,
+			&st.Voltage, &st.BiasCurrent, &st.PONMode, &st.RecordedAt); err != nil {
+			return nil, err
+		}
+		stats = append(stats, st)
+	}
+	return stats, nil
+}
+
 func (s *Store) UpsertWiFiConfig(deviceID string, ssidIndex int, ssid, password, security string, enabled bool, channel, clients int) error {
 	_, err := s.DB.Exec(`
 		INSERT INTO acs_wifi_configs (device_id, ssid_index, ssid, password, security_mode, enabled, channel, active_clients)
@@ -227,6 +368,27 @@ func (s *Store) UpsertWiFiConfig(deviceID string, ssidIndex int, ssid, password,
 	return err
 }
 
+func (s *Store) GetWiFiConfigs(deviceID string) ([]WiFiConfig, error) {
+	rows, err := s.DB.Query(`
+		SELECT id, device_id, ssid_index, ssid, password, enabled, security_mode, channel, active_clients
+		FROM acs_wifi_configs WHERE device_id = $1 ORDER BY ssid_index`, deviceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var configs []WiFiConfig
+	for rows.Next() {
+		var c WiFiConfig
+		if err := rows.Scan(&c.ID, &c.DeviceID, &c.SSIDIndex, &c.SSID, &c.Password,
+			&c.Enabled, &c.SecurityMode, &c.Channel, &c.ActiveClients); err != nil {
+			return nil, err
+		}
+		configs = append(configs, c)
+	}
+	return configs, nil
+}
+
 func (s *Store) UpsertWANConnection(deviceID string, wanIndex int, connType, username, ip, mac string, vlanID int, uptime int64) error {
 	_, err := s.DB.Exec(`
 		INSERT INTO acs_wan_connections (device_id, wan_index, connection_type, username, ip_address, mac_address, vlan_id, uptime)
@@ -235,4 +397,82 @@ func (s *Store) UpsertWANConnection(deviceID string, wanIndex int, connType, use
 			connection_type=$3, username=$4, ip_address=$5, mac_address=$6, vlan_id=$7, uptime=$8`,
 		deviceID, wanIndex, connType, username, ip, mac, vlanID, uptime)
 	return err
+}
+
+func (s *Store) GetWANConnections(deviceID string) ([]WANConnection, error) {
+	rows, err := s.DB.Query(`
+		SELECT id, device_id, wan_index, connection_type, username, ip_address, mac_address, vlan_id, uptime
+		FROM acs_wan_connections WHERE device_id = $1 ORDER BY wan_index`, deviceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var conns []WANConnection
+	for rows.Next() {
+		var c WANConnection
+		if err := rows.Scan(&c.ID, &c.DeviceID, &c.WANIndex, &c.ConnectionType,
+			&c.Username, &c.IPAddress, &c.MACAddress, &c.VLANID, &c.Uptime); err != nil {
+			return nil, err
+		}
+		conns = append(conns, c)
+	}
+	return conns, nil
+}
+
+func (s *Store) UpsertLANConfig(deviceID string, gateway, subnet string, dhcpEnabled bool, dhcpStart, dhcpEnd string, leaseTime int, dns string) error {
+	_, err := s.DB.Exec(`
+		INSERT INTO acs_lan_configs (device_id, gateway_ip, subnet_mask, dhcp_enabled, dhcp_start_ip, dhcp_end_ip, dhcp_lease_time, dns_servers)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		ON CONFLICT (device_id) DO UPDATE SET
+			gateway_ip=$2, subnet_mask=$3, dhcp_enabled=$4, dhcp_start_ip=$5, dhcp_end_ip=$6, dhcp_lease_time=$7, dns_servers=$8`,
+		deviceID, gateway, subnet, dhcpEnabled, dhcpStart, dhcpEnd, leaseTime, dns)
+	return err
+}
+
+func (s *Store) GetLANConfig(deviceID string) (*LANConfig, error) {
+	c := &LANConfig{}
+	err := s.DB.QueryRow(`
+		SELECT id, device_id, gateway_ip, subnet_mask, dhcp_enabled, dhcp_start_ip, dhcp_end_ip, dhcp_lease_time, dns_servers
+		FROM acs_lan_configs WHERE device_id = $1`, deviceID).Scan(
+		&c.ID, &c.DeviceID, &c.GatewayIP, &c.SubnetMask, &c.DHCPEnabled,
+		&c.DHCPStartIP, &c.DHCPEndIP, &c.DHCPLease, &c.DNSServers)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+func (s *Store) RecordConnectedHost(deviceID, ip, mac, hostname, iface string) error {
+	_, err := s.DB.Exec(`
+		INSERT INTO acs_connected_hosts (device_id, ip_address, mac_address, hostname, interface_type)
+		VALUES ($1,$2,$3,$4,$5)
+		ON CONFLICT (device_id, mac_address) DO UPDATE SET
+			ip_address=$2, hostname=$4, interface_type=$5, last_seen=NOW()`,
+		deviceID, ip, mac, hostname, iface)
+	return err
+}
+
+func (s *Store) GetConnectedHosts(deviceID string) ([]ConnectedHost, error) {
+	rows, err := s.DB.Query(`
+		SELECT id, device_id, ip_address, mac_address, hostname, interface_type, last_seen
+		FROM acs_connected_hosts WHERE device_id = $1 ORDER BY last_seen DESC`, deviceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var hosts []ConnectedHost
+	for rows.Next() {
+		var h ConnectedHost
+		if err := rows.Scan(&h.ID, &h.DeviceID, &h.IPAddress, &h.MACAddress,
+			&h.Hostname, &h.InterfaceType, &h.LastSeen); err != nil {
+			return nil, err
+		}
+		hosts = append(hosts, h)
+	}
+	return hosts, nil
 }
