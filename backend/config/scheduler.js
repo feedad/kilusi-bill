@@ -603,7 +603,7 @@ class InvoiceScheduler {
                 JOIN customers c ON s.customer_id = c.id
                 LEFT JOIN packages p ON s.package_id = p.id
                 WHERE s.status = 'active'
-                AND s.siklus IN ('fixed', 'profile', 'TETAP')
+                AND LOWER(s.siklus) IN ('fixed', 'profile', 'tetap')
                 AND s.isolir_date IS NOT NULL
                 AND DATE(s.isolir_date) = (CURRENT_DATE + INTERVAL '${advanceDays} days')::date
             `);
@@ -660,7 +660,7 @@ class InvoiceScheduler {
                     }
 
                     // due_date = isolir_date (both are DATE, no JS conversion needed)
-                    const isFixedCycle = service.siklus === 'fixed' || service.siklus === 'TETAP';
+                    const isFixedCycle = service.siklus === 'fixed' || service.siklus === 'TETAP' || service.siklus === 'tetap';
 
                     const invoiceData = {
                         customer_id: service.customer_id,

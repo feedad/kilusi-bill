@@ -304,7 +304,7 @@ router.post('/:id/process', jwtAuth, asyncHandler(async (req, res) => {
         const serviceId = await CustomerService.createService(req.params.id, {
             package_id: customer.selected_package_id,
             billing_type: defMap.billing_type || 'prepaid',
-            siklus: defMap.billing_cycle || 'tetap',
+            siklus: defMap.billing_cycle || 'TETAP',
             pppoe_suffix: defMap.pppoe_suffix || 'kilusi.id',
             pppoe_password: defMap.pppoe_password || '1234567',
             status: 'pending'

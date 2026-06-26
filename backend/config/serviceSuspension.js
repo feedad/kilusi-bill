@@ -654,7 +654,7 @@ class ServiceSuspensionManager {
                     // Safety check: fixed/tetap cycle — pastikan isolir_date ≈ active_date + 1 bulan
                     // Skip jika selisih > 3 hari (kemungkinan data bug, jangan suspend salah)
                     // Kecuali: prepaid same-day (isolir = active, trial handle suspension)
-                    if ((customer.siklus === 'fixed' || customer.siklus === 'TETAP') && customer.active_date) {
+                    if ((customer.siklus === 'fixed' || customer.siklus === 'TETAP' || customer.siklus === 'tetap') && customer.active_date) {
                         const expectedIsolir = new Date(customer.active_date);
                         expectedIsolir.setMonth(expectedIsolir.getMonth() + 1);
                         const actualIsolirDate = isolirDate || new Date(0);

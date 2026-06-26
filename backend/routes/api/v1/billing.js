@@ -711,7 +711,7 @@ router.post('/invoices/rapel/calculate', asyncHandler(async (req, res) => {
     // Calculate last due_date (matches execute endpoint)
     const lastPeriodMonth = new Date(nextMonth.getFullYear(), nextMonth.getMonth() + numMonths - 1, 1);
     let nextOverdue;
-    const isFixed = svc.siklus === 'fixed' || svc.siklus === 'TETAP';
+    const isFixed = svc.siklus === 'fixed' || svc.siklus === 'TETAP' || svc.siklus === 'tetap';
     if (isFixed) {
         const billingDay = lastDueDate.getDate();
         const lastDayOfMonth = new Date(lastPeriodMonth.getFullYear(), lastPeriodMonth.getMonth() + 1, 0).getDate();
@@ -830,7 +830,7 @@ router.post('/invoices/rapel', asyncHandler(async (req, res) => {
             const periodMonth = new Date(nextMonth.getFullYear(), nextMonth.getMonth() + i, 1);
 
             let dueDate;
-            const isFixed = svc.siklus === 'fixed' || svc.siklus === 'TETAP';
+            const isFixed = svc.siklus === 'fixed' || svc.siklus === 'TETAP' || svc.siklus === 'tetap';
             if (isFixed) {
                 const billingDay = lastDueDate.getDate();
                 const lastDayOfMonth = new Date(periodMonth.getFullYear(), periodMonth.getMonth() + 1, 0).getDate();
