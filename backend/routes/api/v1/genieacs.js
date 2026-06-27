@@ -87,11 +87,60 @@ function enrichDeviceDetail(dev) {
     const now = Date.now();
     const diffMin = (now - lastInform) / 60000;
     const status = diffMin > 10 ? 'offline' : diffMin > 5 ? 'warning' : 'online';
+
+    // Extract WAN/WiFi/optical from raw params blob if available
+    const params = dev.params || {};
+    const wanConns = [];
+    const wifiConfigs = [];
+    let rxPower, txPower, temperature, ponMode;
+
+    for (const [key, val] of Object.entries(params)) {
+        // Optical
+        if (/[Rr]x[Pp]ower/.test(key)) rxPower = val;
+        if (/[Tt]x[Pp]ower/.test(key)) txPower = val;
+        if (/[Tt]emperature/.test(key)) temperature = val;
+        if (/[Pp][Oo][Nn]/.test(key) && !key.includes('Interface')) ponMode = val;
+
+        // WAN
+        const wanMatch = key.match(/WAN(?:PPP|IP)Connection\.(\d+)\./);
+        if (wanMatch) {
+            const idx = parseInt(wanMatch[1]);
+            if (!wanConns[idx]) wanConns[idx] = { wan_index: idx };
+            const suffix = key.split('.').pop();
+            if (suffix === 'Username') wanConns[idx].username = val;
+            if (suffix === 'ExternalIPAddress') wanConns[idx].ip_address = val;
+            if (suffix === 'MACAddress') wanConns[idx].mac_address = val;
+            if (suffix === 'ConnectionType') wanConns[idx].connection_type = val;
+            if (suffix === 'Uptime') wanConns[idx].uptime = parseInt(val) || 0;
+            if (key.includes('VLANID')) wanConns[idx].vlan_id = parseInt(val) || 0;
+        }
+
+        // WiFi
+        const wifiMatch = key.match(/WLANConfiguration\.(\d+)\./);
+        if (wifiMatch) {
+            const idx = parseInt(wifiMatch[1]);
+            if (!wifiConfigs[idx]) wifiConfigs[idx] = { ssid_index: idx };
+            const suffix = key.split('.').pop();
+            if (suffix === 'SSID') wifiConfigs[idx].ssid = val;
+            if (suffix === 'KeyPassphrase') wifiConfigs[idx].password = val;
+            if (suffix === 'Enable') wifiConfigs[idx].enabled = val === '1' || val === 'true';
+            if (suffix === 'BeaconType') wifiConfigs[idx].security_mode = val;
+            if (suffix === 'Channel') wifiConfigs[idx].channel = parseInt(val) || 0;
+            if (suffix === 'TotalAssociations') wifiConfigs[idx].active_clients = parseInt(val) || 0;
+        }
+    }
+
     return {
         ...dev,
         status,
         device_status: status,
-        connectionState: status === 'online' ? 'connected' : 'disconnected'
+        connectionState: status === 'online' ? 'connected' : 'disconnected',
+        rx_power: rxPower || dev.rx_power,
+        tx_power: txPower || dev.tx_power,
+        temperature: temperature || dev.temperature,
+        pon_mode: ponMode || dev.pon_mode,
+        wifi_configs: wifiConfigs.filter(Boolean),
+        wan_connections: wanConns.filter(Boolean),
     };
 }
 

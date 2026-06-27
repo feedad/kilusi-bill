@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -108,6 +109,7 @@ func (s *Store) RunMigrations() error {
 			last_seen TIMESTAMPTZ DEFAULT NOW(),
 			UNIQUE(device_id, mac_address)
 		)`,
+		`ALTER TABLE acs_devices ADD COLUMN IF NOT EXISTS params JSONB DEFAULT '{}'`,
 		`CREATE INDEX IF NOT EXISTS idx_acs_devices_sn ON acs_devices(sn)`,
 		`CREATE INDEX IF NOT EXISTS idx_acs_devices_status ON acs_devices(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_acs_optical_device ON acs_optical_stats(device_id)`,
@@ -122,24 +124,25 @@ func (s *Store) RunMigrations() error {
 }
 
 type DeviceData struct {
-	ID               string    `json:"id"`
-	SN               string    `json:"sn"`
-	ProductClass     string    `json:"product_class"`
-	Manufacturer     string    `json:"manufacturer"`
-	OUI              string    `json:"oui"`
-	HardwareVersion  string    `json:"hardware_version"`
-	SoftwareVersion  string    `json:"software_version"`
-	SpecVersion      string    `json:"spec_version"`
-	Status           string    `json:"status"`
-	LastInform       time.Time `json:"last_inform"`
-	LastBoot         time.Time `json:"last_boot"`
-	ConnRequestURL   string    `json:"conn_request_url"`
-	PeriodicInterval int       `json:"periodic_interval"`
-	PPPoEUsername    string    `json:"pppoe_username"`
-	IPAddress        string    `json:"ip_address"`
-	MACAddress       string    `json:"mac_address"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ID               string            `json:"id"`
+	SN               string            `json:"sn"`
+	ProductClass     string            `json:"product_class"`
+	Manufacturer     string            `json:"manufacturer"`
+	OUI              string            `json:"oui"`
+	HardwareVersion  string            `json:"hardware_version"`
+	SoftwareVersion  string            `json:"software_version"`
+	SpecVersion      string            `json:"spec_version"`
+	Status           string            `json:"status"`
+	LastInform       time.Time         `json:"last_inform"`
+	LastBoot         time.Time         `json:"last_boot"`
+	ConnRequestURL   string            `json:"conn_request_url"`
+	PeriodicInterval int               `json:"periodic_interval"`
+	PPPoEUsername    string            `json:"pppoe_username"`
+	IPAddress        string            `json:"ip_address"`
+	MACAddress       string            `json:"mac_address"`
+	Params           map[string]string `json:"params,omitempty"`
+	CreatedAt        time.Time         `json:"created_at"`
+	UpdatedAt        time.Time         `json:"updated_at"`
 }
 
 type OpticalStat struct {
@@ -223,6 +226,51 @@ func (s *Store) HasWANConnections(sn string) (bool, error) {
 	}
 	return count > 0, nil
 }
+
+func (s *Store) SaveDeviceParams(sn string, params map[string]string) error {
+	jsonb, err := json.Marshal(params)
+	if err != nil {
+		return fmt.Errorf("marshal params: %w", err)
+	}
+	_, err = s.DB.Exec(`UPDATE acs_devices SET params = params || $1::jsonb, updated_at = NOW() WHERE sn = $2`, string(jsonb), sn)
+	return err
+}
+
+func (s *Store) FindDeviceByWANIP(ip string) (string, error) {
+	var sn string
+	err := s.DB.QueryRow(`
+		SELECT sn FROM acs_devices
+		WHERE params->>'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ExternalIPAddress' = $1
+		   OR params->>'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.ExternalIPAddress' = $1
+		   OR params->>'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.3.WANPPPConnection.1.ExternalIPAddress' = $1
+		   OR params->>'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.4.WANPPPConnection.1.ExternalIPAddress' = $1
+		LIMIT 1`, ip).Scan(&sn)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return sn, nil
+}
+
+func (s *Store) GetDeviceParams(sn string) (map[string]string, error) {
+	var raw string
+	err := s.DB.QueryRow(`SELECT COALESCE(params::text, '{}') FROM acs_devices WHERE sn = $1`, sn).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var params map[string]string
+	if err := json.Unmarshal([]byte(raw), &params); err != nil {
+		return nil, err
+	}
+	return params, nil
+}
+
+
 
 func (s *Store) GetDeviceBySN(sn string) (*DeviceData, error) {
 	d := &DeviceData{}

@@ -33,6 +33,9 @@ type Store interface {
 	UpsertWANConnection(deviceID string, wanIndex int, connType, username, ip, mac string, vlanID int, uptime int64) error
 	UpsertLANConfig(deviceID string, gateway, subnet string, dhcpEnabled bool, dhcpStart, dhcpEnd string, leaseTime int, dns string) error
 	RecordConnectedHost(deviceID, ip, mac, hostname, iface string) error
+	SaveDeviceParams(sn string, params map[string]string) error
+	FindDeviceByWANIP(ip string) (string, error)
+	GetDeviceParams(sn string) (map[string]string, error)
 }
 
 type InformData struct {
@@ -293,14 +296,34 @@ func (h *Handler) handleTransferComplete(w http.ResponseWriter, r *http.Request,
 
 func (h *Handler) handleGPVResponse(w http.ResponseWriter, r *http.Request, env *Envelope) {
 	resp := env.Body.GetParameterValuesResp
-	log.Printf("CWMP: GPV response with %d params from %s", len(resp.ParameterList.Parameters), r.RemoteAddr)
+	log.Printf("CWMP: GPV response with %d params from %s (cwmp:id=%s)", len(resp.ParameterList.Parameters), r.RemoteAddr, env.Header.ID)
 
 	// Persist the received parameters to DB
 	if h.Store != nil && len(resp.ParameterList.Parameters) > 0 {
 		params := resp.ParameterList.Parameters
 		sn := extractDeviceSNFromParams(params)
+
+		// Fallback 1: extract SN from cwmp:ID (auto-GPV tasks use "boot-gpv-{SN}")
+		if sn == "" && strings.HasPrefix(env.Header.ID, "boot-gpv-") {
+			sn = env.Header.ID[9:]
+		}
+
+		// Fallback 2: find device by WAN IP from params
 		if sn == "" {
-			// Fallback: find device by IP from session
+			wanIP := extractWANIPFromParams(params)
+			if wanIP != "" {
+				found, err := h.Store.FindDeviceByWANIP(wanIP)
+				if err != nil {
+					log.Printf("CWMP: FindDeviceByWANIP error: %v", err)
+				}
+				if found != "" {
+					sn = found
+				}
+			}
+		}
+
+		// Fallback 3: find device by IP from session
+		if sn == "" {
 			ip := strings.Split(r.RemoteAddr, ":")[0]
 			h.sessions.Range(func(key, value interface{}) bool {
 				session := value.(*Session)
@@ -311,8 +334,11 @@ func (h *Handler) handleGPVResponse(w http.ResponseWriter, r *http.Request, env 
 				return true
 			})
 		}
+
 		if sn != "" {
 			h.persistDeviceParams(sn, params)
+		} else {
+			log.Printf("CWMP: GPV response from %s — could not identify device (dropping params)", r.RemoteAddr)
 		}
 	}
 
@@ -418,7 +444,32 @@ func extractDeviceSNFromParams(params []ParameterValueStruct) string {
 	return ""
 }
 
+func extractWANIPFromParams(params []ParameterValueStruct) string {
+	for _, p := range params {
+		if strings.HasSuffix(p.Name, "ExternalIPAddress") && p.Value != "" && p.Value != "0.0.0.0" {
+			return p.Value
+		}
+	}
+	return ""
+}
+
+func paramsToMap(params []ParameterValueStruct) map[string]string {
+	m := make(map[string]string, len(params))
+	for _, p := range params {
+		if p.Value != "" {
+			m[p.Name] = p.Value
+		}
+	}
+	return m
+}
+
 func (h *Handler) persistDeviceParams(sn string, params []ParameterValueStruct) {
+	// Save raw params as JSONB blob
+	paramMap := paramsToMap(params)
+	if err := h.Store.SaveDeviceParams(sn, paramMap); err != nil {
+		log.Printf("CWMP: SaveDeviceParams error for %s: %v", sn, err)
+	}
+
 	// Group params by category and persist
 	var opticalRx, opticalTx, opticalTemp float64
 	var opticalPON string

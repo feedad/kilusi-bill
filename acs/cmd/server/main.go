@@ -306,9 +306,16 @@ func handleDeviceDetail(w http.ResponseWriter, r *http.Request, store *db.Store,
 		}
 	}
 
+	// Get raw params
+	params, _ := store.GetDeviceParams(device.SN)
+	if params == nil {
+		params = map[string]string{}
+	}
+
 	writeJSON(w, map[string]interface{}{
 		"device": device,
 		"vendor": vendorInfo,
+		"params": params,
 	})
 }
 
