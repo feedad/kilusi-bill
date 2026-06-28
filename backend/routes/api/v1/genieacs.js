@@ -6,10 +6,11 @@ const { asyncHandler } = require('../../../middleware/response');
 const acs = require('../../../config/kilusi_acs');
 
 function enrichWithCustomer(devices) {
-    const ids = devices.filter(d => d.pppoe_username && d.pppoe_username !== '-');
-    if (ids.length === 0) return;
+    const ids = devices.filter(d => d.pppoe_username && d.pppoe_username !== '-' && d.pppoe_username.trim());
+    if (ids.length === 0) { logger.debug('enrichWithCustomer: no devices with pppoe'); return Promise.resolve(); }
     const placeholders = ids.map((_, i) => `$${i + 1}`);
     const values = ids.map(d => d.pppoe_username.split('@')[0]);
+    logger.debug(`enrichWithCustomer: ${ids.length} devices, values=${JSON.stringify(values)}`);
     return query(
         `SELECT c.id, c.name, c.phone, s.service_number, s.isolir_date,
                 td.pppoe_username
@@ -17,9 +18,10 @@ function enrichWithCustomer(devices) {
          JOIN customers c ON c.id = s.customer_id
          LEFT JOIN technical_details td ON td.service_id = s.id
          WHERE td.pppoe_username IS NOT NULL
-           AND REPLACE(td.pppoe_username, '@weconnect.id', '') = ANY($1)`,
+           AND SPLIT_PART(td.pppoe_username, '@', 1) = ANY($1)`,
         [values]
     ).then(r => {
+        logger.debug(`enrichWithCustomer: query returned ${r.rows.length} rows`);
         const map = {};
         r.rows.forEach(row => {
             const key = row.pppoe_username.split('@')[0];
@@ -29,6 +31,7 @@ function enrichWithCustomer(devices) {
             const key = d.pppoe_username?.split('@')[0];
             const c = map[key];
             if (c) {
+                d.customerName = c.name;
                 d.customer_name = c.name;
                 d.customer_phone = c.phone;
                 d.service_number = c.service_number;
@@ -86,6 +89,7 @@ function deviceToListItem(dev) {
         mac_address: dev.mac_address || '-',
         lastInform: dev.last_inform || new Date().toISOString(),
         pppoeUsername: dev.pppoe_username || '-',
+        pppoe_username: dev.pppoe_username || '-',
         ssid,
         password,
         userKonek,
