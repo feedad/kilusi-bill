@@ -49,6 +49,19 @@ function deviceToListItem(dev) {
     const now = Date.now();
     const diffMin = (now - lastInform) / 60000;
     const status = diffMin > 10 ? 'offline' : diffMin > 5 ? 'warning' : 'online';
+
+    // Extract params for list display
+    const params = dev.params || {};
+    let ssid = '-', password = '-', rxPower = '-', userKonek = 0;
+    for (const [key, val] of Object.entries(params)) {
+        const lastDot = key.lastIndexOf('.');
+        const suffix = lastDot >= 0 ? key.slice(lastDot + 1) : key;
+        if (suffix === 'SSID' && !key.includes('SSIDHide') && !key.includes('SSIDIndex')) ssid = val;
+        if (suffix === 'KeyPassphrase') password = val;
+        if (suffix === 'TotalAssociations') userKonek = parseInt(val) || 0;
+        if (suffix === 'RXPower' || suffix === 'RxPower') rxPower = val;
+    }
+
     return {
         _id: dev.id,
         id: dev.id,
@@ -64,10 +77,10 @@ function deviceToListItem(dev) {
         mac_address: dev.mac_address || '-',
         lastInform: dev.last_inform || new Date().toISOString(),
         pppoeUsername: dev.pppoe_username || '-',
-        ssid: '-',
-        password: '-',
-        userKonek: '0',
-        rxPower: '-',
+        ssid,
+        password,
+        userKonek,
+        rxPower,
         tag: dev.pppoe_username || '-',
         customerId: dev.customerId || null,
         customerName: dev.customer_name || '-',
@@ -95,18 +108,20 @@ function enrichDeviceDetail(dev) {
     let rxPower, txPower, temperature, ponMode;
 
     for (const [key, val] of Object.entries(params)) {
+        const lastDot = key.lastIndexOf('.');
+        const suffix = lastDot >= 0 ? key.slice(lastDot + 1) : key;
+
         // Optical
-        if (/[Rr]x[Pp]ower/.test(key)) rxPower = val;
-        if (/[Tt]x[Pp]ower/.test(key)) txPower = val;
-        if (/[Tt]emperature/.test(key)) temperature = val;
-        if (/[Pp][Oo][Nn]/.test(key) && !key.includes('Interface')) ponMode = val;
+        if (suffix === 'RXPower' || suffix === 'RxPower') rxPower = val;
+        if (suffix === 'TXPower' || suffix === 'TxPower') txPower = val;
+        if (suffix === 'Temperature' || suffix === 'temperature') temperature = val;
+        if ((suffix === 'PON' || suffix === 'pon') && !key.includes('Interface')) ponMode = val;
 
         // WAN
         const wanMatch = key.match(/WAN(?:PPP|IP)Connection\.(\d+)\./);
         if (wanMatch) {
             const idx = parseInt(wanMatch[1]);
             if (!wanConns[idx]) wanConns[idx] = { wan_index: idx };
-            const suffix = key.split('.').pop();
             if (suffix === 'Username') wanConns[idx].username = val;
             if (suffix === 'ExternalIPAddress') wanConns[idx].ip_address = val;
             if (suffix === 'MACAddress') wanConns[idx].mac_address = val;
@@ -120,8 +135,7 @@ function enrichDeviceDetail(dev) {
         if (wifiMatch) {
             const idx = parseInt(wifiMatch[1]);
             if (!wifiConfigs[idx]) wifiConfigs[idx] = { ssid_index: idx };
-            const suffix = key.split('.').pop();
-            if (suffix === 'SSID') wifiConfigs[idx].ssid = val;
+            if (suffix === 'SSID' && !key.includes('SSIDHide') && !key.includes('SSIDIndex')) wifiConfigs[idx].ssid = val;
             if (suffix === 'KeyPassphrase') wifiConfigs[idx].password = val;
             if (suffix === 'Enable') wifiConfigs[idx].enabled = val === '1' || val === 'true';
             if (suffix === 'BeaconType') wifiConfigs[idx].security_mode = val;
@@ -186,8 +200,13 @@ router.get('/devices/:id', asyncHandler(async (req, res) => {
     try {
         const detail = await acs.getDevice(id);
         const device = detail.device || detail;
+        const vendor = detail.vendor || null;
         const enriched = enrichDeviceDetail(device);
 
+        // Attach vendor info
+        enriched.vendor_info = vendor;
+
+        // Fetch sub-resource data to supplement params-parsed data
         const [optical, wifi, wan, lan, hosts] = await Promise.all([
             acs.getDeviceOptical(id, 1).catch(() => ({ stats: [] })),
             acs.getDeviceWiFi(id).catch(() => ({ wifi: [] })),
@@ -196,6 +215,8 @@ router.get('/devices/:id', asyncHandler(async (req, res) => {
             acs.getDeviceHosts(id).catch(() => ({ hosts: [] }))
         ]);
 
+        // Only override with sub-resource data if there's actual data
+        // (params-parsed data takes precedence when sub-resources are empty)
         const optStats = optical.stats || [];
         if (optStats.length > 0) {
             enriched.rx_power = optStats[0].rx_power;
@@ -204,10 +225,10 @@ router.get('/devices/:id', asyncHandler(async (req, res) => {
             enriched.pon_mode = optStats[0].pon_mode;
         }
 
-        enriched.wifi_configs = wifi.wifi || [];
-        enriched.wan_connections = wan.wan || [];
+        if (wifi.wifi && wifi.wifi.length > 0 && wifi.wifi.some(w => w.ssid && w.ssid !== '-')) enriched.wifi_configs = wifi.wifi;
+        if (wan.wan && wan.wan.length > 0 && wan.wan.some(w => w.username)) enriched.wan_connections = wan.wan;
         enriched.lan_config = lan.lan;
-        enriched.hosts = hosts.hosts || [];
+        if (hosts.hosts && hosts.hosts.length > 0) enriched.hosts = hosts.hosts;
 
         if (enriched.pppoe_username) {
             const svcQuery = await query(

@@ -92,12 +92,20 @@ func main() {
 			log.Printf("CWMP: upsert device error for %s: %v", data.SN, err)
 		}
 
-		// Auto-GPV on BOOT events (0=BOOTSTRAP, 1=BOOT) or on first PERIODIC
-		// for devices without any WAN data yet
+		// Auto-GPV on BOOT events (0=BOOTSTRAP, 1=BOOT) or PERIODIC
+		// for devices without WAN params in JSONB yet
 		shouldGPV := isBootEvent(data.Events)
 		if !shouldGPV {
 			hasWANData, _ := store.HasWANConnections(data.SN)
 			if !hasWANData {
+				shouldGPV = true
+			}
+		}
+		if !shouldGPV {
+			// Even if WAN connections exist in separate tables,
+			// GPV if params JSONB has no WAN data
+			params, _ := store.GetDeviceParams(data.SN)
+			if params != nil && len(params) == 0 {
 				shouldGPV = true
 			}
 		}
@@ -265,7 +273,7 @@ func isBootEvent(events []cwmp.Event) bool {
 
 func buildAutoGPVPaths(v *vendor.VendorConfig) []string {
 	paths := []string{
-		"DeviceInfo.",
+		"InternetGatewayDevice.DeviceInfo.",
 		"InternetGatewayDevice.WANDevice.1.",
 		"InternetGatewayDevice.LANDevice.1.",
 	}

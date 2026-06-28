@@ -199,12 +199,14 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, env *Enve
 
 	resp := BuildInformResponse(env.Header.ID)
 
-	// Check for pending urgent tasks — piggyback non-GPV commands on InformResponse
+	// Check for pending tasks — piggyback commands on InformResponse
 	pending := h.TaskQueue.Peek(data.SN)
-	if pending != nil && pending.Type != CmdGetParameterValues {
+	if pending != nil {
 		pending = h.TaskQueue.Dequeue(data.SN)
 		var cmdXML string
 		switch pending.Type {
+		case CmdGetParameterValues:
+			cmdXML = BuildGetParameterValues(pending.ID, pending.ParamNames)
 		case CmdSetParameterValues:
 			cmdXML = BuildSetParameterValues(pending.ID, pending.Params, "")
 		case CmdReboot:

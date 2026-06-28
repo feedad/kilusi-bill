@@ -274,42 +274,52 @@ func (s *Store) GetDeviceParams(sn string) (map[string]string, error) {
 
 func (s *Store) GetDeviceBySN(sn string) (*DeviceData, error) {
 	d := &DeviceData{}
+	var paramsRaw string
 	err := s.DB.QueryRow(`
 		SELECT id, sn, product_class, manufacturer, oui, hardware_version, software_version,
 			COALESCE(spec_version,''), status, last_inform, last_boot, conn_request_url, periodic_interval,
-			pppoe_username, COALESCE(ip_address::text,''), COALESCE(mac_address::text,''), created_at, updated_at
+			pppoe_username, COALESCE(ip_address::text,''), COALESCE(mac_address::text,''),
+			COALESCE(params::text,'{}'), created_at, updated_at
 		FROM acs_devices WHERE sn = $1`, sn).Scan(
 		&d.ID, &d.SN, &d.ProductClass, &d.Manufacturer, &d.OUI,
 		&d.HardwareVersion, &d.SoftwareVersion, &d.SpecVersion,
 		&d.Status, &d.LastInform, &d.LastBoot, &d.ConnRequestURL,
 		&d.PeriodicInterval, &d.PPPoEUsername, &d.IPAddress, &d.MACAddress,
-		&d.CreatedAt, &d.UpdatedAt)
+		&paramsRaw, &d.CreatedAt, &d.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
+	}
+	if paramsRaw != "" && paramsRaw != "{}" {
+		json.Unmarshal([]byte(paramsRaw), &d.Params)
 	}
 	return d, nil
 }
 
 func (s *Store) GetDeviceByID(id string) (*DeviceData, error) {
 	d := &DeviceData{}
+	var paramsRaw string
 	err := s.DB.QueryRow(`
 		SELECT id, sn, product_class, manufacturer, oui, hardware_version, software_version,
 			COALESCE(spec_version,''), status, last_inform, last_boot, conn_request_url, periodic_interval,
-			pppoe_username, COALESCE(ip_address::text,''), COALESCE(mac_address::text,''), created_at, updated_at
+			pppoe_username, COALESCE(ip_address::text,''), COALESCE(mac_address::text,''),
+			COALESCE(params::text,'{}'), created_at, updated_at
 		FROM acs_devices WHERE id = $1`, id).Scan(
 		&d.ID, &d.SN, &d.ProductClass, &d.Manufacturer, &d.OUI,
 		&d.HardwareVersion, &d.SoftwareVersion, &d.SpecVersion,
 		&d.Status, &d.LastInform, &d.LastBoot, &d.ConnRequestURL,
 		&d.PeriodicInterval, &d.PPPoEUsername, &d.IPAddress, &d.MACAddress,
-		&d.CreatedAt, &d.UpdatedAt)
+		&paramsRaw, &d.CreatedAt, &d.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
-	if err != nil {
+		if err != nil {
 		return nil, err
+	}
+	if paramsRaw != "" && paramsRaw != "{}" {
+		json.Unmarshal([]byte(paramsRaw), &d.Params)
 	}
 	return d, nil
 }
@@ -337,7 +347,7 @@ func (s *Store) UpsertDevice(d *DeviceData) error {
 }
 
 func (s *Store) ListDevices(search, vendorFilter, statusFilter string, limit, offset int) ([]DeviceData, int, error) {
-	query := "SELECT id, sn, product_class, manufacturer, oui, hardware_version, software_version, COALESCE(spec_version,''), status, last_inform, last_boot, conn_request_url, periodic_interval, pppoe_username, COALESCE(ip_address::text,''), COALESCE(mac_address::text,''), created_at, updated_at FROM acs_devices WHERE 1=1"
+	query := "SELECT id, sn, product_class, manufacturer, oui, hardware_version, software_version, COALESCE(spec_version,''), status, last_inform, last_boot, conn_request_url, periodic_interval, pppoe_username, COALESCE(ip_address::text,''), COALESCE(mac_address::text,''), COALESCE(params::text,'{}'), created_at, updated_at FROM acs_devices WHERE 1=1"
 	countQuery := "SELECT COUNT(*) FROM acs_devices WHERE 1=1"
 	args := []interface{}{}
 	argIdx := 1
@@ -381,12 +391,16 @@ func (s *Store) ListDevices(search, vendorFilter, statusFilter string, limit, of
 	var devices []DeviceData
 	for rows.Next() {
 		var d DeviceData
+		var paramsRaw string
 		if err := rows.Scan(&d.ID, &d.SN, &d.ProductClass, &d.Manufacturer, &d.OUI,
 			&d.HardwareVersion, &d.SoftwareVersion, &d.SpecVersion,
 			&d.Status, &d.LastInform, &d.LastBoot,
 			&d.ConnRequestURL, &d.PeriodicInterval, &d.PPPoEUsername,
-			&d.IPAddress, &d.MACAddress, &d.CreatedAt, &d.UpdatedAt); err != nil {
+			&d.IPAddress, &d.MACAddress, &paramsRaw, &d.CreatedAt, &d.UpdatedAt); err != nil {
 			return nil, 0, err
+		}
+		if paramsRaw != "" && paramsRaw != "{}" {
+			json.Unmarshal([]byte(paramsRaw), &d.Params)
 		}
 		devices = append(devices, d)
 	}
