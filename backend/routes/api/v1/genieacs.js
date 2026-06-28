@@ -56,9 +56,18 @@ function deviceToListItem(dev) {
     for (const [key, val] of Object.entries(params)) {
         const lastDot = key.lastIndexOf('.');
         const suffix = lastDot >= 0 ? key.slice(lastDot + 1) : key;
-        if (suffix === 'SSID' && !key.includes('SSIDHide') && !key.includes('SSIDIndex')) ssid = val;
+
+        // Pick SSID from WLANConfiguration.1 (primary WiFi), not the last one encountered
+        if (suffix === 'SSID' && !key.includes('SSIDHide') && !key.includes('SSIDIndex')) {
+            const wifiIdx = key.match(/WLANConfiguration\.(\d+)\./);
+            if (!wifiIdx || wifiIdx[1] === '1') ssid = val; // prefer idx 1, fallback to any
+        }
         if (suffix === 'KeyPassphrase') password = val;
-        if (suffix === 'TotalAssociations') userKonek = parseInt(val) || 0;
+        // TotalAssociations from WLANConfiguration.1 (primary)
+        if (suffix === 'TotalAssociations') {
+            const wifiIdx = key.match(/WLANConfiguration\.(\d+)\./);
+            if (!wifiIdx || wifiIdx[1] === '1') userKonek = parseInt(val) || 0;
+        }
         if (suffix === 'RXPower' || suffix === 'RxPower') rxPower = val;
     }
 
