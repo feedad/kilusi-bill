@@ -30,8 +30,8 @@ function getApiBaseUrl(): string {
   // Try to get API URL from environment variable first
   const apiURL = process.env.NEXT_PUBLIC_API_URL
 
-  // Fallback to production URL through Cloudflare
-  const fallbackURL = 'http://172.22.10.30:3001'
+  // Fallback to localhost (API is on same server as frontend or proxied via Nginx)
+  const fallbackURL = 'http://localhost:3001'
 
   const finalURL = apiURL && apiURL.trim() !== '' ? apiURL : fallbackURL
 

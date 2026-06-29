@@ -34,6 +34,8 @@ export interface ACSDevice {
   wan_connections?: ACSWANConnection[]
   // LAN config
   lan_config?: ACSLanConfig
+  // Raw params from GPV
+  params?: Record<string, string>
 }
 
 export interface ACSHost {

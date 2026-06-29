@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/authStore'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui'
 import { Button } from '@/components/ui'
@@ -34,7 +35,6 @@ import {
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { EditSSIDModal } from './components/EditSSIDModal'
-import { DeviceDetailModal } from './components/DeviceDetailModal'
 import { DeviceStats } from './components/DeviceStats'
 import { GenieACSDevice } from './types'
 import { adminApi } from '@/lib/api-clients'
@@ -48,6 +48,7 @@ interface DeviceStats {
 }
 
 export default function GenieACSPage() {
+  const router = useRouter()
   const { user } = useAuthStore()
   const [devices, setDevices] = useState<GenieACSDevice[]>([])
   const [stats, setStats] = useState<DeviceStats>({
@@ -64,9 +65,8 @@ export default function GenieACSPage() {
   const [filterStatus, setFilterStatus] = useState<'all' | 'online' | 'offline' | 'warning'>('all')
   const [refreshing, setRefreshing] = useState(false)
   const [autoRefresh, setAutoRefresh] = useState(true)
-  const [selectedDevice, setSelectedDevice] = useState<GenieACSDevice | null>(null)
-  const [showDetails, setShowDetails] = useState(false)
   const [showEditSSID, setShowEditSSID] = useState(false)
+  const [editingDevice, setEditingDevice] = useState<GenieACSDevice | null>(null)
   const [editForm, setEditForm] = useState({
     ssid: '',
     password: '',
@@ -208,7 +208,7 @@ export default function GenieACSPage() {
   }
 
   const handleEditSSID = (device: GenieACSDevice) => {
-    setSelectedDevice(device)
+    setEditingDevice(device)
     setEditForm({
       ssid: device.ssid || '',
       password: device.password || '',
@@ -218,12 +218,12 @@ export default function GenieACSPage() {
   }
 
   const handleSaveSSID = async () => {
-    if (!selectedDevice) return
+    if (!editingDevice) return
 
     try {
       setEditLoading(true)
       const response = await adminApi.post('/api/v1/genieacs/edit', {
-        id: selectedDevice._id || selectedDevice.id,
+        id: editingDevice._id || editingDevice.id,
         ssid: editForm.ssid || undefined,
         password: editForm.password || undefined
       })
@@ -461,10 +461,7 @@ export default function GenieACSPage() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => {
-                              setSelectedDevice(device)
-                              setShowDetails(true)
-                            }}
+                            onClick={() => router.push(`/admin/genieacs/${device.serialNumber || device.serial}`)}
                           >
                             <Eye className="h-4 w-4" />
                           </Button>
@@ -518,10 +515,7 @@ export default function GenieACSPage() {
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => {
-                                setSelectedDevice(device)
-                                setShowDetails(true)
-                              }}
+                              onClick={() => router.push(`/admin/genieacs/${device.serialNumber || device.serial}`)}
                               className="h-8 px-3"
                             >
                               <Eye className="h-3 w-3 mr-1" />
@@ -620,10 +614,7 @@ export default function GenieACSPage() {
                                   <Button
                                     variant="outline"
                                     size="sm"
-                                    onClick={() => {
-                                      setSelectedDevice(device)
-                                      setShowDetails(true)
-                                    }}
+                                    onClick={() => router.push(`/admin/genieacs/${device.serialNumber || device.serial}`)}
                                     className="h-6 px-2"
                                     title="Lihat Detail"
                                   >
@@ -692,22 +683,10 @@ export default function GenieACSPage() {
         </CardContent>
       </Card>
 
-      {/* Device Details Modal */}
-      {showDetails && selectedDevice && (
-        <DeviceDetailModal
-          device={selectedDevice}
-          isOpen={showDetails}
-          onClose={() => setShowDetails(false)}
-          onAction={(id, action) => handleDeviceAction(id, action)}
-          onEditSSID={(device) => handleEditSSID(device)}
-          actionLoading={actionLoading}
-        />
-      )}
-
       {/* Edit SSID Modal */}
-      {showEditSSID && selectedDevice && (
+      {showEditSSID && editingDevice && (
         <EditSSIDModal
-          device={selectedDevice}
+          device={editingDevice}
           isOpen={showEditSSID}
           onClose={() => setShowEditSSID(false)}
           onSave={handleSaveSSID}
