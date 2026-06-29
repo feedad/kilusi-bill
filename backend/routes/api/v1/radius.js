@@ -13,6 +13,20 @@ function reloadFreeRadiusClients() {
     });
 }
 
+// Regenerate CoA proxy config on FreeRADIUS server and restart
+function regenerateCoaConfig() {
+    const { exec } = require('child_process');
+    const cmd = "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 feedad@172.22.10.101 'sudo /usr/local/bin/gen-coa-config.sh && sudo systemctl restart freeradius'";
+    exec(cmd, (err, stdout, stderr) => {
+        if (err) {
+            logger.error('FreeRADIUS CoA config regeneration failed:', stderr || err.message);
+        } else {
+            logger.info('FreeRADIUS CoA config regenerated and restarted successfully');
+            if (stdout) logger.debug('CoA regen output:', stdout.trim());
+        }
+    });
+}
+
 // Ensure SNMP Monitor service is running (side-effect import)
 require('../../../services/snmp-monitor-service');
 
@@ -34,6 +48,7 @@ router.post('/nas', asyncHandler(async (req, res) => {
     try {
         const data = await radiusService.createNas(req.body);
         reloadFreeRadiusClients();
+        regenerateCoaConfig();
         res.status(201).json({ success: true, message: 'NAS created successfully', data });
     } catch (e) {
         if (e.code === 'CONFLICT') return res.status(409).json({ success: false, message: e.message });
@@ -46,6 +61,7 @@ router.put('/nas/:id', asyncHandler(async (req, res) => {
     try {
         const data = await radiusService.updateNas(req.params.id, req.body);
         reloadFreeRadiusClients();
+        regenerateCoaConfig();
         res.json({ success: true, message: 'NAS updated successfully', data });
     } catch (e) {
         if (e.code === 'NOT_FOUND') return res.sendNotFound('NAS Server');
@@ -59,7 +75,22 @@ router.delete('/nas/:id', asyncHandler(async (req, res) => {
     const success = await radiusService.deleteNas(req.params.id);
     if (!success) return res.sendNotFound('NAS Server');
     reloadFreeRadiusClients();
+    regenerateCoaConfig();
     res.json({ success: true, message: 'NAS deleted successfully' });
+}));
+
+// POST /api/v1/radius/nas/regenerate-coa - Manual trigger for CoA config regeneration
+router.post('/nas/regenerate-coa', asyncHandler(async (req, res) => {
+    const { exec } = require('child_process');
+    const cmd = "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 feedad@172.22.10.101 'sudo /usr/local/bin/gen-coa-config.sh && sudo systemctl restart freeradius'";
+    exec(cmd, (err, stdout, stderr) => {
+        if (err) {
+            logger.error('CoA config regeneration failed:', stderr || err.message);
+            return res.status(500).json({ success: false, message: 'Gagal regenerate: ' + (stderr || err.message) });
+        }
+        logger.info('CoA config regenerated manually');
+        res.json({ success: true, message: 'CoA config regenerated and FreeRADIUS restarted', output: stdout.trim() });
+    });
 }));
 
 // POST /api/v1/radius/nas/bulk/test (Bulk test)
