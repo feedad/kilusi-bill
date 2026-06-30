@@ -164,6 +164,15 @@ class InvoiceScheduler {
             return { created: 0, skipped: 0 };
         }
 
+        // Wait 5s to let cron finish first (avoid race condition with concurrent generateDailyInvoices* calls)
+        await new Promise(r => setTimeout(r, 5000));
+
+        const recheck = await query('SELECT COUNT(*) as cnt FROM invoices WHERE created_at >= $1', [startOfDay]);
+        if (parseInt(recheck.rows[0].cnt) > 0) {
+            logger.info('[CatchUp] Cron sudah generate invoice selama delay, skip');
+            return { created: 0, skipped: 0 };
+        }
+
         logger.info('[CatchUp] Invoice belum ada — menjalankan catch-up...');
         const r1 = await this.generateDailyInvoicesForFixedAndProfile();
         const r2 = await this.generateDailyInvoicesByBillingDay();
@@ -351,21 +360,7 @@ class InvoiceScheduler {
                         continue;
                     }
 
-                    // Check if invoice already exists for this service this month
                     const currentDate = new Date();
-                    const startOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-                    const endOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
-
-                    const existingInvoice = await getOne(`
-                        SELECT id FROM invoices
-                        WHERE service_number = $1
-                        AND created_at >= $2 AND created_at <= $3
-                    `, [customer.service_number, startOfMonth, endOfMonth]);
-
-                    if (existingInvoice) {
-                        logger.info(`Invoice already exists for service ${customer.service_number} this month`);
-                        continue;
-                    }
 
                     // Set due date based on customer's billing_day (1-28), capped to month's last day
                     const billingDay = (() => {
@@ -375,7 +370,18 @@ class InvoiceScheduler {
                     })();
                     const lastDayOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
                     const targetDay = Math.min(billingDay, lastDayOfMonth);
-                    const dueDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), targetDay);
+                    const dueDate = formatDateLocal(new Date(currentDate.getFullYear(), currentDate.getMonth(), targetDay));
+
+                    // Check if invoice already exists for this service with same due_date
+                    const existingInvoice = await getOne(`
+                        SELECT id FROM invoices
+                        WHERE service_number = $1 AND due_date = $2
+                    `, [customer.service_number, dueDate]);
+
+                    if (existingInvoice) {
+                        logger.info(`Invoice already exists for service ${customer.service_number} due ${dueDate} (monthly generator)`);
+                        continue;
+                    }
 
                     // Get tax settings from customer_default_settings
                     const taxSetting = await query(`
@@ -414,7 +420,7 @@ class InvoiceScheduler {
                         amount: amountWithTax, // Use price with tax
                         base_amount: basePrice, // Store base price for reference
                         tax_rate: taxRate, // Store tax rate for reference
-                        due_date: formatDateLocal(dueDate),
+                        due_date: dueDate,
                         notes: `Tagihan bulanan ${currentDate.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}`
                     };
 
@@ -457,10 +463,6 @@ class InvoiceScheduler {
             const currentYear = today.getFullYear();
             const currentMonth = today.getMonth();
 
-            // Compute start and end of current month for duplicate checks
-            const startOfMonth = new Date(currentYear, currentMonth, 1);
-            const endOfMonth = new Date(currentYear, currentMonth + 1, 0);
-
             // For each active customer whose billing_day == today (capped 1-28)
             for (const customer of activeCustomers) {
                 try {
@@ -482,20 +484,19 @@ class InvoiceScheduler {
                         continue;
                     }
 
-                    // Check if invoice already exists for this service this month
-                    const existingInvoice = await getOne(`
-                        SELECT id FROM invoices
-                        WHERE service_number = $1
-                        AND created_at >= $2 AND created_at <= $3
-                    `, [customer.service_number, startOfMonth, endOfMonth]);
-
-                    if (existingInvoice) {
-                        logger.info(`Invoice already exists for service ${customer.service_number} this month (daily generator)`);
-                        continue;
-                    }
-
                     // Set due date to today's date (which equals billing_day)
                     const dueDate = formatDateLocal(new Date(currentYear, currentMonth, normalizedBillingDay));
+
+                    // Check if invoice already exists for this service with same due_date
+                    const existingInvoice = await getOne(`
+                        SELECT id FROM invoices
+                        WHERE service_number = $1 AND due_date = $2
+                    `, [customer.service_number, dueDate]);
+
+                    if (existingInvoice) {
+                        logger.info(`Invoice already exists for service ${customer.service_number} due ${dueDate} (daily generator)`);
+                        continue;
+                    }
 
                     // Get tax settings from customer_default_settings
                     const taxSetting = await query(`
@@ -590,11 +591,6 @@ class InvoiceScheduler {
 
             logger.info(`Checking for invoices to generate (advance_days: ${advanceDays})`);
 
-            const currentYear = today.getFullYear();
-            const currentMonth = today.getMonth();
-            const startOfMonth = new Date(currentYear, currentMonth, 1);
-            const endOfMonth = new Date(currentYear, currentMonth + 1, 0, 23, 59, 59);
-
             // Get all active services with FIXED (TETAP), PROFILE cycle whose isolir date matches target
             const servicesResult = await query(`
                 SELECT s.*, c.name as customer_name, c.phone as customer_phone,
@@ -616,15 +612,14 @@ class InvoiceScheduler {
 
             for (const service of eligibleServices) {
                 try {
-                    // Check if invoice already exists for this service this month
+                    // Check if invoice already exists for this service with same due_date
                     const existingInvoice = await getOne(`
                         SELECT id FROM invoices
-                        WHERE service_number = $1
-                        AND created_at >= $2 AND created_at <= $3
-                    `, [service.service_number, startOfMonth, endOfMonth]);
+                        WHERE service_number = $1 AND due_date = $2
+                    `, [service.service_number, service.isolir_date]);
 
                     if (existingInvoice) {
-                        logger.info(`Invoice already exists for service ${service.service_number} this month`);
+                        logger.info(`Invoice already exists for service ${service.service_number} due ${service.isolir_date}`);
                         skipped++;
                         continue;
                     }
