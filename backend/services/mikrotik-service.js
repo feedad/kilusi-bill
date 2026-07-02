@@ -433,14 +433,15 @@ class MikrotikService {
                 return { success: false, message: 'NAS not found' };
             }
 
-            // 3. Send RADIUS CoA Disconnect Request (use coaport from nas table, default 3799)
+            // 3. Send RADIUS CoA Disconnect Request via FreeRADIUS proxy (per-NAS port)
+            const coaPort = nas.coa_proxy_port || (20000 + nas.id);
             const result = await radiusDisconnect.disconnectUser({
                 username,
                 nasIp: status.nas_ip,
                 nasSecret: nas.secret,
                 sessionId: status.session_id || status.acctsessionid,
                 framedIp: status.framed_ip,
-                coaPort: nas.coaport || 3799
+                coaPort: coaPort
             });
 
             return result;

@@ -858,7 +858,7 @@ router.post('/coa', async (req, res) => {
 
         // Get NAS secret from nas table
         const nasQuery = `
-            SELECT secret, coaport, nasname
+            SELECT id, secret, coaport, coa_proxy_port, nasname
             FROM nas
             WHERE nasname = $1 OR shortname = $1
             LIMIT 1
@@ -874,7 +874,7 @@ router.post('/coa', async (req, res) => {
         }
 
         const nas = nasResult.rows[0];
-        const coaPort = nas.coaport || 3799;
+        const coaPort = nas.coa_proxy_port || (20000 + nas.id);
 
         logger.info(`📡 Sending CoA to NAS ${session.nas_ip}:${coaPort} for user ${targetUsername}`);
 
