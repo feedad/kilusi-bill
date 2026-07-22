@@ -1210,11 +1210,14 @@ function startServer(portToUse) {
         }
 
         server.listen(port, host, () => {
+            const os = require('os');
+            const nets = os.networkInterfaces();
+            const lanIp = Object.values(nets).flat().find(i => i.family === 'IPv4' && !i.internal)?.address || 'localhost';
             logger.info(`✅ Server berhasil berjalan pada port ${port}`);
-            logger.info(`🌐 Web Portal tersedia di: http://${host === '0.0.0.0' ? '172.22.10.29' : host}:${port}`);
+            logger.info(`🌐 Web Portal tersedia di: http://${host === '0.0.0.0' ? lanIp : host}:${port}`);
             logger.info(`🌐 Local access: http://localhost:${port}`);
-            logger.info(`🌐 Network access: http://172.22.10.29:${port}`);
-            logger.info(`🌐 WebSocket available: ws://${host === '0.0.0.0' ? '172.22.10.29' : host}:${port}`);
+            logger.info(`🌐 Network access: http://${lanIp}:${port}`);
+            logger.info(`🌐 WebSocket available: ws://${host === '0.0.0.0' ? lanIp : host}:${port}`);
             logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
             // Update global.appSettings.port dengan port yang berhasil digunakan
             global.appSettings.port = port.toString();
