@@ -1,4 +1,4 @@
-const { getSetting, setSetting } = require("./settingsManager");
+const { getSetting, updateSetting } = require("./settingsManager");
 const billingManager = require("./billing");
 const logger = require("./logger");
 const fs = require("fs");
@@ -861,7 +861,7 @@ Terima kasih telah menggunakan layanan kami.
         const d = new Date();
         const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
         const currentCount = getSetting(`whatsapp_daily_count.${today}`, 0);
-        setSetting(`whatsapp_daily_count.${today}`, currentCount + 1);
+        updateSetting(`whatsapp_daily_count.${today}`, currentCount + 1);
     }
 
     // Get current WhatsApp provider
@@ -1414,15 +1414,17 @@ Terima kasih telah menggunakan layanan kami.
     }
 
     // Send notification with provider routing
-    //   off:      skip with log
-    //   omnichat: Meta template (primary), no fallback on failure
-    //   baileys:  local format only
-    //   dual:     Omnichat Meta template → Baileys local fallback
+    //   global:     options.provider determines primary, second = failover
+    //   off:        skip with log
+    //   omnichat:   Omnichat only (no failover)
+    //   baileys:    Baileys only (no failover)
+    //   dual + options.provider='baileys':  Baileys primary, Omnichat failover
+    //   dual + lainnya:                     Omnichat primary, Baileys failover
     async sendNotification(phoneNumber, message, options = {}) {
-        const provider = this.getProvider();
+        const globalProvider = this.getProvider();
 
         // OFF: always log and skip
-        if (provider === "off") {
+        if (globalProvider === "off") {
             logger.info(
                 `[WhatsApp] Notifications DISABLED (off). Skipping ${phoneNumber}`,
             );
@@ -1452,117 +1454,62 @@ Terima kasih telah menggunakan layanan kami.
             };
         }
 
-        const fallbackEnabled = this.isBaileysFallbackEnabled();
+        // Build provider priority list
+        let providers = [];
+        if (globalProvider === "omnichat") {
+            providers = ["omnichat"];
+        } else if (globalProvider === "baileys") {
+            providers = ["baileys"];
+        } else if (globalProvider === "dual") {
+            if (options.provider === "baileys") {
+                providers = ["baileys", "omnichat"];
+            } else {
+                providers = ["omnichat", "baileys"];
+            }
+        } else {
+            return { success: false, error: `Unknown global provider: ${globalProvider}`, provider: globalProvider };
+        }
+
+        const baileysReady = !!this.sock;
 
         logger.info(
-            `[Route] Sending to ${phoneNumber} | provider: ${provider} | type: ${options.notification_type || "-"}`,
+            `[Route] Sending to ${phoneNumber} | global: ${globalProvider} | options.provider: ${options.provider || "-"} | type: ${options.notification_type || "-"}`,
         );
 
-        // OMNICHAT ONLY: try Meta template, fail hard if not approved
-        if (provider === "omnichat") {
-            try {
-                const result = await this.sendNotificationOmnichat(
-                    phoneNumber,
-                    message,
-                    options,
-                );
-                return result;
-            } catch (omnichatError) {
-                logger.error(
-                    `[Omnichat-Only] Failed to send to ${phoneNumber}: ${omnichatError.message}`,
-                );
-                await messageLogger
-                    .logFailedMessage(phoneNumber, omnichatError.message, {
-                        customer_id: options.customer_id,
-                        customer_name: options.customer_name,
-                        notification_type:
-                            options.notification_type || "general",
-                        message_content: message,
-                        sent_via: "api",
-                    })
-                    .catch(() => {});
-                return {
-                    success: false,
-                    error: omnichatError.message,
-                    provider: "omnichat",
-                };
+        for (const p of providers) {
+            if (p === "baileys" && !baileysReady) {
+                logger.warn(`[Route] Baileys not available, skipping...`);
+                continue;
             }
-        }
 
-        // DUAL: Omnichat Meta template primary, Baileys local fallback
-        if (provider === "dual") {
             try {
-                const result = await this.sendNotificationOmnichat(
-                    phoneNumber,
-                    message,
-                    options,
-                );
-                logger.info(`[Dual] Omnichat success for ${phoneNumber}`);
-                return result;
-            } catch (omnichatError) {
-                logger.warn(
-                    `[Dual] Omnichat failed for ${phoneNumber}: ${omnichatError.message}. Trying Baileys...`,
-                );
-                await messageLogger
-                    .logFailedMessage(phoneNumber, omnichatError.message, {
-                        customer_id: options.customer_id,
-                        customer_name: options.customer_name,
-                        notification_type:
-                            options.notification_type || "general",
-                        message_content: message,
-                        sent_via: "api",
-                    })
-                    .catch(() => {});
-                if (fallbackEnabled && this.sock) {
-                    try {
-                        const baileysResult =
-                            await this.sendNotificationBaileys(
-                                phoneNumber,
-                                message,
-                                options,
-                            );
-                        logger.info(
-                            `[Dual] Baileys fallback success for ${phoneNumber}`,
-                        );
-                        return {
-                            ...baileysResult,
-                            fallback: true,
-                            originalError: omnichatError.message,
-                        };
-                    } catch (baileysError) {
-                        logger.error(
-                            `[Dual] Baileys also failed for ${phoneNumber}: ${baileysError.message}`,
-                        );
-                        return {
-                            success: false,
-                            error: `Both providers failed: Omnichat (${omnichatError.message}), Baileys (${baileysError.message})`,
-                            provider: "none",
-                        };
-                    }
+                let result;
+                if (p === "omnichat") {
+                    result = await this.sendNotificationOmnichat(phoneNumber, message, options);
+                } else {
+                    result = await this.sendNotificationBaileys(phoneNumber, message, options);
                 }
-                return {
-                    success: false,
-                    error: omnichatError.message,
-                    provider: "omnichat",
-                    fallbackAttempted: false,
-                };
+                if (result && result.success) {
+                    if (providers.length > 1 && p === providers[1]) {
+                        logger.info(`[Route] ${p} fallback success for ${phoneNumber}`);
+                        return { ...result, fallback: true, originalError: null };
+                    }
+                    return result;
+                }
+                logger.warn(`[Route] ${p} returned failure for ${phoneNumber}: ${result?.error || "unknown"}`);
+            } catch (err) {
+                logger.warn(`[Route] ${p} error for ${phoneNumber}: ${err.message}`);
+                await messageLogger.logFailedMessage(phoneNumber, err.message, {
+                    customer_id: options.customer_id,
+                    customer_name: options.customer_name,
+                    notification_type: options.notification_type || "general",
+                    message_content: message,
+                    sent_via: p,
+                }).catch(() => {});
             }
         }
 
-        // BAILEYS ONLY: local format
-        if (provider === "baileys") {
-            return await this.sendNotificationBaileys(
-                phoneNumber,
-                message,
-                options,
-            );
-        }
-
-        return {
-            success: false,
-            error: `Unknown provider: ${provider}`,
-            provider,
-        };
+        return { success: false, error: "All providers failed", provider: "none" };
     }
 
     // Legacy notification method (deprecated - use sendNotification instead)
@@ -1736,10 +1683,11 @@ Terima kasih telah menggunakan layanan kami.
                         );
                     }
 
-                    // Add delay between messages within batch
+                    // Add delay between messages within batch (skip for Baileys, it has its own delay)
                     if (
                         j < batch.length - 1 &&
-                        settings.delayBetweenMessages > 0
+                        settings.delayBetweenMessages > 0 &&
+                        !(notification.options && notification.options.provider === "baileys")
                     ) {
                         await this.delay(settings.delayBetweenMessages * 1000);
                     }
@@ -2173,50 +2121,45 @@ Terima kasih telah menggunakan layanan kami.
             );
 
             const template = await this.getTemplateFromDatabase(
-                "maintenance_notification",
+                "broadcast_notification",
             );
             const companyInfo = await this.getCompanyInfo();
+            const contentText = disruptionData.content ||
+                `Area: ${disruptionData.area || "Seluruh Area"}. Estimasi: ${disruptionData.estimatedTime || "Sedang dalam penanganan"}`;
             const customData = {
-                type: disruptionData.type || "Gangguan Jaringan",
                 title: disruptionData.title || "Gangguan Jaringan",
-                content:
-                    disruptionData.content ||
-                    `Area: ${disruptionData.area || "Seluruh Area"}. Estimasi: ${disruptionData.estimatedTime || "Sedang dalam penanganan"}`,
+                content: contentText,
+                info_tambahan: disruptionData.info_tambahan || "-",
+                supportPhone: getSetting("support_phone", "+6281234567890"),
+                customerPortal: companyInfo.portal_url || "-",
+                companyName: companyInfo.name,
             };
-            const templateContent = template
-                ? template.content
-                : this.templates.service_disruption.template;
 
-            let message;
+            let message, messageData;
             if (template) {
                 const context = { company: companyInfo, customData };
-                const messageData = this.resolveMessageData(
-                    templateContent,
+                messageData = this.resolveMessageData(
+                    template.content,
                     context,
                 );
                 message = this.replaceTemplateVariables(
-                    templateContent,
+                    template.content,
                     messageData,
                 );
             } else {
-                message = this.replaceTemplateVariables(templateContent, {
-                    disruption_type: disruptionData.type || "Gangguan Jaringan",
-                    affected_area: disruptionData.area || "Seluruh Area",
-                    estimated_resolution:
-                        disruptionData.estimatedTime ||
-                        "Sedang dalam penanganan",
-                    support_phone: getSetting(
-                        "support_phone",
-                        "+6281234567890",
-                    ),
-                });
+                message = `*${customData.title}*\n\n${customData.content}\n\nInfo: ${customData.info_tambahan}\nHubungi: ${customData.supportPhone}\n\n${customData.companyName}`;
             }
 
             // Prepare notifications for bulk sending
+            const notifOptions = {
+                notification_type: "service_disruption",
+                provider: "baileys",
+                ...(messageData ? { meta_data: messageData } : {}),
+            };
             const notifications = activeCustomers.map((customer) => ({
                 phoneNumber: customer.phone,
                 message: message,
-                options: {},
+                options: notifOptions,
             }));
 
             // Use bulk notifications with rate limiting
@@ -2281,10 +2224,10 @@ Terima kasih telah menggunakan layanan kami.
                 ? template.content
                 : this.templates.service_announcement.template;
 
-            let message;
+            let message, messageData;
             if (template) {
                 const context = { company: companyInfo, customData };
-                const messageData = this.resolveMessageData(
+                messageData = this.resolveMessageData(
                     templateContent,
                     context,
                 );
@@ -2301,10 +2244,15 @@ Terima kasih telah menggunakan layanan kami.
             }
 
             // Prepare notifications for bulk sending
+            const notifOptions = {
+                notification_type: "broadcast_notification",
+                provider: "baileys",
+                ...(messageData ? { meta_data: messageData } : {}),
+            };
             const notifications = activeCustomers.map((customer) => ({
                 phoneNumber: customer.phone,
                 message: message,
-                options: {},
+                options: notifOptions,
             }));
 
             // Use bulk notifications with rate limiting
@@ -3407,6 +3355,19 @@ Terima kasih.
         }
     }
 
+    async getTechnicianName(technicianId) {
+        try {
+            const result = await query(
+                `SELECT name FROM users WHERE id = $1 AND role = 'technician'`,
+                [technicianId],
+            );
+            return result.rows.length > 0 ? result.rows[0].name : null;
+        } catch (error) {
+            logger.error("Error getting technician name:", error);
+            return null;
+        }
+    }
+
     // Send notification to all admins
     async sendToAdmins(message, options = {}) {
         try {
@@ -3447,30 +3408,29 @@ Terima kasih.
     async notifyAdminsNewTicket(ticketData) {
         try {
             const companyInfo = await this.getCompanyInfo();
-            const priorityEmoji =
-                {
-                    low: "🟢",
-                    medium: "🟡",
-                    high: "🟠",
-                    urgent: "🔴",
-                }[ticketData.priority] || "⚪";
+            const template = await this.getTemplateFromDatabase("ticket_created");
 
-            const message = `🎫 *TIKET BARU*
+            let message, messageData;
+            if (template) {
+                const context = {
+                    company: companyInfo,
+                    customData: {
+                        ticketNumber: ticketData.ticketNumber,
+                        subject: ticketData.subject,
+                        category: ticketData.category,
+                    },
+                };
+                messageData = this.resolveMessageData(template.content, context);
+                message = this.replaceTemplateVariables(template.content, messageData);
+            } else {
+                message = `🎫 *TIKET BARU*\n\n📝 *Nomor:* ${ticketData.ticketNumber}\n👤 *Customer:* ${ticketData.customerName}\n📋 *Subjek:* ${ticketData.subject}\n📂 *Kategori:* ${ticketData.category}\n\n${companyInfo.name}`;
+            }
 
-${priorityEmoji} *Prioritas:* ${ticketData.priority.toUpperCase()}
-
-📝 *Nomor:* ${ticketData.ticketNumber}
-👤 *Customer:* ${ticketData.customerName}
-📱 *HP:* ${ticketData.customerPhone}
-📋 *Subjek:* ${ticketData.subject}
-📂 *Kategori:* ${ticketData.category}
-
-${ticketData.description}
-
-*${companyInfo.name}*
-Silakan login untuk menindaklanjuti.`;
-
-            return await this.sendToAdmins(message);
+            return await this.sendToAdmins(message, {
+                notification_type: "ticket_created",
+                provider: "baileys",
+                ...(messageData ? { meta_data: messageData } : {}),
+            });
         } catch (error) {
             logger.error("Error notifying admins about new ticket:", error);
             return { success: false, error: error.message };
@@ -3481,23 +3441,32 @@ Silakan login untuk menindaklanjuti.`;
     async notifyAdminsNewRegistration(registrationData) {
         try {
             const companyInfo = await this.getCompanyInfo();
-            const packageInfo = registrationData.packageName
-                ? `\n📦 *Paket:* ${registrationData.packageName}`
-                : "";
+            const template = await this.getTemplateFromDatabase("admin_new_registration");
 
-            const message = `📝 *REGISTRASI BARU*
+            let message, messageData;
+            if (template) {
+                const context = {
+                    company: companyInfo,
+                    customData: {
+                        customerName: registrationData.customerName,
+                        customerPhone: registrationData.customerPhone,
+                        customerAddress: registrationData.address || "-",
+                        packageName: registrationData.packageName || "-",
+                        registrationDate: registrationData.registrationDate,
+                        notes: registrationData.customerEmail ? `Email: ${registrationData.customerEmail}` : "-",
+                    },
+                };
+                messageData = this.resolveMessageData(template.content, context);
+                message = this.replaceTemplateVariables(template.content, messageData);
+            } else {
+                message = `📝 *REGISTRASI BARU*\n\n👤 *Nama:* ${registrationData.customerName}\n📱 *HP:* ${registrationData.customerPhone}\n📍 *Alamat:* ${registrationData.address || "-"}\n📅 *Tanggal:* ${registrationData.registrationDate}\n\n${companyInfo.name}`;
+            }
 
-👤 *Nama:* ${registrationData.customerName}
-📱 *HP:* ${registrationData.customerPhone}
-📧 *Email:* ${registrationData.customerEmail || "-"}
-📍 *Alamat:* ${registrationData.address || "-"}${packageInfo}
-
-📅 *Tanggal:* ${registrationData.registrationDate}
-
-*${companyInfo.name}*
-Silakan login untuk memproses registrasi.`;
-
-            return await this.sendToAdmins(message);
+            return await this.sendToAdmins(message, {
+                notification_type: "admin_new_registration",
+                provider: "baileys",
+                ...(messageData ? { meta_data: messageData } : {}),
+            });
         } catch (error) {
             logger.error(
                 "Error notifying admins about new registration:",
@@ -3519,27 +3488,42 @@ Silakan login untuk memproses registrasi.`;
             }
 
             const companyInfo = await this.getCompanyInfo();
-            const scheduleInfo = taskData.scheduleDate
-                ? `\n📅 *Jadwal:* ${taskData.scheduleDate}` +
-                  (taskData.scheduleTime
-                      ? `\n⏰ *Jam:* ${taskData.scheduleTime}`
-                      : "")
-                : "";
+            const technicianName = await this.getTechnicianName(technicianId);
+            const template = await this.getTemplateFromDatabase("technician_new_installation");
 
-            const message = `🔧 *TUGAS INSTALASI BARU*
+            let message, messageData;
+            if (template) {
+                const context = {
+                    company: companyInfo,
+                    customData: {
+                        technicianName: technicianName || "Teknisi",
+                        customerName: taskData.customerName,
+                        customerPhone: taskData.customerPhone,
+                        customerAddress: taskData.address || "-",
+                        packageName: taskData.packageName,
+                        packageSpeed: taskData.packageSpeed,
+                        installationDate: taskData.scheduleDate || "-",
+                        installationTime: taskData.scheduleTime || "-",
+                        notes: `ID: ${taskData.installationId}`,
+                    },
+                };
+                messageData = this.resolveMessageData(template.content, context);
+                message = this.replaceTemplateVariables(template.content, messageData);
+            } else {
+                const scheduleInfo = taskData.scheduleDate
+                    ? `\n📅 *Jadwal:* ${taskData.scheduleDate}` +
+                      (taskData.scheduleTime
+                          ? `\n⏰ *Jam:* ${taskData.scheduleTime}`
+                          : "")
+                    : "";
+                message = `🔧 *TUGAS INSTALASI BARU*\n\n👤 *Customer:* ${taskData.customerName}\n📱 *HP:* ${taskData.customerPhone}\n📍 *Alamat:* ${taskData.address || "-"}${scheduleInfo}\n\n📦 *Paket:* ${taskData.packageName} (${taskData.packageSpeed})\n\n*${companyInfo.name}*`;
+            }
 
-👤 *Customer:* ${taskData.customerName}
-📱 *HP:* ${taskData.customerPhone}
-📍 *Alamat:* ${taskData.address || "-"}${scheduleInfo}
-
-📦 *Paket:* ${taskData.packageName} (${taskData.packageSpeed})
-
-🎫 *ID Instalasi:* ${taskData.installationId}
-
-*${companyInfo.name}*
-Silakan hubungi customer sebelum meluncur.`;
-
-            const result = await this.sendNotification(phone, message);
+            const result = await this.sendNotification(phone, message, {
+                notification_type: "technician_new_installation",
+                provider: "baileys",
+                ...(messageData ? { meta_data: messageData } : {}),
+            });
             if (result.success) {
                 logger.info(
                     `📱 Technician notified about new task: ${taskData.installationId}`,
@@ -3563,41 +3547,35 @@ Silakan hubungi customer sebelum meluncur.`;
                 return { success: false, error: "Technician phone not found" };
             }
 
-            const categoryEmoji =
-                {
-                    technical: "🔧",
-                    billing: "💰",
-                    general: "📋",
-                    complaint: "⚠️",
-                }[ticketData.category] || "📋";
+            const companyInfo = await this.getCompanyInfo();
+            const technicianName = await this.getTechnicianName(technicianId);
+            const template = await this.getTemplateFromDatabase("ticket_assigned");
 
-            const priorityEmoji =
-                {
-                    low: "🟢",
-                    medium: "🟡",
-                    high: "🟠",
-                    urgent: "🔴",
-                }[ticketData.priority] || "⚪";
+            let message, messageData;
+            if (template) {
+                const context = {
+                    company: companyInfo,
+                    customData: {
+                        technicianName: technicianName || "Teknisi",
+                        ticketNumber: ticketData.ticketNumber,
+                        customerName: ticketData.customerName,
+                        customerPhone: ticketData.customerPhone,
+                        customerAddress: ticketData.customerAddress || "-",
+                        category: ticketData.category || "General",
+                        description: ticketData.description || "-",
+                    },
+                };
+                messageData = this.resolveMessageData(template.content, context);
+                message = this.replaceTemplateVariables(template.content, messageData);
+            } else {
+                message = `🎫 *TICKET DITUGASKAN*\n\n👤 *Customer:* ${ticketData.customerName}\n📱 *HP:* ${ticketData.customerPhone}\n📋 *Subjek:* ${ticketData.subject}\n\n🎫 *ID Tiket:* ${ticketData.ticketNumber}\n\nSilakan login untuk menindaklanjuti.`;
+            }
 
-            const message = `🎫 *TICKET DITUGASKAN*
-
-${priorityEmoji} *Prioritas:* ${ticketData.priority?.toUpperCase() || "NORMAL"}
-
-${categoryEmoji} *Kategori:* ${ticketData.category?.toUpperCase() || "GENERAL"}
-
-👤 *Customer:* ${ticketData.customerName}
-📱 *HP:* ${ticketData.customerPhone}
-📋 *Subjek:* ${ticketData.subject}
-
-${ticketData.description}
-
-${ticketData.takenOverReason ? `📝 *Catatan Admin:* ${ticketData.takenOverReason}` : ""}
-
-🎫 *ID Tiket:* ${ticketData.ticketNumber}
-
-Silakan login untuk menindaklanjuti.`;
-
-            const result = await this.sendNotification(phone, message);
+            const result = await this.sendNotification(phone, message, {
+                notification_type: "ticket_assigned",
+                provider: "baileys",
+                ...(messageData ? { meta_data: messageData } : {}),
+            });
             if (result.success) {
                 logger.info(
                     `📱 Technician notified about ticket ${ticketData.ticketNumber}`,
