@@ -599,6 +599,17 @@ Terima kasih telah menggunakan layanan kami.
                 return this.formatCurrency(ctx.package.price);
             return "";
         },
+        isolirDate: (ctx) => {
+            if (ctx.customData?.isolirDate || ctx.customData?.isolir_date)
+                return this.formatDate(
+                    ctx.customData.isolirDate || ctx.customData.isolir_date,
+                );
+            if (ctx.service?.isolir_date)
+                return this.formatDate(ctx.service.isolir_date);
+            if (ctx.customer?.isolir_date)
+                return this.formatDate(ctx.customer.isolir_date);
+            return "";
+        },
         dueDate: (ctx) => {
             if (ctx.customData?.dueDate || ctx.customData?.due_date)
                 return this.formatDate(
