@@ -129,7 +129,13 @@ class BillingCycleService {
      */
     async calculateIsolirDate(customerId, activeDate, profilePeriod = null, siklus = null) {
         try {
-            const billingCycle = siklus || await this.getCustomerBillingCycle(customerId);
+            const rawCycle = siklus || await this.getCustomerBillingCycle(customerId);
+            const cycleMap = {
+                'TETAP': 'fixed', 'BULANAN': 'monthly', 'PROFILE': 'profile',
+                'tetap': 'fixed', 'bulan': 'monthly', 'profile': 'profile',
+                'monthly': 'monthly', 'fixed': 'fixed'
+            };
+            const billingCycle = cycleMap[rawCycle] || rawCycle;
             const settings = await this.getBillingSettings();
 
             switch (billingCycle) {
@@ -446,7 +452,9 @@ class BillingCycleService {
                     s.id as service_id,
                     s.siklus,
                     s.billing_type,
-                    s.status as service_status
+                    s.status as service_status,
+                    s.active_date as prev_active_date,
+                    s.isolir_date as prev_isolir_date
                 FROM invoices i
                 LEFT JOIN services s ON s.service_number = i.service_number
                 LEFT JOIN LATERAL (
@@ -487,6 +495,19 @@ class BillingCycleService {
             if (method !== 'payment_date') {
                 logger.info(`[UPDATE_DATES] Reconnection method is '${method}', skipping date update`);
                 return null;
+            }
+
+            // Guard: skip date update if service already has future isolir_date
+            if (invoice.service_id) {
+                const svcCheck_ = await this.pool.query(`SELECT isolir_date FROM services WHERE id = $1`, [invoice.service_id]);
+                if (svcCheck_.rows.length > 0 && svcCheck_.rows[0].isolir_date) {
+                    const currentIsolir_ = new Date(svcCheck_.rows[0].isolir_date);
+                    if (currentIsolir_ > new Date()) {
+                        const isoStr_ = `${currentIsolir_.getFullYear()}-${String(currentIsolir_.getMonth() + 1).padStart(2, '0')}-${String(currentIsolir_.getDate()).padStart(2, '0')}`;
+                        logger.info(`[UPDATE_DATES] Service ${invoice.service_id} already has future isolir_date (${isoStr_}). Skipping date update.`);
+                        return { newActiveDate: null, newIsolirDate: null, skipped: true };
+                    }
+                }
             }
 
             const dueDate = new Date(invoice.due_date);
@@ -548,8 +569,18 @@ class BillingCycleService {
                 WHERE id = $3
             `, [newActiveDate, newIsolirDate, invoice.service_id]);
 
+            // Save previous dates to payments table for rollback purposes
+            if (invoice.prev_active_date || invoice.prev_isolir_date) {
+                await query(`
+                    UPDATE payments
+                    SET previous_active_date = $1,
+                        previous_isolir_date = $2
+                    WHERE invoice_id = $3 AND is_rolled_back = FALSE
+                `, [invoice.prev_active_date, invoice.prev_isolir_date, invoiceId]);
+            }
+
             logger.info(`✅ [UPDATE_DATES] Service ${invoice.service_id} dates updated: active_date=${newActiveDate.toISOString().split('T')[0]}, isolir_date=${newIsolirDate.toISOString().split('T')[0]} (cycle: ${dbCycle})`);
-            return { newActiveDate, newIsolirDate };
+            return { newActiveDate, newIsolirDate, previousActiveDate: invoice.prev_active_date, previousIsolirDate: invoice.prev_isolir_date };
 
         } catch (error) {
             logger.error('[UPDATE_DATES] Error updating service dates after payment:', error);

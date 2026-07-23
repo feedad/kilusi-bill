@@ -701,21 +701,20 @@ router.post('/invoices/rapel/calculate', asyncHandler(async (req, res) => {
     const lastInvResult = await query(
         `SELECT MAX(due_date) as last_due_date FROM invoices i WHERE ${invFilter}`, invParams
     );
-    const lastDueDate = lastInvResult.rows[0]?.last_due_date
-        ? new Date(lastInvResult.rows[0].last_due_date)
+    const rawLastDue = lastInvResult.rows[0]?.last_due_date;
+    const lastDueDate = rawLastDue
+        ? new Date(rawLastDue)
         : (svc.isolir_date ? new Date(svc.isolir_date) : new Date());
-    const hasPreviousInvoices = lastInvResult.rows[0]?.last_due_date != null;
-    const monthOffset = hasPreviousInvoices ? 1 : 0;
-    const nextMonth = new Date(lastDueDate.getFullYear(), lastDueDate.getMonth() + monthOffset, 1);
+    const nextMonth = new Date(lastDueDate.getFullYear(), lastDueDate.getMonth() + 1, 1);
 
     // Calculate last due_date (matches execute endpoint)
     const lastPeriodMonth = new Date(nextMonth.getFullYear(), nextMonth.getMonth() + numMonths - 1, 1);
     let nextOverdue;
     const isFixed = svc.siklus === 'fixed' || svc.siklus === 'TETAP' || svc.siklus === 'tetap';
     if (isFixed) {
-        const billingDay = lastDueDate.getDate();
+        const billingDay = svc.isolir_date ? new Date(svc.isolir_date).getDate() : lastDueDate.getDate();
         const lastDayOfMonth = new Date(lastPeriodMonth.getFullYear(), lastPeriodMonth.getMonth() + 1, 0).getDate();
-        nextOverdue = new Date(lastPeriodMonth.getFullYear(), lastPeriodMonth.getMonth() + 1, Math.min(billingDay, lastDayOfMonth));
+        nextOverdue = new Date(lastPeriodMonth.getFullYear(), lastPeriodMonth.getMonth(), Math.min(billingDay, lastDayOfMonth));
     } else {
         nextOverdue = new Date(lastPeriodMonth.getFullYear(), lastPeriodMonth.getMonth() + 1, 0);
     }
@@ -796,13 +795,12 @@ router.post('/invoices/rapel', asyncHandler(async (req, res) => {
         const lastInvResult = await client.query(
             `SELECT MAX(due_date) as last_due_date FROM invoices i WHERE ${invFilter}`, invParams
         );
-        const lastDueDate = lastInvResult.rows[0]?.last_due_date
-            ? new Date(lastInvResult.rows[0].last_due_date)
+        const rawLastDueDate = lastInvResult.rows[0]?.last_due_date;
+        const lastDueDate = rawLastDueDate
+            ? new Date(rawLastDueDate)
             : (svc.isolir_date ? new Date(svc.isolir_date) : new Date());
-        // When no previous invoice, the isolir_date IS the first period (don't skip a month)
-        const hasPreviousInvoices = lastInvResult.rows[0]?.last_due_date != null;
-        const monthOffset = hasPreviousInvoices ? 1 : 0;
-        const nextMonth = new Date(lastDueDate.getFullYear(), lastDueDate.getMonth() + monthOffset, 1);
+        // Base month: always +1 month from reference date
+        const nextMonth = new Date(lastDueDate.getFullYear(), lastDueDate.getMonth() + 1, 1);
 
         const bulkSettings = await client.query(`SELECT * FROM bulk_payment_settings WHERE id = 1`);
         const settings = bulkSettings.rows[0] || {};
@@ -832,9 +830,9 @@ router.post('/invoices/rapel', asyncHandler(async (req, res) => {
             let dueDate;
             const isFixed = svc.siklus === 'fixed' || svc.siklus === 'TETAP' || svc.siklus === 'tetap';
             if (isFixed) {
-                const billingDay = lastDueDate.getDate();
+                const billingDay = svc.isolir_date ? new Date(svc.isolir_date).getDate() : lastDueDate.getDate();
                 const lastDayOfMonth = new Date(periodMonth.getFullYear(), periodMonth.getMonth() + 1, 0).getDate();
-                dueDate = new Date(periodMonth.getFullYear(), periodMonth.getMonth() + 1, Math.min(billingDay, lastDayOfMonth));
+                dueDate = new Date(periodMonth.getFullYear(), periodMonth.getMonth(), Math.min(billingDay, lastDayOfMonth));
             } else {
                 dueDate = new Date(periodMonth.getFullYear(), periodMonth.getMonth() + 1, 0);
             }
@@ -889,6 +887,8 @@ router.post('/invoices/rapel', asyncHandler(async (req, res) => {
 
         const finalDueDate = generatedInvoices.length > 0
             ? generatedInvoices[generatedInvoices.length - 1].due_date : null;
+        const firstDueDate = generatedInvoices.length > 0
+            ? generatedInvoices[0].due_date : null;
 
         return {
             customer_id, months: numMonths,
@@ -905,6 +905,7 @@ router.post('/invoices/rapel', asyncHandler(async (req, res) => {
             packageId: svc.package_id,
             siklus: svc.siklus,
             oldIsolirDate: svc.isolir_date,
+            firstDueDate: firstDueDate,
             lastDueDate: finalDueDate
         };
     });
@@ -917,21 +918,36 @@ router.post('/invoices/rapel', asyncHandler(async (req, res) => {
             const whatsappNotifications = require('../../../config/whatsapp-notifications');
 
             // 1. Update service dates
-            // active_date = old isolir_date (start of the paid billing period)
+            // active_date = start of the period we just paid for (= previous isolir_date)
+            // isolir_date = next billing cycle after the last paid invoice
+            let newActiveDate = null;
+            let newActiveDateStr = null;
             let newIsolirDate = null;
             let newIsolirDateStr = null;
-            if (result.oldIsolirDate || result.lastDueDate) {
-                const newActiveDate = result.oldIsolirDate || result.lastDueDate;
+            if (result.lastDueDate) {
+                if (result.oldIsolirDate) {
+                    newActiveDate = new Date(result.oldIsolirDate);
+                } else if (result.firstDueDate) {
+                    const d = new Date(result.firstDueDate);
+                    const prevMonth = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+                    const lastDayOfPrev = new Date(prevMonth.getFullYear(), prevMonth.getMonth() + 1, 0).getDate();
+                    newActiveDate = new Date(prevMonth.getFullYear(), prevMonth.getMonth(), Math.min(d.getDate(), lastDayOfPrev));
+                } else {
+                    newActiveDate = new Date(result.lastDueDate);
+                }
+                newActiveDateStr = `${newActiveDate.getFullYear()}-${String(newActiveDate.getMonth() + 1).padStart(2, '0')}-${String(newActiveDate.getDate()).padStart(2, '0')}`;
+
+                // isolir_date = end of last paid period + 1 cycle (= next cron trigger date)
                 newIsolirDate = await BillingCycleService.calculateIsolirDate(
-                    result.customer_id, new Date(newActiveDate), null, result.siklus
+                    result.customer_id, new Date(result.lastDueDate), null, result.siklus
                 );
-                // Format as local date string (avoid UTC conversion)
                 newIsolirDateStr = `${newIsolirDate.getFullYear()}-${String(newIsolirDate.getMonth() + 1).padStart(2, '0')}-${String(newIsolirDate.getDate()).padStart(2, '0')}`;
+
                 await query(`
-                    UPDATE services SET active_date = $1, isolir_date = $2, updated_at = NOW()
+                    UPDATE services SET active_date = $1::date, isolir_date = $2::date, updated_at = NOW()
                     WHERE id = $3
-                `, [newActiveDate, newIsolirDateStr, result.serviceId]);
-                logger.info(`Rapel: Updated service dates for ${result.customer_id}: active=${newActiveDate}, isolir=${newIsolirDateStr}`);
+                `, [newActiveDateStr, newIsolirDateStr, result.serviceId]);
+                logger.info(`Rapel: Updated service dates for ${result.customer_id}: active=${newActiveDateStr}, isolir=${newIsolirDateStr}`);
             }
 
             // 2. Restore service if was suspended
@@ -1633,6 +1649,14 @@ router.post('/payments/:id/rollback', asyncHandler(async (req, res) => {
                 WHERE id = $1
             `, [payment.invoice_id]);
 
+            // Restore previous active and isolir dates to services if available
+            let targetIsolirDate = null;
+            let targetActiveDate = null;
+            if (payment.previous_active_date && payment.previous_isolir_date) {
+                targetActiveDate = new Date(payment.previous_active_date);
+                targetIsolirDate = new Date(payment.previous_isolir_date);
+            }
+
             // Suspend service again if this was the payment that reactivated the customer
             const serviceSuspension = require('../../../config/serviceSuspension');
 
@@ -1642,6 +1666,8 @@ router.post('/payments/:id/rollback', asyncHandler(async (req, res) => {
                     s.id as service_id,
                     s.status as service_status,
                     s.package_id,
+                    s.service_number,
+                    s.isolir_date,
                     c.name,
                     p.group as package_group,
                     p.pppoe_profile
@@ -1655,19 +1681,45 @@ router.post('/payments/:id/rollback', asyncHandler(async (req, res) => {
             if (serviceDataResult.rows.length > 0) {
                 const serviceData = serviceDataResult.rows[0];
 
-                // Only suspend if service is currently active
-                if (serviceData.service_status === 'active') {
-                    logger.info(`🔄 Rolling back payment ${paymentId} - suspending service for ${serviceData.name}`);
-                    try {
-                        await serviceSuspension.suspendCustomerService(
-                            { name: serviceData.name, service_id: serviceData.service_id },
-                            'Payment rollback - service suspended'
-                        );
-                        logger.info(`✅ Service suspended for rollback: ${serviceData.name}`);
-                    } catch (suspendError) {
-                        // Log error but don't fail the rollback
-                        logger.error(`⚠️ Failed to suspend service during rollback for ${serviceData.name}:`, suspendError.message);
-                        // Continue with rollback - service suspension is secondary
+                if (targetActiveDate && targetIsolirDate) {
+                    await query(`
+                        UPDATE services
+                        SET active_date = $1, isolir_date = $2, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = $3
+                    `, [targetActiveDate, targetIsolirDate, serviceData.service_id]);
+                    logger.info(`🔄 Rolling back payment ${paymentId} - restored service dates for ${serviceData.name} to active=${targetActiveDate.toISOString().split('T')[0]}, isolir=${targetIsolirDate.toISOString().split('T')[0]}`);
+                } else {
+                    targetIsolirDate = serviceData.isolir_date ? new Date(serviceData.isolir_date) : new Date(0);
+                }
+
+                // Check if isolir date is in the past (suspend needed)
+                const isPastIsolir = targetIsolirDate <= new Date();
+
+                if (isPastIsolir) {
+                    // Only suspend if service is currently active
+                    if (serviceData.service_status === 'active') {
+                        logger.info(`🔄 Rolling back payment ${paymentId} - suspending service for ${serviceData.name} (isolir date: ${targetIsolirDate.toISOString().split('T')[0]})`);
+                        try {
+                            await serviceSuspension.suspendCustomerService(
+                                { name: serviceData.name, service_id: serviceData.service_id },
+                                'Payment rollback - service suspended'
+                            );
+                            logger.info(`✅ Service suspended for rollback: ${serviceData.name}`);
+                        } catch (suspendError) {
+                            // Log error but don't fail the rollback
+                            logger.error(`⚠️ Failed to suspend service during rollback for ${serviceData.name}:`, suspendError.message);
+                            // Continue with rollback - service suspension is secondary
+                        }
+                    }
+                } else {
+                    // Isolir date is in the future. Ensure service is active.
+                    if (serviceData.service_status === 'suspended') {
+                         logger.info(`🔄 Rolling back payment ${paymentId} - restoring service for ${serviceData.name} (isolir date: ${targetIsolirDate.toISOString().split('T')[0]})`);
+                         try {
+                             await serviceSuspension.restoreServiceByServiceId(serviceData.service_id);
+                         } catch (e) {
+                             logger.error(`⚠️ Failed to restore service during rollback for ${serviceData.name}:`, e.message);
+                         }
                     }
                 }
             }
