@@ -182,6 +182,58 @@ class AutoExpenseService {
     }
   }
 
+  async triggerMarketingFee(customerId) {
+    try {
+      // 1. Ambil nilai dari referrer_cash_amount
+      const amountResult = await query(
+        "SELECT setting_value FROM auto_expense_settings WHERE setting_key = 'referrer_cash_amount' AND is_active = true"
+      );
+      const amount = parseFloat(amountResult.rows[0]?.setting_value || 0);
+
+      if (amount <= 0) return { success: false, message: 'Cash reward amount is 0 or invalid' };
+
+      // 2. Ambil kategori akuntansi 'Fee Marketing'
+      const categoryResult = await query(
+        "SELECT id FROM accounting_categories WHERE name = 'Fee Marketing' AND is_active = true LIMIT 1"
+      );
+      if (categoryResult.rows.length === 0) return { success: false, message: 'Category Fee Marketing not found' };
+
+      // 3. Cek apakah customer INI sudah tercatat referral-nya
+      const existCheck = await query(`
+        SELECT id FROM accounting_transactions 
+        WHERE type = 'expense' 
+        AND reference_type IN ('marketing_fee', 'marketing_fee_fixed_code') 
+        AND description LIKE $1 
+        LIMIT 1
+      `, [`%${customerId}%`]);
+
+      if (existCheck.rows.length > 0) {
+        return { success: false, message: 'Fee already recorded via Referral' };
+      }
+
+      const customerResult = await query('SELECT name FROM customers WHERE id = $1', [customerId]);
+      const customerName = customerResult.rows[0]?.name || `Customer #${customerId}`;
+
+      // 4. Catat pengeluaran fee marketing wajib
+      await query(`
+        INSERT INTO accounting_transactions (
+          category_id, type, amount, description, reference_type, reference_id, date, created_at
+        ) VALUES ($1, 'expense', $2, $3, 'marketing_fee_manual', $4, CURRENT_DATE, CURRENT_TIMESTAMP)
+      `, [
+        categoryResult.rows[0].id,
+        amount,
+        `Fee Marketing (Direct/Non-Referral) - Aktivasi ${customerName}`,
+        customerId
+      ]);
+
+      logger.info(`Marketing fee recorded: Rp ${amount} for customer ${customerId}`);
+      return { success: true, message: 'Marketing fee recorded successfully' };
+    } catch (error) {
+      logger.error('Error triggering marketing fee:', error);
+      return { success: false, message: 'Failed to record marketing fee' };
+    }
+  }
+
   // Manual trigger for testing
   async triggerRecurringExpenses() {
     try {

@@ -85,18 +85,20 @@ class ActivationService {
             logger.error(`Failed to send activation notifications for ${customerId}:`, e.message);
         }
 
-        // 7. Trigger technician fee if enabled (non-blocking)
+        // 7. Trigger technician fee if enabled (non-blocking) ALWAYS
         try {
             const autoExpenseService = require('./auto-expense-service');
             const installResult = await getOne(
-                'SELECT technician_id FROM installations WHERE customer_id = $1 AND status = \'completed\' ORDER BY completed_date DESC LIMIT 1',
+                'SELECT technician_id FROM installations WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1',
                 [customerId]
             );
-            if (installResult && installResult.technician_id) {
-                await autoExpenseService.triggerTechnicianFee(customerId, installResult.technician_id);
-            }
+            const techId = installResult ? installResult.technician_id : null;
+            await autoExpenseService.triggerTechnicianFee(customerId, techId);
+
+            // 7a. Trigger marketing fee (non-blocking) ALWAYS (if not covered by referral)
+            await autoExpenseService.triggerMarketingFee(customerId);
         } catch (e) {
-            logger.warn(`Failed to trigger technician fee for ${customerId}: ${e.message}`);
+            logger.warn(`Failed to trigger technician/marketing fee for ${customerId}: ${e.message}`);
         }
 
         // 7b. Process cash reward + referred discount (non-blocking)
