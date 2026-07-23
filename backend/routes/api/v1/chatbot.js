@@ -883,32 +883,42 @@ router.get('/packages', chatbotPublicAuth, async (req, res) => {
         const cached = getCached(cacheKey, 300000); // 5 min
         if (cached) return res.json(cached);
 
-        const packages = await query(
-            `SELECT id, name, speed, price FROM packages WHERE is_active = true ORDER BY price ASC`
-        );
-
-        const pkgList = packages.rows.map(p => ({
-            id: p.id,
-            name: p.name,
-            speed: p.speed || '-',
-            price: Math.round(parseFloat(p.price)),
-        }));
-
-        // Get installation fee
-        let installFee = 50000;
+        // Ambil biaya instalasi default (package_id IS NULL)
+        let defaultInstallFee = 0;
         try {
             const feeResult = await getOne(
                 `SELECT fee_amount FROM installation_fee_settings
                  WHERE billing_type = 'prepaid' AND package_id IS NULL AND is_active = true
                  LIMIT 1`
             );
-            if (feeResult) installFee = Math.round(parseFloat(feeResult.fee_amount));
+            if (feeResult) defaultInstallFee = Math.round(parseFloat(feeResult.fee_amount));
         } catch (e) { /* use default */ }
+
+        // Ambil paket beserta biaya instalasinya (jika ada)
+        const packages = await query(`
+            SELECT p.id, p.name, p.speed, p.price, f.fee_amount as specific_fee
+            FROM packages p
+            LEFT JOIN installation_fee_settings f 
+                ON f.package_id = p.id AND f.is_active = true AND f.billing_type = 'prepaid'
+            WHERE p.is_active = true 
+            ORDER BY p.price ASC
+        `);
+
+        const pkgList = packages.rows.map(p => {
+            const installFee = p.specific_fee !== null ? Math.round(parseFloat(p.specific_fee)) : defaultInstallFee;
+            return {
+                id: p.id,
+                name: p.name,
+                speed: p.speed || '-',
+                price: Math.round(parseFloat(p.price)),
+                installation_fee: installFee
+            };
+        });
 
         const response = {
             success: true,
             packages: pkgList,
-            installation_fee: installFee,
+            default_installation_fee: defaultInstallFee,
             billing_type: 'prepaid',
             registration_url: 'https://kilusi.id/customer/register',
         };
