@@ -27,14 +27,27 @@ function normalizePhone(phone) {
 }
 
 /**
- * Generate invoice number
+ * Generate invoice number (Async with DB collision check)
  */
-function generateInvoiceNumber() {
+async function generateInvoiceNumber() {
     const date = new Date();
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
-    const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
-    return `INV-${year}${month}-${random}`;
+    let invoiceNumber;
+    let isDuplicate = true;
+
+    while (isDuplicate) {
+        const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+        invoiceNumber = `INV-${year}${month}-${random}`;
+        
+        // Check if exists
+        const { query } = require('./database');
+        const check = await query('SELECT 1 FROM invoices WHERE invoice_number = $1', [invoiceNumber]);
+        if (check.rows.length === 0) {
+            isDuplicate = false;
+        }
+    }
+    return invoiceNumber;
 }
 
 /**
@@ -495,7 +508,7 @@ async function getInvoicesByPhone(phone) {
  */
 async function createInvoice(invoiceData) {
     try {
-        const invoiceNumber = invoiceData.invoice_number || generateInvoiceNumber();
+        const invoiceNumber = invoiceData.invoice_number || await generateInvoiceNumber();
 
         const sql = `
             INSERT INTO invoices (

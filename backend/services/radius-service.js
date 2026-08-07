@@ -298,7 +298,7 @@ class RadiusService {
      * Get Active Sessions (from radacct)
      */
     async getActiveSessions() {
-        const result = await query("SELECT * FROM radacct WHERE acctstoptime IS NULL ORDER BY acctstarttime DESC");
+        const result = await query("SELECT * FROM radacct WHERE acctstoptime IS NULL AND acctupdatetime IS NOT NULL AND acctupdatetime >= NOW() - INTERVAL '30 minutes' ORDER BY acctstarttime DESC");
         return result.rows;
     }
 
@@ -347,6 +347,8 @@ class RadiusService {
                 FROM radacct
                 WHERE username = $1
                 AND acctstoptime IS NULL
+                AND acctupdatetime IS NOT NULL
+                AND acctupdatetime >= NOW() - INTERVAL '30 minutes'
                 ORDER BY radacctid DESC
                 LIMIT 1
             `;

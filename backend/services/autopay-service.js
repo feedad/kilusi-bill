@@ -329,9 +329,10 @@ class AutopayService {
 
       // Send WhatsApp notification
       try {
+        const _isoDate = updatedDates?.newIsolirDate ? new Date(updatedDates.newIsolirDate).toLocaleDateString("id-ID", { year: "numeric", month: "long", day: "numeric" }) : undefined;
         const whatsappNotifications = require('../config/whatsapp-notifications');
         await whatsappNotifications.sendPaymentReceivedNotification(payResult.rows[0].id, {
-          dueDate: updatedDates?.newIsolirDate,
+          dueDate: _isoDate,
           amount: amountForNotif
         });
       } catch (waErr) {

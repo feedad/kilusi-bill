@@ -497,14 +497,16 @@ class BillingCycleService {
                 return null;
             }
 
-            // Guard: skip date update if service already has future isolir_date
+            // Guard: skip date update ONLY if service already has isolir_date more than 45 days in future (already advanced for multiple cycles)
             if (invoice.service_id) {
-                const svcCheck_ = await this.pool.query(`SELECT isolir_date FROM services WHERE id = $1`, [invoice.service_id]);
+                const svcCheck_ = await query(`SELECT isolir_date FROM services WHERE id = $1`, [invoice.service_id]);
                 if (svcCheck_.rows.length > 0 && svcCheck_.rows[0].isolir_date) {
                     const currentIsolir_ = new Date(svcCheck_.rows[0].isolir_date);
-                    if (currentIsolir_ > new Date()) {
+                    const limitDate = new Date();
+                    limitDate.setDate(limitDate.getDate() + 45);
+                    if (currentIsolir_ > limitDate) {
                         const isoStr_ = `${currentIsolir_.getFullYear()}-${String(currentIsolir_.getMonth() + 1).padStart(2, '0')}-${String(currentIsolir_.getDate()).padStart(2, '0')}`;
-                        logger.info(`[UPDATE_DATES] Service ${invoice.service_id} already has future isolir_date (${isoStr_}). Skipping date update.`);
+                        logger.info(`[UPDATE_DATES] Service ${invoice.service_id} already has far future isolir_date (${isoStr_}). Skipping date update.`);
                         return { newActiveDate: null, newIsolirDate: null, skipped: true };
                     }
                 }

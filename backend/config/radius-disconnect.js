@@ -4,8 +4,8 @@ const radius = require('radius');
 
 /**
  * RADIUS Disconnect/CoA (Change of Authorization) Module
- * Sends Disconnect-Request (code 40) to FreeRADIUS CoA proxy.
- * Proxy port is determined by NAS ID (20000 + nas_id) for per-NAS routing.
+ * Sends Disconnect-Request (code 40) to FreeRADIUS coa_relay proxy.
+ * coa_relay on port 37999 forwards to the correct NAS via radclient.
  */
 
 class RadiusDisconnect {
@@ -25,7 +25,6 @@ class RadiusDisconnect {
         const {
             username,
             nasIp,
-            coaPort,
             sessionId,
             framedIp,
             freeradiusServer = '172.22.10.101',
@@ -36,7 +35,7 @@ class RadiusDisconnect {
             throw new Error('Username and NAS IP are required');
         }
 
-        const port = coaPort || 3799;
+        const port = 37999; // coa_relay proxy — forwards to NAS via radclient
 
         return new Promise((resolve, reject) => {
             try {

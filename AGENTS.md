@@ -32,8 +32,8 @@ PGPASSWORD='kilusi17!' psql -U kilusi_user -h localhost -d kilusi_bill
 ### Server IPs
 | IP | Host | Service |
 |----|------|---------|
-| 172.22.10.30 | BILLING | Backend (3001), Frontend prod (8080), Frontend dev (8081) |
-| 172.22.10.29 | BILLING (alt) | Also runs backend |
+| 172.22.10.30 | DEVELOPMENT | Development server (this machine) |
+| 172.22.10.103 | PRODUCTION | Backend (3001), Frontend prod (8080), Frontend dev (8081) |
 
 ### URLs
 | URL | Purpose |

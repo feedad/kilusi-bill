@@ -31,6 +31,8 @@ interface Admin {
     id: string
     username: string
     role: 'superadmin' | 'administrator' | 'technician' | 'finance' | 'operator' | 'admin' // Added legacy admin
+    email?: string
+    phone?: string
     is_active: boolean
     last_login: string | null
     created_at: string
@@ -69,6 +71,8 @@ export default function AdminUsersPage() {
         username: '',
         password: '',
         role: 'operator',
+        email: '',
+        phone: '',
         is_active: true
     })
     const [passwordData, setPasswordData] = useState({
@@ -114,7 +118,9 @@ export default function AdminUsersPage() {
             const response = await adminApi.post('/api/v1/admins', {
                 username: formData.username,
                 password: formData.password,
-                role: formData.role
+                role: formData.role,
+                email: formData.email,
+                phone: formData.phone
             })
 
             if (response.data.success) {
@@ -141,6 +147,8 @@ export default function AdminUsersPage() {
             const response = await adminApi.put(`/api/v1/admins/${selectedAdmin.id}`, {
                 username: formData.username,
                 role: formData.role,
+                email: formData.email,
+                phone: formData.phone,
                 is_active: formData.is_active
             })
 
@@ -224,6 +232,8 @@ export default function AdminUsersPage() {
             username: admin.username,
             password: '',
             role: admin.role,
+            email: admin.email,
+            phone: admin.phone,
             is_active: admin.is_active
         })
         setShowEditDialog(true)
@@ -245,6 +255,8 @@ export default function AdminUsersPage() {
             username: '',
             password: '',
             role: 'operator',
+            email: '',
+            phone: '',
             is_active: true
         })
         setSelectedAdmin(null)
@@ -395,6 +407,7 @@ export default function AdminUsersPage() {
                                         <th className="text-left py-3 px-4 font-medium">Username</th>
                                         <th className="text-left py-3 px-4 font-medium">Role</th>
                                         <th className="text-left py-3 px-4 font-medium">Status</th>
+                                        <th className="text-left py-3 px-4 font-medium">Telepon</th>
                                         <th className="text-left py-3 px-4 font-medium">Login Terakhir</th>
                                         <th className="text-left py-3 px-4 font-medium">Dibuat</th>
                                         <th className="text-right py-3 px-4 font-medium">Aksi</th>
@@ -403,7 +416,7 @@ export default function AdminUsersPage() {
                                 <tbody>
                                     {filteredAdmins.length === 0 ? (
                                         <tr>
-                                            <td colSpan={6} className="text-center py-8 text-muted-foreground">
+                                            <td colSpan={7} className="text-center py-8 text-muted-foreground">
                                                 Tidak ada data user
                                             </td>
                                         </tr>
@@ -431,6 +444,9 @@ export default function AdminUsersPage() {
                                                         <Badge variant={admin.is_active ? 'default' : 'secondary'}>
                                                             {admin.is_active ? 'Aktif' : 'Nonaktif'}
                                                         </Badge>
+                                                    </td>
+                                                    <td className="py-3 px-4 text-sm text-muted-foreground">
+                                                        {admin.phone || '-'}
                                                     </td>
                                                     <td className="py-3 px-4">
                                                         <div className="flex items-center text-sm text-muted-foreground">
@@ -542,6 +558,25 @@ export default function AdminUsersPage() {
                                 </SelectContent>
                             </Select>
                         </div>
+                        <div>
+                            <Label htmlFor="create-email">Email (Opsional)</Label>
+                            <Input
+                                id="create-email"
+                                type="email"
+                                value={formData.email}
+                                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                                placeholder="admin@email.com"
+                            />
+                        </div>
+                        <div>
+                            <Label htmlFor="create-phone">Nomor Telepon</Label>
+                            <Input
+                                id="create-phone"
+                                value={formData.phone}
+                                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                                placeholder="628xxxx (untuk notifikasi WA)"
+                            />
+                        </div>
                     </div>
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setShowCreateDialog(false)} disabled={formLoading}>
@@ -600,6 +635,25 @@ export default function AdminUsersPage() {
                                     ))}
                                 </SelectContent>
                             </Select>
+                        </div>
+                        <div>
+                            <Label htmlFor="edit-email">Email (Opsional)</Label>
+                            <Input
+                                id="edit-email"
+                                type="email"
+                                value={formData.email}
+                                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                                placeholder="admin@email.com"
+                            />
+                        </div>
+                        <div>
+                            <Label htmlFor="edit-phone">Nomor Telepon</Label>
+                            <Input
+                                id="edit-phone"
+                                value={formData.phone}
+                                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                                placeholder="628xxxx (untuk notifikasi WA)"
+                            />
                         </div>
                         <div className="flex items-center space-x-2">
                             <Switch

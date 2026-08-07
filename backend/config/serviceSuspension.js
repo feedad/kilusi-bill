@@ -255,8 +255,19 @@ class ServiceSuspensionManager {
                 LIMIT 1
             `, [serviceId]);
 
+            // Guard: skip date recalculation ONLY if service already has far future isolir_date (>45 days)
+            const svcCheck_ = await query(`SELECT isolir_date FROM services WHERE id = $1`, [serviceId]);
+            const limitDate_ = new Date();
+            limitDate_.setDate(limitDate_.getDate() + 45);
+            const hasFutureIsolir_ = svcCheck_.rows.length > 0 && svcCheck_.rows[0].isolir_date
+                && new Date(svcCheck_.rows[0].isolir_date) > limitDate_;
+            if (hasFutureIsolir_) {
+                const isoStr_ = `${svcCheck_.rows[0].isolir_date.getFullYear()}-${String(svcCheck_.rows[0].isolir_date.getMonth() + 1).padStart(2, '0')}-${String(svcCheck_.rows[0].isolir_date.getDate()).padStart(2, '0')}`;
+                logger.info(`[RESTORE] Service already has far future isolir_date (${isoStr_}). Skipping date recalculation.`);
+            }
+
             // Handle reconnection method - recalculate dates if needed
-            if (method === 'payment_date') {
+            if (!hasFutureIsolir_ && method === 'payment_date') {
                 logger.info(`[RESTORE] Reconnection method is 'payment_date'. Calculating active_date based on payment date vs due date.`);
 
                 let newActiveDate;
@@ -331,8 +342,10 @@ class ServiceSuspensionManager {
 
                     logger.info(`[RESTORE] New active_date: ${newActiveDate.toISOString()}, New isolir_date: ${updateFields.isolir_date?.toISOString() || 'null'}`);
                 }
-            } else {
+            } else if (!hasFutureIsolir_) {
                 logger.info(`[RESTORE] Reconnection method is 'isolate_date'. Keeping existing dates.`);
+            } else {
+                logger.info(`[RESTORE] Skipping isolir_date branch - future date already set.`);
             }
 
             // Wrap status + radgroup in transaction (atomic restore)

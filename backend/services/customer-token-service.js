@@ -83,7 +83,6 @@ class CustomerTokenService {
                 customerId,
                 expiresAt,
                 loginUrl,
-                billingExpiry, // Include for reference
                 customer: {
                     id: customer.id,
                     name: customer.name,

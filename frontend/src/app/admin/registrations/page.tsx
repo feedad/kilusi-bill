@@ -1639,6 +1639,10 @@ export default function RegistrationsPage() {
                       <p className="text-xs text-muted-foreground">Telepon</p>
                       <p className="font-medium text-blue-600">{selectedCustomer.phone}</p>
                     </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Email</p>
+                      <p className="font-medium">{selectedCustomer.email || '-'}</p>
+                    </div>
                     <div className="md:col-span-2">
                       <p className="text-xs text-muted-foreground">Alamat</p>
                       <p className="font-medium">{selectedCustomer.address || '-'}</p>
@@ -1650,6 +1654,14 @@ export default function RegistrationsPage() {
                           ? `${selectedCustomer.package_name}${selectedCustomer.package_price ? ` - ${formatCurrency(selectedCustomer.package_price)}` : ''}`
                           : '-'}
                       </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Tanggal Pendaftaran</p>
+                      <p className="font-medium">{selectedCustomer.created_at ? new Date(selectedCustomer.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) : '-'}</p>
+                    </div>
+                    <div className="md:col-span-2">
+                      <p className="text-xs text-muted-foreground">Catatan</p>
+                      <p className="font-medium">{selectedCustomer.email ? `Email: ${selectedCustomer.email}` : '-'}</p>
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground">Status</p>

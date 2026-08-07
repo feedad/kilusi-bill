@@ -720,21 +720,21 @@ class CustomerService {
         // Package Change - Update RADIUS and Kick User
         let packageUpdated = false;
         let invoiceUpdated = false;
-        if (package_id && package_id !== current.package_id) {
-            logger.info(`🔄 Package changed for customer ${id} from ${current.package_id} to ${package_id}`);
+        const oldPkgId = current.package_id ? parseInt(current.package_id) : null;
+        const newPkgId = package_id ? parseInt(package_id) : null;
+
+        if (newPkgId && !isNaN(newPkgId) && oldPkgId !== newPkgId) {
+            logger.info(`🔄 Package changed for customer ${id} from ${oldPkgId} to ${newPkgId}`);
 
             try {
                 // Get both old and new package details
-                const packagesResult = await query(`
-                  SELECT id, name, speed, price, "group", pppoe_profile
-                  FROM packages
-                  WHERE id = $1 OR id = $2
-                `, [current.package_id, package_id]);
+                const oldPkgRes = await query(`SELECT id, name, speed, price, "group", pppoe_profile FROM packages WHERE id = $1`, [oldPkgId]);
+                const newPkgRes = await query(`SELECT id, name, speed, price, "group", pppoe_profile FROM packages WHERE id = $1`, [newPkgId]);
 
-                if (packagesResult.rows.length >= 2) {
-                    const oldPackage = packagesResult.rows.find(p => p.id === current.package_id);
-                    const newPackage = packagesResult.rows.find(p => p.id === package_id);
+                const oldPackage = oldPkgRes.rows[0];
+                const newPackage = newPkgRes.rows[0];
 
+                if (oldPackage && newPackage) {
                     // Prepaid package change: block if paid invoice with future due_date exists
                     const billingType = updatedCustomer.billing_type || current.billing_type;
 
@@ -758,7 +758,7 @@ class CustomerService {
                                 package_id = $2, updated_at = NOW()
                             WHERE customer_id = $3 AND status IN ('unpaid', 'sent', 'draft')
                               AND service_number = $4
-                        `, [newPackage.price, package_id, id, updatedCustomer.service_number]);
+                        `, [newPackage.price, newPkgId, id, updatedCustomer.service_number]);
 
                         invoiceUpdated = updResult.rowCount > 0;
                     }
@@ -778,19 +778,20 @@ class CustomerService {
                         billingType, invoiceUpdated
                     ]);
 
-                    // Get RADIUS username (try multiple possible usernames)
+                    // Get RADIUS username (try multiple possible usernames + prefix match)
                     const radiusUserResult = await query(`
                         SELECT username FROM radcheck
                         WHERE LOWER(username) = LOWER($1)
                            OR LOWER(username) = LOWER($2)
                            OR LOWER(username) = LOWER($3)
+                           OR LOWER(username) LIKE LOWER($4 || '%')
                         LIMIT 1
-                    `, [updatedCustomer.name, updatedCustomer.pppoe_username, updatedCustomer.service_number]);
+                    `, [updatedCustomer.name, updatedCustomer.pppoe_username, updatedCustomer.service_number, updatedCustomer.service_number]);
 
                     if (radiusUserResult.rows.length > 0) {
                         const radiusUsername = radiusUserResult.rows[0].username;
 
-                        // Update RADIUS group (use main query, not radius-postgres db.query)
+                        // Update RADIUS group
                         await query(`DELETE FROM radusergroup WHERE username = $1`, [radiusUsername]);
                         await query(`INSERT INTO radusergroup (username, groupname, priority) VALUES ($1, $2, 1)`, [radiusUsername, newPackage.group]);
 
@@ -912,63 +913,13 @@ class CustomerService {
                 return;
             }
 
-            // Get company info
-            const companyInfo = await query("SELECT value FROM app_config WHERE key = 'company_name'");
-            const companyName = companyInfo.rows[0]?.value || 'KITA SELALU TERKONEKSI';
-
-            const supportInfo = await query("SELECT value FROM app_config WHERE key = 'support_phone'");
-            const supportPhone = supportInfo.rows[0]?.value || '08123456789';
-
-            // Determine if upgrade or downgrade
-            const oldPrice = parseFloat(oldPackage.price) || 0;
-            const newPrice = parseFloat(newPackage.price) || 0;
-
-            let changeType, emoji, notificationType;
-            if (newPrice > oldPrice) {
-                changeType = 'upgrade';
-                emoji = '📈';
-                notificationType = 'package_upgrade';
-            } else if (newPrice < oldPrice) {
-                changeType = 'downgrade';
-                emoji = '📉';
-                notificationType = 'package_downgrade';
-            } else {
-                changeType = 'ubah';
-                emoji = '🔄';
-                notificationType = 'package_change';
-            }
-
-            // Build status-specific message
-            let statusMessage;
-            if (billingType === 'prepaid' && invoiceUpdated) {
-                statusMessage = `Tagihan Anda telah diperbarui ke Rp ${newPrice.toLocaleString('id-ID')}. Segera lakukan pembayaran.\n\n`;
-            } else {
-                statusMessage = `Total tagihan Anda akan berubah pada tagihan berikutnya.\n\n`;
-            }
-
-            // Build message with single template
-            const message = `*${emoji} PERUBAHAN PAKET BERHASIL*\n\n` +
-                `Halo ${customer.nama_customer || customer.name},\n\n` +
-                `Paket internet Anda telah di ${changeType}:\n\n` +
-                `📦 Dari: ${oldPackage.name}\n` +
-                `💰 Harga: Rp ${oldPrice.toLocaleString('id-ID')}/bulan\n\n` +
-                `📦 Ke: ${newPackage.name}\n` +
-                `💰 Harga: Rp ${newPrice.toLocaleString('id-ID')}/bulan\n\n` +
-                statusMessage +
-                `─────────────────────\n` +
-                `${companyName}\n` +
-                `Hubungi: ${supportPhone}\n\n` +
-                `_Terima kasih telah berlangganan._`;
-
-            // Send WhatsApp message
-            await kilusiOmnichat.sendMessage(customer.phone, message, {
-                customer_id: customer.id,
-                customer_name: customer.nama_customer || customer.name,
-                notification_type: notificationType,
-                source: 'customer_service'
-            });
-
-            logger.info(`📱 Package change notification sent to ${customer.nama_customer || customer.name} (${customer.phone}): ${oldPackage.name} → ${newPackage.name}`);
+            const whatsappNotifications = require('../config/whatsapp-notifications');
+            await whatsappNotifications.sendPackageChangeNotification(
+                customer.phone,
+                customer,
+                oldPackage,
+                newPackage
+            );
         } catch (error) {
             logger.error(`Failed to send package change notification to customer ${customer.id}:`, error.message);
             // Don't throw - notification failure shouldn't break the package update

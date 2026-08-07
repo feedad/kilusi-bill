@@ -732,18 +732,20 @@ Terima kasih telah menggunakan layanan kami.
             ctx.customData?.oldPackageName ||
             ctx.customData?.old_package_name ||
             "",
-        oldPackagePrice: (ctx) =>
-            ctx.customData?.oldPackagePrice ||
-            ctx.customData?.old_package_price ||
-            "",
+        oldPackagePrice: (ctx) => {
+            const val = ctx.customData?.oldPackagePrice || ctx.customData?.old_package_price;
+            if (!val) return "";
+            return typeof val === "number" ? this.formatCurrency(val) : String(val);
+        },
         newPackageName: (ctx) =>
             ctx.customData?.newPackageName ||
             ctx.customData?.new_package_name ||
             "",
-        newPackagePrice: (ctx) =>
-            ctx.customData?.newPackagePrice ||
-            ctx.customData?.new_package_price ||
-            "",
+        newPackagePrice: (ctx) => {
+            const val = ctx.customData?.newPackagePrice || ctx.customData?.new_package_price;
+            if (!val) return "";
+            return typeof val === "number" ? this.formatCurrency(val) : String(val);
+        },
 
         // === REGISTRATION ===
         registrationDate: (ctx) =>
@@ -1081,11 +1083,11 @@ Terima kasih telah menggunakan layanan kami.
         try {
             let queryStr, params;
             if (serviceNumber) {
-                queryStr = `SELECT active_date, billing_type, siklus, service_number
+                queryStr = `SELECT active_date, billing_type, siklus, service_number, isolir_date
                             FROM services WHERE service_number = $1 LIMIT 1`;
                 params = [serviceNumber];
             } else {
-                queryStr = `SELECT active_date, billing_type, siklus, service_number
+                queryStr = `SELECT active_date, billing_type, siklus, service_number, isolir_date
                             FROM services WHERE customer_id = $1
                             ORDER BY created_at DESC LIMIT 1`;
                 params = [customerId];
@@ -1353,18 +1355,8 @@ Terima kasih telah menggunakan layanan kami.
             );
             await this.delay(randomDelay * 1000);
 
-            // Add header and footer
-            const companyHeader = getSetting(
-                "company_header",
-                "📱 KILUSI BILL 📱\n\n",
-            );
-            const footerSeparator =
-                "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
-            const footerInfo =
-                footerSeparator +
-                getSetting("footer_info", "Powered by Alijaya Digital Network");
-
-            const fullMessage = `${companyHeader}${message}${footerInfo}`;
+            // Use template body as-is (no hardcoded header/footer)
+            const fullMessage = message;
 
             // If imagePath provided and exists, try to send as image with caption
             if (options.imagePath) {
@@ -1543,18 +1535,8 @@ Terima kasih telah menggunakan layanan kami.
             const formattedNumber = this.formatPhoneNumber(phoneNumber);
             const jid = `${formattedNumber}@s.whatsapp.net`;
 
-            // Add header and footer
-            const companyHeader = getSetting(
-                "company_header",
-                "📱 KILUSI BILL 📱\n\n",
-            );
-            const footerSeparator =
-                "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
-            const footerInfo =
-                footerSeparator +
-                getSetting("footer_info", "Powered by Alijaya Digital Network");
-
-            const fullMessage = `${companyHeader}${message}${footerInfo}`;
+            // Use template body as-is (no hardcoded header/footer)
+            const fullMessage = message;
 
             // If imagePath provided and exists, try to send as image with caption
             if (options.imagePath) {
@@ -3037,6 +3019,59 @@ Terima kasih telah menggunakan layanan kami.
         }
     }
 
+    // Send package change notification (uses package_change Meta template)
+    async sendPackageChangeNotification(phoneNumber, customer, oldPackage, newPackage) {
+        try {
+            const template = await this.getTemplateFromDatabase("package_change");
+            const companyInfo = await this.getCompanyInfo(customer.id);
+            const service = await this.getServiceForCustomer(customer.id, customer.service_number);
+            const packageData = newPackage;
+
+            const oldPrice = parseFloat(oldPackage.price || oldPackage.old_price) || 0;
+            const newPrice = parseFloat(newPackage.price || newPackage.new_price) || 0;
+
+            const customData = {
+                customerName: customer.nama_customer || customer.name || "-",
+                serviceNumber: customer.service_number || service?.service_number || "-",
+                oldPackageName: oldPackage.name || oldPackage.old_package_name || "-",
+                oldPackagePrice: oldPrice,
+                newPackageName: newPackage.name || newPackage.new_package_name || "-",
+                newPackagePrice: newPrice,
+            };
+
+            let message, messageData = null;
+            if (template) {
+                const context = {
+                    customer,
+                    invoice: null,
+                    package: packageData,
+                    service,
+                    company: companyInfo,
+                    customData,
+                };
+                messageData = this.resolveMessageData(template.content, context);
+                message = this.replaceTemplateVariables(template.content, messageData);
+            } else {
+                message = `📦 *PERUBAHAN PAKET BERHASIL*\n\nHalo ${customData.customerName},\n\nPaket internet Anda telah diubah:\nDari: ${customData.oldPackageName} (Rp ${this.formatCurrency(oldPrice)}/bulan)\nKe: ${customData.newPackageName} (Rp ${this.formatCurrency(newPrice)}/bulan)\n\nSalam,\n${companyInfo.name}`;
+            }
+
+            const result = await this.sendNotification(phoneNumber, message, {
+                customer_id: customer.id,
+                customer_name: customData.customerName,
+                notification_type: "package_change",
+                ...(messageData ? { meta_data: messageData } : {}),
+            });
+
+            if (result.success) {
+                logger.info(`📱 Package change notification sent to ${phoneNumber} (${oldPackage.name} → ${newPackage.name})`);
+            }
+            return result;
+        } catch (error) {
+            logger.error(`Error sending package change notification to ${phoneNumber}:`, error.message);
+            return { success: false, error: error.message };
+        }
+    }
+
     // Send registration rejected notification
     async sendRegistrationRejectedNotification(phoneNumber, data = {}) {
         try {
@@ -3473,17 +3508,65 @@ Terima kasih.
                 message = `📝 *REGISTRASI BARU*\n\n👤 *Nama:* ${registrationData.customerName}\n📱 *HP:* ${registrationData.customerPhone}\n📍 *Alamat:* ${registrationData.address || "-"}\n📅 *Tanggal:* ${registrationData.registrationDate}\n\n${companyInfo.name}`;
             }
 
-            return await this.sendToAdmins(message, {
+            // Send to all admins
+            const adminResult = await this.sendToAdmins(message, {
                 notification_type: "admin_new_registration",
                 provider: "baileys",
                 ...(messageData ? { meta_data: messageData } : {}),
             });
+
+            // Auto-detect mitra from address and forward notification to mitra's phone
+            if (registrationData.address) {
+                try {
+                    const mitra = await this.detectMitraByAddress(registrationData.address);
+                    if (mitra && mitra.phone) {
+                        await this.sendNotification(mitra.phone, message, {
+                            notification_type: "admin_new_registration",
+                            provider: "baileys",
+                            ...(messageData ? { meta_data: messageData } : {}),
+                        });
+                        logger.info(`[RegNotif] Sent new registration to mitra ${mitra.name} (${mitra.phone})`);
+                    }
+                } catch (mitraErr) {
+                    logger.warn(`[Registrar] Mitra forward failed: ${mitraErr.message}`);
+                }
+            }
+
+            return adminResult;
         } catch (error) {
             logger.error(
                 "Error notifying admins about new registration:",
                 error,
             );
             return { success: false, error: error.message };
+        }
+    }
+
+    // Detect mitra by matching customer address against region names
+    async detectMitraByAddress(address) {
+        try {
+            const addr = String(address || "").toLowerCase();
+            if (!addr) return null;
+
+            const result = await query(`
+                SELECT m.id, m.name, m.phone
+                FROM regions r
+                JOIN mitra m ON m.id = r.mitra_id
+                WHERE m.disabled_at IS NULL
+                  AND m.phone IS NOT NULL AND m.phone != ''
+                  AND LOWER(r.name) <> ''
+            `);
+            if (result.rows.length === 0) return null;
+
+            // Match whichever region name appears in the address
+            const matched = result.rows.find(r => {
+                const regionName = String(r.name || "").toLowerCase();
+                return regionName && addr.includes(regionName);
+            });
+            return matched || null;
+        } catch (error) {
+            logger.warn(`Error detecting mitra by address: ${error.message}`);
+            return null;
         }
     }
 

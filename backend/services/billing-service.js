@@ -92,7 +92,7 @@ class BillingService {
     }
 
     async createInvoice(data) {
-        const invoiceNumber = data.invoice_number || this.generateInvoiceNumber();
+        const invoiceNumber = data.invoice_number || await this.generateInvoiceNumber();
         const sql = `
             INSERT INTO invoices (
                 customer_id, package_id, invoice_number, amount, due_date, status, notes
@@ -132,12 +132,24 @@ class BillingService {
         });
     }
 
-    generateInvoiceNumber() {
+    async generateInvoiceNumber() {
         const date = new Date();
         const year = date.getFullYear();
         const month = String(date.getMonth() + 1).padStart(2, '0');
-        const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
-        return `INV-${year}${month}-${random}`;
+        let invoiceNumber;
+        let isDuplicate = true;
+
+        while (isDuplicate) {
+            const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+            invoiceNumber = `INV-${year}${month}-${random}`;
+            
+            // Check if exists
+            const check = await query('SELECT 1 FROM invoices WHERE invoice_number = $1', [invoiceNumber]);
+            if (check.rows.length === 0) {
+                isDuplicate = false;
+            }
+        }
+        return invoiceNumber;
     }
 
     // ==================
@@ -191,7 +203,7 @@ class BillingService {
                 notes = 'Tagihan bulan pertama';
             }
 
-            const invoiceNumber = this.generateInvoiceNumber();
+            const invoiceNumber = await this.generateInvoiceNumber();
             const sql = `
                 INSERT INTO invoices (
                     customer_id, package_id, invoice_number, amount, total_amount,

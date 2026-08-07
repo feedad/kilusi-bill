@@ -44,9 +44,17 @@ export function DeviceDetailModal({ device, isOpen, onClose, onAction, onEditSSI
         }
     }
 
-    const modelName = device.model || device.productClass || '-';
-    const hardwareVersion = device.hardware_version || '-';
-    const softwareVersion = device.software_version || '-';
+    const getParam = (path: any) => {
+        if (typeof path === 'string') return path;
+        if (path && typeof path === 'object' && '_value' in path) return path._value;
+        return '-';
+    }
+
+    const modelName = getParam((device.parameters?.InternetGatewayDevice?.DeviceInfo as any)?.ModelName);
+    const hardwareVersion = getParam((device.parameters?.InternetGatewayDevice?.DeviceInfo as any)?.HardwareVersion);
+    const softwareVersion = getParam((device.parameters?.InternetGatewayDevice?.DeviceInfo as any)?.SoftwareVersion);
+    const wanIp = getParam((device.parameters?.InternetGatewayDevice?.WANDevice?.['1']?.WANConnectionDevice?.['1'] as any)?.ExternalIPAddress);
+    const wanMac = getParam((device.parameters?.InternetGatewayDevice?.WANDevice?.['1']?.WANConnectionDevice?.['1'] as any)?.MACAddress);
 
     const deviceId = device._id || device.id || ''
 
@@ -206,12 +214,12 @@ export function DeviceDetailModal({ device, isOpen, onClose, onAction, onEditSSI
                             <h3 className="font-semibold mb-3">Network Information</h3>
                             <div className="space-y-2 text-sm">
                                 <div className="flex justify-between">
-                                    <span className="text-muted-foreground">IP TR-069:</span>
-                                    <span className="font-mono">{device.ip_address || '-'}</span>
+                                    <span className="text-muted-foreground">WAN IP:</span>
+                                    <span className="font-mono">{wanIp}</span>
                                 </div>
                                 <div className="flex justify-between">
-                                    <span className="text-muted-foreground">MAC:</span>
-                                    <span className="font-mono">{device.mac_address || device.oui || '-'}</span>
+                                    <span className="text-muted-foreground">WAN MAC:</span>
+                                    <span className="font-mono">{wanMac}</span>
                                 </div>
                             </div>
                         </div>

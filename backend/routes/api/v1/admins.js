@@ -21,6 +21,7 @@ router.get('/', async (req, res) => {
                 username, 
                 role, 
                 email,
+                phone,
                 last_login, 
                 created_at, 
                 updated_at
@@ -102,7 +103,7 @@ router.get('/:id', async (req, res) => {
  */
 router.post('/', async (req, res) => {
     try {
-        const { username, password, role = 'operator', email } = req.body;
+        const { username, password, role = 'operator', email, phone } = req.body;
 
         // Validation
         if (!username || !password) {
@@ -151,10 +152,10 @@ router.post('/', async (req, res) => {
 
         // Insert new admin
         const result = await query(
-            `INSERT INTO users (username, password, role, email) 
-             VALUES ($1, $2, $3, $4) 
-             RETURNING id, username, role, email, created_at`,
-            [username, passwordHash, role, email || null]
+            `INSERT INTO users (username, password, role, email, phone) 
+             VALUES ($1, $2, $3, $4, $5) 
+             RETURNING id, username, role, email, phone, created_at`,
+            [username, passwordHash, role, email || null, phone || null]
         );
 
         logger.info(`Admin created: ${username} with role ${role}`);
@@ -183,7 +184,7 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        const { username, role, email } = req.body;
+        const { username, role, email, phone } = req.body;
         // removed is_active
 
         // Check if admin exists
@@ -245,6 +246,11 @@ router.put('/:id', async (req, res) => {
             values.push(email);
         }
 
+        if (phone !== undefined) {
+            updates.push(`phone = $${paramIndex++}`);
+            values.push(phone);
+        }
+
         // is_active ignored as column doesn't exist
 
         if (updates.length === 0) {
@@ -264,7 +270,7 @@ router.put('/:id', async (req, res) => {
             `UPDATE users 
              SET ${updates.join(', ')} 
              WHERE id = $${paramIndex}
-             RETURNING id, username, role, email, updated_at`,
+             RETURNING id, username, role, email, phone, updated_at`,
             values
         );
 

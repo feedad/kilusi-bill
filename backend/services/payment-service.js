@@ -175,9 +175,10 @@ async function processPaymentAfterVerification({
 
     // 6. WhatsApp notification to customer
     try {
+        const _isoDate = updatedDates?.newIsolirDate ? new Date(updatedDates.newIsolirDate).toLocaleDateString("id-ID", { year: "numeric", month: "long", day: "numeric" }) : undefined;
         const whatsappNotifications = require('../config/whatsapp-notifications');
         await whatsappNotifications.sendPaymentReceivedNotification(paymentId, {
-            dueDate: updatedDates?.newIsolirDate,
+            dueDate: _isoDate,
         });
         logger.info(`[PaymentService] WA notification sent for payment ${paymentId}`);
     } catch (e) {

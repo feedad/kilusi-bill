@@ -7,6 +7,8 @@ import { CONFIG } from '@/lib/config';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 
+import { Navigation, Loader2 } from "lucide-react";
+
 const CoordinateMap = dynamic(
     () => import('@/components/CoordinateMap'),
     { ssr: false }
@@ -31,6 +33,36 @@ export default function RegisterPage() {
     const [checkingCode, setCheckingCode] = useState(false);
     const [codeValid, setCodeValid] = useState(null); // null, true, false
     const [coordinates, setCoordinates] = useState<{ lat: number; lng: number } | null>(null);
+    const [locationLoading, setLocationLoading] = useState(false);
+    const [locationError, setLocationError] = useState("");
+
+    const handleGetLocation = () => {
+        if (!navigator.geolocation) {
+            setLocationError("Geolokasi tidak didukung oleh browser Anda");
+            return;
+        }
+
+        setLocationLoading(true);
+        setLocationError("");
+
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                const lat = parseFloat(position.coords.latitude.toFixed(7));
+                const lng = parseFloat(position.coords.longitude.toFixed(7));
+                setCoordinates({ lat, lng });
+                setLocationLoading(false);
+            },
+            (error) => {
+                setLocationError("Gagal mendapatkan lokasi. Pastikan GPS aktif dan izin diberikan.");
+                setLocationLoading(false);
+            },
+            {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 0
+            }
+        );
+    };
 
     // Pre-fill from URL
     useEffect(() => {
@@ -269,6 +301,22 @@ export default function RegisterPage() {
                                 Pin Lokasi Pemasangan
                             </label>
                             <p className="text-xs text-slate-500 mb-2">Seret pin ke posisi yang tepat</p>
+                            <div className="mb-3 flex flex-col space-y-2">
+                                <button
+                                    type="button"
+                                    onClick={handleGetLocation}
+                                    disabled={locationLoading}
+                                    className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 transition-colors"
+                                >
+                                    {locationLoading ? (
+                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                    ) : (
+                                        <Navigation className="h-4 w-4 mr-2" />
+                                    )}
+                                    Deteksi Lokasi Otomatis (GPS)
+                                </button>
+                                {locationError && <p className="text-sm text-red-600">{locationError}</p>}
+                            </div>
                             <div className="h-[250px] rounded-md overflow-hidden border border-slate-300 dark:border-slate-600">
                                 <CoordinateMap
                                     address={formData.address}

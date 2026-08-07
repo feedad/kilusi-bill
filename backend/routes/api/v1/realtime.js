@@ -385,6 +385,8 @@ router.get('/online-customers', async (req, res) => {
                     acctupdatetime as last_update
                 FROM radacct
                 WHERE acctstoptime IS NULL
+                  AND acctupdatetime IS NOT NULL
+                  AND acctupdatetime >= NOW() - INTERVAL '30 minutes'
                 ORDER BY username, acctstarttime DESC
             `;
 
@@ -841,6 +843,8 @@ router.post('/coa', async (req, res) => {
             FROM radacct
             WHERE username = $1
             AND acctstoptime IS NULL
+            AND acctupdatetime IS NOT NULL
+            AND acctupdatetime >= NOW() - INTERVAL '30 minutes'
             ORDER BY acctstarttime DESC
             LIMIT 1
         `;
@@ -856,7 +860,7 @@ router.post('/coa', async (req, res) => {
 
         const session = sessionResult.rows[0];
 
-        // Get NAS secret from nas table
+        // Get NAS IP for routing
         const nasQuery = `
             SELECT id, secret, coaport, coa_proxy_port, nasname
             FROM nas
@@ -874,9 +878,8 @@ router.post('/coa', async (req, res) => {
         }
 
         const nas = nasResult.rows[0];
-        const coaPort = nas.coa_proxy_port || (20000 + nas.id);
 
-        logger.info(`📡 Sending CoA to NAS ${session.nas_ip}:${coaPort} for user ${targetUsername}`);
+        logger.info(`📡 Sending CoA via coa_relay (37999) for user ${targetUsername} to NAS ${session.nas_ip}`);
 
         // Import radius disconnect module
         const radiusDisconnect = require('../../../config/radius-disconnect');
@@ -884,10 +887,8 @@ router.post('/coa', async (req, res) => {
         const result = await radiusDisconnect.disconnectUser({
             username: targetUsername,
             nasIp: session.nas_ip,
-            nasSecret: nas.secret,
             sessionId: session.session_id,
-            framedIp: session.framed_ip,
-            coaPort: coaPort
+            framedIp: session.framed_ip
         });
 
         if (result.success) {
@@ -1348,6 +1349,8 @@ router.get('/online-status', asyncHandler(async (req, res) => {
                 EXTRACT(EPOCH FROM (NOW() - acctstarttime)) as uptime_seconds
             FROM radacct
             WHERE acctstoptime IS NULL
+              AND acctupdatetime IS NOT NULL
+              AND acctupdatetime >= NOW() - INTERVAL '30 minutes'
             ORDER BY acctstarttime DESC
         `;
 
@@ -1436,19 +1439,20 @@ router.get('/online-status', asyncHandler(async (req, res) => {
 // POST /api/v1/realtime/radius-sync - Reopen RADIUS sessions stopped by restart
 router.post('/radius-sync', async (req, res) => {
     try {
-        const radiusSync = require('../../../config/radius-sync');
-        const result = await radiusSync.reopenStoppedSessions();
+        const radiusCleanup = require('../../../services/radius-cleanup');
+        await radiusCleanup.cleanup();
+        const stats = await radiusCleanup.getStats();
 
         res.json({
-            success: result.success,
-            reopened: result.reopened,
-            message: result.success
-                ? `${result.reopened} session(s) reopened`
-                : `Reopen failed: ${result.error}`,
+            success: true,
+            stale_remaining: stats?.staleRows || 0,
+            message: (stats?.staleRows || 0) > 0
+                ? `${stats.staleRows} sesi stale tersisa`
+                : 'Tidak ada sesi stale. Database bersih.',
             timestamp: new Date()
         });
     } catch (error) {
-        logger.error('Error in RADIUS sync reopen:', error);
+        logger.error('Error in RADIUS sync cleanup:', error);
         res.status(500).json({
             success: false,
             message: `Terjadi kesalahan: ${error.message}`

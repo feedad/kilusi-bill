@@ -10,6 +10,35 @@ const { asyncHandler } = require('../../../middleware/response');
 const serviceSuspension = require('../../../config/serviceSuspension');
 const { generateInvoiceNumber } = require('../../../config/billing');
 
+// Top-level Date helpers for safe month arithmetic
+function parseDateParts(dateInput) {
+    if (!dateInput) return new Date();
+    if (dateInput instanceof Date) return new Date(dateInput.getFullYear(), dateInput.getMonth(), dateInput.getDate());
+    const str = String(dateInput).split('T')[0];
+    const parts = str.split('-');
+    if (parts.length === 3) return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    return new Date(dateInput);
+}
+
+function addMonthsToDate(dateInput, months, targetDay) {
+    const d = parseDateParts(dateInput);
+    const dayToUse = targetDay || d.getDate();
+    const y = d.getFullYear();
+    const m = d.getMonth() + months;
+    const adjY = y + Math.floor(m / 12);
+    const adjM = ((m % 12) + 12) % 12;
+    const lastDayOfMonth = new Date(adjY, adjM + 1, 0).getDate();
+    const day = Math.min(dayToUse, lastDayOfMonth);
+    return new Date(adjY, adjM, day);
+}
+
+function formatDateISO(date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
 function categorizePaymentMethod(rawMethod, gateway) {
     if (!rawMethod || rawMethod.trim() === '') return { method: '-', channel: '-' };
 
@@ -697,28 +726,52 @@ router.post('/invoices/rapel/calculate', asyncHandler(async (req, res) => {
     const svc = serviceResult.rows[0];
     const price = parseFloat(svc.package_price) || 0;
 
-    // Find last invoice month (same logic as execute endpoint)
-    const lastInvResult = await query(
-        `SELECT MAX(due_date) as last_due_date FROM invoices i WHERE ${invFilter}`, invParams
-    );
-    const rawLastDue = lastInvResult.rows[0]?.last_due_date;
-    const lastDueDate = rawLastDue
-        ? new Date(rawLastDue)
-        : (svc.isolir_date ? new Date(svc.isolir_date) : new Date());
-    const nextMonth = new Date(lastDueDate.getFullYear(), lastDueDate.getMonth() + 1, 1);
+    // Date helpers for safe month arithmetic
+    const parseDateParts = (dateInput) => {
+        if (!dateInput) return new Date();
+        if (dateInput instanceof Date) return new Date(dateInput.getFullYear(), dateInput.getMonth(), dateInput.getDate());
+        const str = String(dateInput).split('T')[0];
+        const parts = str.split('-');
+        if (parts.length === 3) return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+        return new Date(dateInput);
+    };
+    const addMonthsToDate = (dateInput, months, targetDay) => {
+        const d = parseDateParts(dateInput);
+        const dayToUse = targetDay || d.getDate();
+        const y = d.getFullYear();
+        const m = d.getMonth() + months;
+        const adjY = y + Math.floor(m / 12);
+        const adjM = ((m % 12) + 12) % 12;
+        const lastDayOfMonth = new Date(adjY, adjM + 1, 0).getDate();
+        const day = Math.min(dayToUse, lastDayOfMonth);
+        return new Date(adjY, adjM, day);
+    };
+    const formatDateISO = (date) => {
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    };
 
-    // Calculate last due_date (matches execute endpoint)
-    const lastPeriodMonth = new Date(nextMonth.getFullYear(), nextMonth.getMonth() + numMonths - 1, 1);
-    let nextOverdue;
-    const isFixed = svc.siklus === 'fixed' || svc.siklus === 'TETAP' || svc.siklus === 'tetap';
-    if (isFixed) {
-        const billingDay = svc.isolir_date ? new Date(svc.isolir_date).getDate() : lastDueDate.getDate();
-        const lastDayOfMonth = new Date(lastPeriodMonth.getFullYear(), lastPeriodMonth.getMonth() + 1, 0).getDate();
-        nextOverdue = new Date(lastPeriodMonth.getFullYear(), lastPeriodMonth.getMonth(), Math.min(billingDay, lastDayOfMonth));
+    // Find last PAID invoice due_date
+    const lastPaidInvResult = await query(
+        `SELECT MAX(due_date) as last_due_date FROM invoices i WHERE ${invFilter} AND i.status = 'paid'`, invParams
+    );
+    const rawLastPaid = lastPaidInvResult.rows[0]?.last_due_date;
+
+    let baseDate;
+    if (svc.isolir_date) {
+        baseDate = parseDateParts(svc.isolir_date);
+    } else if (rawLastPaid) {
+        baseDate = addMonthsToDate(rawLastPaid, 1);
     } else {
-        nextOverdue = new Date(lastPeriodMonth.getFullYear(), lastPeriodMonth.getMonth() + 1, 0);
+        baseDate = new Date();
     }
-    const nextOverdueStr = `${nextOverdue.getFullYear()}-${String(nextOverdue.getMonth() + 1).padStart(2, '0')}-${String(nextOverdue.getDate()).padStart(2, '0')}`;
+    const billingDay = baseDate.getDate();
+
+    // next_overdue is the NEW isolir_date after rapel period (baseDate + numMonths)
+    const nextOverdue = addMonthsToDate(baseDate, numMonths, billingDay);
+    const nextOverdueStr = formatDateISO(nextOverdue);
 
     // Bulk discount
     const bulkSettings = await query(`SELECT * FROM bulk_payment_settings WHERE id = 1`);
@@ -792,15 +845,21 @@ router.post('/invoices/rapel', asyncHandler(async (req, res) => {
         const svc = svcResult.rows[0];
         const price = parseFloat(svc.package_price) || 0;
 
-        const lastInvResult = await client.query(
-            `SELECT MAX(due_date) as last_due_date FROM invoices i WHERE ${invFilter}`, invParams
+        // Find last PAID invoice due_date
+        const lastPaidResult = await client.query(
+            `SELECT MAX(due_date) as last_due_date FROM invoices i WHERE ${invFilter} AND i.status = 'paid'`, invParams
         );
-        const rawLastDueDate = lastInvResult.rows[0]?.last_due_date;
-        const lastDueDate = rawLastDueDate
-            ? new Date(rawLastDueDate)
-            : (svc.isolir_date ? new Date(svc.isolir_date) : new Date());
-        // Base month: always +1 month from reference date
-        const nextMonth = new Date(lastDueDate.getFullYear(), lastDueDate.getMonth() + 1, 1);
+        const rawLastPaid = lastPaidResult.rows[0]?.last_due_date;
+
+        let baseDate;
+        if (svc.isolir_date) {
+            baseDate = parseDateParts(svc.isolir_date);
+        } else if (rawLastPaid) {
+            baseDate = addMonthsToDate(rawLastPaid, 1);
+        } else {
+            baseDate = new Date();
+        }
+        const billingDay = baseDate.getDate();
 
         const bulkSettings = await client.query(`SELECT * FROM bulk_payment_settings WHERE id = 1`);
         const settings = bulkSettings.rows[0] || {};
@@ -825,18 +884,8 @@ router.post('/invoices/rapel', asyncHandler(async (req, res) => {
 
         const generatedInvoices = [];
         for (let i = 0; i < numMonths; i++) {
-            const periodMonth = new Date(nextMonth.getFullYear(), nextMonth.getMonth() + i, 1);
-
-            let dueDate;
-            const isFixed = svc.siklus === 'fixed' || svc.siklus === 'TETAP' || svc.siklus === 'tetap';
-            if (isFixed) {
-                const billingDay = svc.isolir_date ? new Date(svc.isolir_date).getDate() : lastDueDate.getDate();
-                const lastDayOfMonth = new Date(periodMonth.getFullYear(), periodMonth.getMonth() + 1, 0).getDate();
-                dueDate = new Date(periodMonth.getFullYear(), periodMonth.getMonth(), Math.min(billingDay, lastDayOfMonth));
-            } else {
-                dueDate = new Date(periodMonth.getFullYear(), periodMonth.getMonth() + 1, 0);
-            }
-            const invoiceNumber = generateInvoiceNumber();
+            const dueDate = addMonthsToDate(baseDate, i, billingDay);
+            const invoiceNumber = await generateInvoiceNumber();
             const invDiscount = discountPerInvoice + (i < discountRemainder ? 1 : 0);
             const finalAmount = price - invDiscount;
 
@@ -849,7 +898,7 @@ router.post('/invoices/rapel', asyncHandler(async (req, res) => {
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9)
                  RETURNING *`,
                  [customer_id, svc.package_id, invoiceNumber, price, finalAmount,
-                  `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, '0')}-${String(dueDate.getDate()).padStart(2, '0')}`,
+                  formatDateISO(dueDate),
                  payment_method ? 'paid' : 'unpaid', invNotes, svc.service_number]
             );
 
@@ -885,10 +934,10 @@ router.post('/invoices/rapel', asyncHandler(async (req, res) => {
             }
         }
 
-        const finalDueDate = generatedInvoices.length > 0
-            ? generatedInvoices[generatedInvoices.length - 1].due_date : null;
-        const firstDueDate = generatedInvoices.length > 0
-            ? generatedInvoices[0].due_date : null;
+        const nextIsolirDate = addMonthsToDate(baseDate, numMonths, billingDay);
+        const nextIsolirDateStr = formatDateISO(nextIsolirDate);
+        const lastPaidInv = generatedInvoices[generatedInvoices.length - 1];
+        const lastPaidDueDateStr = lastPaidInv.due_date ? formatDateISO(parseDateParts(lastPaidInv.due_date)) : formatDateISO(addMonthsToDate(nextIsolirDate, -1, billingDay));
 
         return {
             customer_id, months: numMonths,
@@ -898,15 +947,15 @@ router.post('/invoices/rapel', asyncHandler(async (req, res) => {
                 final_amount: i.final_amount, due_date: i.due_date, status: i.status
             })),
             payment: payment ? { id: payment.id, amount: payment.amount, method: payment.payment_method, date: payment.payment_date } : null,
-            next_overdue: finalDueDate,
+            next_overdue: nextIsolirDateStr,
             // Post-processing data
             serviceId: svc.service_id,
             serviceStatus: svc.service_status,
             packageId: svc.package_id,
             siklus: svc.siklus,
             oldIsolirDate: svc.isolir_date,
-            firstDueDate: firstDueDate,
-            lastDueDate: finalDueDate
+            newActiveDateStr: lastPaidDueDateStr,
+            newIsolirDateStr: nextIsolirDateStr
         };
     });
 
@@ -920,29 +969,10 @@ router.post('/invoices/rapel', asyncHandler(async (req, res) => {
             // 1. Update service dates
             // active_date = start of the period we just paid for (= previous isolir_date)
             // isolir_date = next billing cycle after the last paid invoice
-            let newActiveDate = null;
-            let newActiveDateStr = null;
-            let newIsolirDate = null;
-            let newIsolirDateStr = null;
-            if (result.lastDueDate) {
-                if (result.oldIsolirDate) {
-                    newActiveDate = new Date(result.oldIsolirDate);
-                } else if (result.firstDueDate) {
-                    const d = new Date(result.firstDueDate);
-                    const prevMonth = new Date(d.getFullYear(), d.getMonth() - 1, 1);
-                    const lastDayOfPrev = new Date(prevMonth.getFullYear(), prevMonth.getMonth() + 1, 0).getDate();
-                    newActiveDate = new Date(prevMonth.getFullYear(), prevMonth.getMonth(), Math.min(d.getDate(), lastDayOfPrev));
-                } else {
-                    newActiveDate = new Date(result.lastDueDate);
-                }
-                newActiveDateStr = `${newActiveDate.getFullYear()}-${String(newActiveDate.getMonth() + 1).padStart(2, '0')}-${String(newActiveDate.getDate()).padStart(2, '0')}`;
+            let newActiveDateStr = result.newActiveDateStr;
+            let newIsolirDateStr = result.newIsolirDateStr;
 
-                // isolir_date = end of last paid period + 1 cycle (= next cron trigger date)
-                newIsolirDate = await BillingCycleService.calculateIsolirDate(
-                    result.customer_id, new Date(result.lastDueDate), null, result.siklus
-                );
-                newIsolirDateStr = `${newIsolirDate.getFullYear()}-${String(newIsolirDate.getMonth() + 1).padStart(2, '0')}-${String(newIsolirDate.getDate()).padStart(2, '0')}`;
-
+            if (newActiveDateStr && newIsolirDateStr) {
                 await query(`
                     UPDATE services SET active_date = $1::date, isolir_date = $2::date, updated_at = NOW()
                     WHERE id = $3
@@ -974,7 +1004,8 @@ router.post('/invoices/rapel', asyncHandler(async (req, res) => {
 
             // 3. WhatsApp notification
             try {
-                const notifDueDate = newIsolirDateStr || result.lastDueDate;
+                const _fmtDate = (d) => d ? new Date(d).toLocaleDateString("id-ID", { year: "numeric", month: "long", day: "numeric" }) : undefined;
+                const notifDueDate = _fmtDate(newIsolirDateStr) || _fmtDate(result.lastDueDate);
                 await whatsappNotifications.sendPaymentReceivedNotification(result.payment.id, {
                     dueDate: notifDueDate
                 });
@@ -1193,7 +1224,7 @@ router.post('/invoices', asyncHandler(async (req, res) => {
     }
 
     // Generate invoice number
-    const invoiceNumber = generateInvoiceNumber();
+    const invoiceNumber = await generateInvoiceNumber();
 
     // Get service_number for this customer
     let serviceNumber = reqServiceNumber;
@@ -1532,9 +1563,10 @@ router.post('/payments', asyncHandler(async (req, res) => {
 
     // Send WhatsApp notification for payment received (after dates updated)
     try {
+        const _isoDate = updatedDates?.newIsolirDate ? new Date(updatedDates.newIsolirDate).toLocaleDateString("id-ID", { year: "numeric", month: "long", day: "numeric" }) : undefined;
         const whatsappNotifications = require('../../../config/whatsapp-notifications');
         await whatsappNotifications.sendPaymentReceivedNotification(payment.id, {
-            dueDate: updatedDates?.newIsolirDate
+            dueDate: _isoDate
         });
         logger.info(`WhatsApp notification sent for payment ${payment.id}`);
     } catch (notifError) {
@@ -1807,9 +1839,11 @@ router.post('/invoices/:id/resend', asyncHandler(async (req, res) => {
 
         const invoice = invoiceResult.rows[0];
 
-        // Check if invoice can be resent (overdue or unpaid)
-        if (invoice.status !== 'overdue' && invoice.status !== 'unpaid' && invoice.status !== 'sent') {
-            return res.sendError('INVALID_OPERATION', 'Invoice tidak dapat dikirim ulang. Hanya invoice yang overdue, unpaid, atau sent yang dapat dikirim ulang.', [], {
+        // Check if invoice can be resent (overdue, unpaid, sent, or suspended)
+        const resendableStatuses = ['overdue', 'unpaid', 'sent', 'suspended'];
+        if (!resendableStatuses.includes(invoice.status)) {
+            logger.warn(`[Resend] Invoice ${invoice.invoice_number} (${invoice.status}) ditolak untuk dikirim ulang`);
+            return res.sendError('INVALID_OPERATION', 'Invoice tidak dapat dikirim ulang. Hanya invoice yang overdue, unpaid, sent, atau suspended yang dapat dikirim ulang.', [], {
                 current_status: invoice.status
             });
         }

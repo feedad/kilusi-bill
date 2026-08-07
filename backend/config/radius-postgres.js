@@ -269,6 +269,8 @@ async function getActivePPPoEConnections() {
                 acctstarttime
             FROM radacct
             WHERE acctstoptime IS NULL
+              AND acctupdatetime IS NOT NULL
+              AND acctupdatetime >= NOW() - INTERVAL '30 minutes'
             ORDER BY acctstarttime DESC
         `);
 
@@ -303,6 +305,8 @@ async function getUserConnectionStatus(username) {
                 callingstationid
             FROM radacct
             WHERE username = $1 AND acctstoptime IS NULL
+              AND acctupdatetime IS NOT NULL
+              AND acctupdatetime >= NOW() - INTERVAL '30 minutes'
             ORDER BY acctstarttime DESC
             LIMIT 1
         `, [username]);
@@ -477,6 +481,8 @@ async function getOnlineUsersByGroup() {
             JOIN radusergroup rug ON ra.username = rug.username
             JOIN radgroup rg ON rug.groupname = rg.groupname
             WHERE ra.acctstoptime IS NULL
+              AND ra.acctupdatetime IS NOT NULL
+              AND ra.acctupdatetime >= NOW() - INTERVAL '30 minutes'
             GROUP BY rg.groupname
             ORDER BY rg.groupname
         `);
