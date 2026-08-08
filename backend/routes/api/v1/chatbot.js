@@ -295,6 +295,75 @@ router.get('/invoices/search', chatbotPublicAuth, async (req, res) => {
 });
 
 /**
+ * GET /customers/search
+ * Search customers by name, address, phone, or service_number.
+ * Used by Omnichat to lookup customer information for AI/admin queries.
+ */
+router.get('/customers/search', chatbotPublicAuth, async (req, res) => {
+    try {
+        const q = (req.query.q || '').trim();
+
+        if (!q || q.length < 2) {
+            return res.json({ success: true, data: [], total: 0, message: 'Minimal 2 karakter' });
+        }
+
+        const result = await query(`
+            SELECT DISTINCT ON (COALESCE(s.id::text, c.id::text))
+                c.id as customer_id,
+                c.name as customer_name,
+                c.phone as customer_phone,
+                c.email as customer_email,
+                COALESCE(s.address_installation, c.address) as address,
+                s.service_number,
+                COALESCE(s.status, 'no_service') as service_status,
+                p.name as package_name,
+                p.price as package_price,
+                s.active_date,
+                s.isolir_date,
+                r.name as region_name,
+                m.name as mitra_name
+            FROM customers c
+            LEFT JOIN services s ON s.customer_id = c.id
+            LEFT JOIN packages p ON s.package_id = p.id
+            LEFT JOIN regions r ON s.region_id = r.id
+            LEFT JOIN mitra m ON r.mitra_id = m.id
+            WHERE (
+                c.name ILIKE '%' || $1 || '%'
+                OR c.address ILIKE '%' || $1 || '%'
+                OR s.address_installation ILIKE '%' || $1 || '%'
+                OR s.service_number ILIKE '%' || $1 || '%'
+                OR c.phone ILIKE '%' || $1 || '%'
+            )
+            ORDER BY COALESCE(s.id::text, c.id::text), s.created_at DESC NULLS LAST
+            LIMIT 20
+        `, [q]);
+
+        return res.json({
+            success: true,
+            total: result.rows.length,
+            data: result.rows.map(row => ({
+                customer_id: row.customer_id,
+                customer_name: row.customer_name,
+                customer_phone: row.customer_phone,
+                customer_email: row.customer_email || null,
+                address: row.address || null,
+                service_number: row.service_number || null,
+                service_status: row.service_status,
+                package_name: row.package_name || null,
+                package_price: row.package_price ? Math.round(parseFloat(row.package_price)) : null,
+                active_date: row.active_date ? new Date(row.active_date).toISOString().split('T')[0] : null,
+                isolir_date: row.isolir_date ? new Date(row.isolir_date).toISOString().split('T')[0] : null,
+                region_name: row.region_name || null,
+                mitra_name: row.mitra_name || null,
+            })),
+        });
+    } catch (error) {
+        logger.error('[Chatbot] Customer search error:', error);
+        return res.json({ success: false, message: 'Terjadi kesalahan. Silakan coba lagi.' });
+    }
+});
+
+/**
  * POST /support
  * Create support ticket from WhatsApp
  */

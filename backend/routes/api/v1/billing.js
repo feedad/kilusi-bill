@@ -1692,7 +1692,7 @@ router.post('/payments/:id/rollback', asyncHandler(async (req, res) => {
             // Suspend service again if this was the payment that reactivated the customer
             const serviceSuspension = require('../../../config/serviceSuspension');
 
-            // Get service data
+            // Get service data matching the specific invoice being rolled back
             const serviceDataResult = await query(`
                 SELECT
                     s.id as service_id,
@@ -1703,12 +1703,13 @@ router.post('/payments/:id/rollback', asyncHandler(async (req, res) => {
                     c.name,
                     p.group as package_group,
                     p.pppoe_profile
-                FROM services s
+                FROM invoices i
+                JOIN services s ON s.service_number = i.service_number
                 JOIN customers c ON c.id = s.customer_id
                 LEFT JOIN packages p ON p.id = s.package_id
-                WHERE s.customer_id = $1
+                WHERE i.id = $1
                 LIMIT 1
-            `, [payment.customer_id]);
+            `, [payment.invoice_id]);
 
             if (serviceDataResult.rows.length > 0) {
                 const serviceData = serviceDataResult.rows[0];

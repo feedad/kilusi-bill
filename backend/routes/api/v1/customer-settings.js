@@ -176,11 +176,26 @@ async function syncToBackendConfiguration(settings) {
     const updates = {};
     let hasUpdates = false;
 
-    // 1. Sync 'invoice_days_before_suspend' -> 'invoice_advance_days'
-    if (settings.invoice_days_before_suspend) {
+    // 1. Sync 'invoice_advance_days' or 'invoice_days_before_suspend' -> 'invoice_advance_days'
+    if (settings.invoice_advance_days) {
+      const val = parseInt(settings.invoice_advance_days.value || settings.invoice_advance_days);
+      if (!isNaN(val)) {
+        updates.invoice_advance_days = val;
+        hasUpdates = true;
+      }
+    } else if (settings.invoice_days_before_suspend) {
       const val = parseInt(settings.invoice_days_before_suspend.value || settings.invoice_days_before_suspend);
       if (!isNaN(val)) {
         updates.invoice_advance_days = val;
+        hasUpdates = true;
+      }
+    }
+
+    // 1b. Sync 'grace_period_days' -> 'grace_period_days'
+    if (settings.grace_period_days !== undefined) {
+      const val = parseInt(settings.grace_period_days.value || settings.grace_period_days);
+      if (!isNaN(val)) {
+        updates.grace_period_days = val;
         hasUpdates = true;
       }
     }

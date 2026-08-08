@@ -244,6 +244,22 @@ export default function CustomerDefaultSettingsModal({ open, onClose }: Customer
 
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-2">
+                      Pembuatan Tagihan (Hari Sebelum Jatuh Tempo)
+                    </label>
+                    <Input
+                      type="number"
+                      value={formData.invoice_advance_days ?? 7}
+                      onChange={(e) => handleInputChange('invoice_advance_days', parseInt(e.target.value) || 7)}
+                      min={1}
+                      max={30}
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Berapa hari sebelum jatuh tempo tagihan otomatis diterbitkan (misal: 7 = H-7 sebelum jatuh tempo)
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
                       Grace Period (Tenggat Hari Sebelum Suspend)
                     </label>
                     <Input
