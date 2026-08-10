@@ -162,10 +162,11 @@ async function generateBrandedPage(invoiceId) {
       if (acc.isActive === false) return false;
       // Company account (is_company === true) -> show for ALL customers
       if (acc.is_company === true) return true;
-      // No mitra_id assigned -> show as fallback
-      if (!acc.mitra_id) return true;
-      // Mitra account -> only show if matches customer's mitra_id
-      return inv.customer_mitra_id && String(acc.mitra_id) === String(inv.customer_mitra_id);
+      const mIds = Array.isArray(acc.mitra_ids) ? acc.mitra_ids : (acc.mitra_id ? [acc.mitra_id] : []);
+      // No mitra_ids assigned -> show as fallback
+      if (mIds.length === 0) return true;
+      // Mitra account -> show if customer's mitra_id is in mitra_ids list
+      return inv.customer_mitra_id && mIds.map(String).includes(String(inv.customer_mitra_id));
     };
 
     if (ps?.bank_accounts) banks = ps.bank_accounts.filter(filterAccountForMitra);

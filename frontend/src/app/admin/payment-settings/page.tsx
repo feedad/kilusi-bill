@@ -34,6 +34,7 @@ interface BankAccount {
     isActive: boolean
     is_company?: boolean
     mitra_id?: string | null
+    mitra_ids?: string[]
 }
 
 interface EWallet {
@@ -44,6 +45,7 @@ interface EWallet {
     isActive: boolean
     is_company?: boolean
     mitra_id?: string | null
+    mitra_ids?: string[]
 }
 
 interface MitraOption {
@@ -229,6 +231,7 @@ export default function PaymentSettingsPage() {
             return
         }
 
+        const selectedMitraIds = bankForm.is_company ? [] : (bankForm.mitra_ids || (bankForm.mitra_id ? [bankForm.mitra_id] : []))
         const newAccount: BankAccount = {
             id: editingBank?.id || Date.now().toString(),
             bankName: bankForm.bankName,
@@ -236,7 +239,8 @@ export default function PaymentSettingsPage() {
             accountName: bankForm.accountName,
             isActive: bankForm.isActive ?? true,
             is_company: bankForm.is_company ?? true,
-            mitra_id: bankForm.is_company ? null : (bankForm.mitra_id || null)
+            mitra_id: selectedMitraIds[0] || null,
+            mitra_ids: selectedMitraIds
         }
 
         if (editingBank) {
@@ -245,7 +249,7 @@ export default function PaymentSettingsPage() {
             setBankAccounts(prev => [...prev, newAccount])
         }
 
-        setBankForm({ bankName: '', accountNumber: '', accountName: '', isActive: true, is_company: true, mitra_id: '' })
+        setBankForm({ bankName: '', accountNumber: '', accountName: '', isActive: true, is_company: true, mitra_id: '', mitra_ids: [] })
         setShowBankForm(false)
         setEditingBank(null)
         setHasChanges(true)
@@ -260,7 +264,11 @@ export default function PaymentSettingsPage() {
 
     const editBankAccount = (account: BankAccount) => {
         setEditingBank(account)
-        setBankForm(account)
+        const initialMitraIds = account.mitra_ids || (account.mitra_id ? [account.mitra_id] : [])
+        setBankForm({
+            ...account,
+            mitra_ids: initialMitraIds
+        })
         setShowBankForm(true)
     }
 
@@ -271,6 +279,7 @@ export default function PaymentSettingsPage() {
             return
         }
 
+        const selectedWalletMitraIds = walletForm.is_company ? [] : (walletForm.mitra_ids || (walletForm.mitra_id ? [walletForm.mitra_id] : []))
         const newWallet: EWallet = {
             id: editingWallet?.id || Date.now().toString(),
             provider: walletForm.provider,
@@ -278,7 +287,8 @@ export default function PaymentSettingsPage() {
             accountName: walletForm.accountName,
             isActive: walletForm.isActive ?? true,
             is_company: walletForm.is_company ?? true,
-            mitra_id: walletForm.is_company ? null : (walletForm.mitra_id || null)
+            mitra_id: selectedWalletMitraIds[0] || null,
+            mitra_ids: selectedWalletMitraIds
         }
 
         if (editingWallet) {
@@ -287,7 +297,7 @@ export default function PaymentSettingsPage() {
             setEWallets(prev => [...prev, newWallet])
         }
 
-        setWalletForm({ provider: '', phoneNumber: '', accountName: '', isActive: true, is_company: true, mitra_id: '' })
+        setWalletForm({ provider: '', phoneNumber: '', accountName: '', isActive: true, is_company: true, mitra_id: '', mitra_ids: [] })
         setShowWalletForm(false)
         setEditingWallet(null)
         setHasChanges(true)
@@ -302,7 +312,11 @@ export default function PaymentSettingsPage() {
 
     const editEWallet = (wallet: EWallet) => {
         setEditingWallet(wallet)
-        setWalletForm(wallet)
+        const initialMitraIds = wallet.mitra_ids || (wallet.mitra_id ? [wallet.mitra_id] : [])
+        setWalletForm({
+            ...wallet,
+            mitra_ids: initialMitraIds
+        })
         setShowWalletForm(true)
     }
 
@@ -512,17 +526,28 @@ export default function PaymentSettingsPage() {
 
                                         {!bankForm.is_company && (
                                             <div>
-                                                <label className="text-sm font-medium">Mitra Pemilik Rekening</label>
-                                                <select
-                                                    value={bankForm.mitra_id || ''}
-                                                    onChange={(e) => setBankForm({ ...bankForm, mitra_id: e.target.value })}
-                                                    className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
-                                                >
-                                                    <option value="">-- Pilih Mitra --</option>
-                                                    {mitraList.map(m => (
-                                                        <option key={m.id} value={m.id}>{m.name}</option>
-                                                    ))}
-                                                </select>
+                                                <label className="text-sm font-medium block mb-1">Pilih Mitra Pemilik Rekening</label>
+                                                <div className="flex flex-wrap gap-3 p-2 border rounded-md bg-background">
+                                                    {mitraList.map(m => {
+                                                        const currentIds = bankForm.mitra_ids || (bankForm.mitra_id ? [bankForm.mitra_id] : []);
+                                                        const isChecked = currentIds.includes(m.id);
+                                                        return (
+                                                            <label key={m.id} className="flex items-center gap-1.5 text-xs font-medium cursor-pointer">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={isChecked}
+                                                                    onChange={(e) => {
+                                                                        const next = e.target.checked
+                                                                            ? [...currentIds, m.id]
+                                                                            : currentIds.filter(id => id !== m.id);
+                                                                        setBankForm({ ...bankForm, mitra_ids: next, mitra_id: next[0] || null });
+                                                                    }}
+                                                                />
+                                                                {m.name}
+                                                            </label>
+                                                        );
+                                                    })}
+                                                </div>
                                             </div>
                                         )}
                                     </div>
@@ -570,7 +595,11 @@ export default function PaymentSettingsPage() {
                                                             <Badge variant="outline" className="border-blue-500 text-blue-500">Perusahaan</Badge>
                                                         ) : (
                                                             <Badge variant="outline" className="border-purple-500 text-purple-500">
-                                                                {mitraList.find(m => m.id === account.mitra_id)?.name || 'Pribadi Mitra'}
+                                                                {(() => {
+                                                                    const ids = account.mitra_ids || (account.mitra_id ? [account.mitra_id] : []);
+                                                                    const names = ids.map(id => mitraList.find(m => m.id === id)?.name).filter(Boolean);
+                                                                    return names.length > 0 ? names.join(', ') : 'Pribadi Mitra';
+                                                                })()}
                                                             </Badge>
                                                         )}
                                                     </div>
@@ -663,17 +692,28 @@ export default function PaymentSettingsPage() {
 
                                         {!walletForm.is_company && (
                                             <div>
-                                                <label className="text-sm font-medium">Mitra Pemilik Rekening</label>
-                                                <select
-                                                    value={walletForm.mitra_id || ''}
-                                                    onChange={(e) => setWalletForm({ ...walletForm, mitra_id: e.target.value })}
-                                                    className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
-                                                >
-                                                    <option value="">-- Pilih Mitra --</option>
-                                                    {mitraList.map(m => (
-                                                        <option key={m.id} value={m.id}>{m.name}</option>
-                                                    ))}
-                                                </select>
+                                                <label className="text-sm font-medium block mb-1">Pilih Mitra Pemilik Rekening</label>
+                                                <div className="flex flex-wrap gap-3 p-2 border rounded-md bg-background">
+                                                    {mitraList.map(m => {
+                                                        const currentIds = walletForm.mitra_ids || (walletForm.mitra_id ? [walletForm.mitra_id] : []);
+                                                        const isChecked = currentIds.includes(m.id);
+                                                        return (
+                                                            <label key={m.id} className="flex items-center gap-1.5 text-xs font-medium cursor-pointer">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={isChecked}
+                                                                    onChange={(e) => {
+                                                                        const next = e.target.checked
+                                                                            ? [...currentIds, m.id]
+                                                                            : currentIds.filter(id => id !== m.id);
+                                                                        setWalletForm({ ...walletForm, mitra_ids: next, mitra_id: next[0] || null });
+                                                                    }}
+                                                                />
+                                                                {m.name}
+                                                            </label>
+                                                        );
+                                                    })}
+                                                </div>
                                             </div>
                                         )}
                                     </div>
@@ -723,7 +763,11 @@ export default function PaymentSettingsPage() {
                                                             <Badge variant="outline" className="border-blue-500 text-blue-500">Perusahaan</Badge>
                                                         ) : (
                                                             <Badge variant="outline" className="border-purple-500 text-purple-500">
-                                                                {mitraList.find(m => m.id === wallet.mitra_id)?.name || 'Pribadi Mitra'}
+                                                                {(() => {
+                                                                    const ids = wallet.mitra_ids || (wallet.mitra_id ? [wallet.mitra_id] : []);
+                                                                    const names = ids.map(id => mitraList.find(m => m.id === id)?.name).filter(Boolean);
+                                                                    return names.length > 0 ? names.join(', ') : 'Pribadi Mitra';
+                                                                })()}
                                                             </Badge>
                                                         )}
                                                     </div>

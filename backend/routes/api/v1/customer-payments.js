@@ -50,8 +50,9 @@ router.get('/methods', customerJwtAuth, asyncHandler(async (req, res) => {
     const filterAccountForMitra = (acc) => {
       if (acc.isActive === false) return false;
       if (acc.is_company === true) return true;
-      if (!acc.mitra_id) return true;
-      return customerMitraId && String(acc.mitra_id) === String(customerMitraId);
+      const mIds = Array.isArray(acc.mitra_ids) ? acc.mitra_ids : (acc.mitra_id ? [acc.mitra_id] : []);
+      if (mIds.length === 0) return true;
+      return customerMitraId && mIds.map(String).includes(String(customerMitraId));
     };
 
     // Build manual payment methods from payment_settings
