@@ -601,7 +601,7 @@ class InvoiceScheduler {
                 WHERE s.status = 'active'
                 AND LOWER(s.siklus) IN ('fixed', 'profile', 'tetap')
                 AND s.isolir_date IS NOT NULL
-                AND DATE(s.isolir_date) = (CURRENT_DATE + INTERVAL '${advanceDays} days')::date
+                AND DATE(s.isolir_date) <= (CURRENT_DATE + INTERVAL '${advanceDays} days')::date
             `);
 
             const eligibleServices = servicesResult.rows;
