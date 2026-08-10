@@ -1375,6 +1375,18 @@ Terima kasih telah menggunakan layanan kami.
                             `✅ [Baileys] Image notification sent to ${phoneNumber} with image`,
                         );
 
+                        await messageLogger.logMessage({
+                            phone_number: phoneNumber,
+                            customer_id: options.customer_id,
+                            customer_name: options.customer_name,
+                            notification_type: options.notification_type || "general",
+                            message_content: fullMessage,
+                            message_type: "image",
+                            status: "sent",
+                            sent_via: "baileys",
+                            created_at: new Date(),
+                        }).catch(e => logger.warn('[Baileys] Log message failed:', e.message));
+
                         this.incrementDailyMessageCount();
                         return {
                             success: true,
@@ -1400,6 +1412,18 @@ Terima kasih telah menggunakan layanan kami.
             logger.info(
                 `✅ [Baileys] Text notification sent to ${phoneNumber}`,
             );
+
+            await messageLogger.logMessage({
+                phone_number: phoneNumber,
+                customer_id: options.customer_id,
+                customer_name: options.customer_name,
+                notification_type: options.notification_type || "general",
+                message_content: fullMessage,
+                message_type: "text",
+                status: "sent",
+                sent_via: "baileys",
+                created_at: new Date(),
+            }).catch(e => logger.warn('[Baileys] Log message failed:', e.message));
 
             this.incrementDailyMessageCount();
             return { success: true, provider: "baileys", withImage: false };

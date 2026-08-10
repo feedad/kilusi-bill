@@ -364,6 +364,100 @@ router.get('/customers/search', chatbotPublicAuth, async (req, res) => {
 });
 
 /**
+ * GET /connection-status/:query
+ * Get real-time RADIUS connection status by customer phone, service number, pppoe_username, or customer_id.
+ * Used by Omnichat to display real-time connection info (online status, IP, NAS, uptime, last_seen).
+ */
+router.get('/connection-status/:query', chatbotPublicAuth, async (req, res) => {
+    try {
+        const queryStr = (req.params.query || '').trim();
+
+        if (!queryStr) {
+            return res.json({ success: false, message: 'Query parameter is required' });
+        }
+
+        const phoneVariants = getPhoneVariants(queryStr);
+        const radiusPostgres = require('../../../config/radius-postgres');
+
+        // Lookup customer & service by phone, service_number, pppoe_username, or customer_id
+        const customerResult = await query(`
+            SELECT DISTINCT ON (s.id)
+                c.id as customer_id,
+                c.name as customer_name,
+                c.phone as customer_phone,
+                s.id as service_id,
+                s.service_number,
+                COALESCE(s.status, 'no_service') as service_status,
+                t.pppoe_username,
+                p.name as package_name,
+                p.price as package_price,
+                s.active_date,
+                s.isolir_date
+            FROM customers c
+            LEFT JOIN services s ON s.customer_id = c.id
+            LEFT JOIN technical_details t ON t.service_id = s.id
+            LEFT JOIN packages p ON s.package_id = p.id
+            WHERE (
+                c.phone = ANY($1)
+                OR s.service_number = $2
+                OR LOWER(t.pppoe_username) = LOWER($2)
+                OR c.id = $2
+            )
+            ORDER BY s.id, s.created_at DESC NULLS LAST
+            LIMIT 10
+        `, [phoneVariants, queryStr]);
+
+        if (customerResult.rows.length === 0) {
+            return res.json({ success: false, message: 'Pelanggan / Layanan tidak ditemukan' });
+        }
+
+        const servicesData = await Promise.all(customerResult.rows.map(async (row) => {
+            let connStatus = { online: false, status: 'offline', last_seen: null };
+
+            if (row.pppoe_username) {
+                try {
+                    connStatus = await radiusPostgres.getUserConnectionStatus(row.pppoe_username);
+                } catch (radiusErr) {
+                    logger.warn(`[ChatbotConnStatus] Failed to fetch RADIUS status for ${row.pppoe_username}:`, radiusErr.message);
+                }
+            }
+
+            return {
+                customer_id: row.customer_id,
+                customer_name: row.customer_name,
+                customer_phone: row.customer_phone,
+                service_number: row.service_number || null,
+                pppoe_username: row.pppoe_username || null,
+                service_status: row.service_status,
+                package_name: row.package_name || null,
+                package_price: row.package_price ? Math.round(parseFloat(row.package_price)) : null,
+                active_date: row.active_date ? new Date(row.active_date).toISOString().split('T')[0] : null,
+                isolir_date: row.isolir_date ? new Date(row.isolir_date).toISOString().split('T')[0] : null,
+                connection_status: {
+                    online: connStatus?.online || false,
+                    status: connStatus?.status || 'offline',
+                    ip_address: connStatus?.ip_address || connStatus?.framed_ip || null,
+                    nas_ip: connStatus?.nas_ip || null,
+                    mac_address: connStatus?.mac_address || null,
+                    session_start: connStatus?.session_start ? new Date(connStatus.session_start).toISOString() : null,
+                    uptime_seconds: connStatus?.uptime_seconds || (connStatus?.session_time ? parseInt(connStatus.session_time) : null),
+                    last_seen: connStatus?.last_seen ? new Date(connStatus.last_seen).toISOString() : null
+                }
+            };
+        }));
+
+        return res.json({
+            success: true,
+            total: servicesData.length,
+            data: servicesData
+        });
+    } catch (error) {
+        logger.error('[Chatbot] Connection status error:', error);
+        return res.json({ success: false, message: 'Terjadi kesalahan saat mengambil status koneksi.' });
+    }
+});
+
+/**
  * POST /support
  * Create support ticket from WhatsApp
  */
