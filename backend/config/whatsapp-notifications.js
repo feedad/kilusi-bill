@@ -3582,6 +3582,7 @@ Terima kasih.
             else if (addr.includes("cilaja")) aliasKeyword = "bukit cilaja";
             else if (addr.includes("polandia") || addr.includes("pld")) aliasKeyword = "polandia";
             else if (addr.includes("poncol")) aliasKeyword = "poncol";
+            else if (addr.includes("buana") || addr.includes("subang raya") || addr.includes("bsr") || addr.includes("sukamelang")) aliasKeyword = "buana subang raya 2";
 
             const searchAddr = aliasKeyword || addr;
 
