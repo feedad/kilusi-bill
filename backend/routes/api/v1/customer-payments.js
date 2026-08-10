@@ -33,11 +33,32 @@ router.get('/methods', customerJwtAuth, asyncHandler(async (req, res) => {
     const settings = getAllSettings();
     const paymentSettings = settings.payment_settings || {};
 
+    // Get customer's mitra_id if available
+    let customerMitraId = null;
+    if (customerId) {
+      const mitraRes = await query(`
+        SELECT m.id as mitra_id
+        FROM services s
+        JOIN regions r ON r.id = s.region_id
+        JOIN mitra m ON m.id = r.mitra_id
+        WHERE s.customer_id = $1
+        LIMIT 1
+      `, [customerId]);
+      customerMitraId = mitraRes.rows[0]?.mitra_id || null;
+    }
+
+    const filterAccountForMitra = (acc) => {
+      if (acc.isActive === false) return false;
+      if (acc.is_company === true) return true;
+      if (!acc.mitra_id) return true;
+      return customerMitraId && String(acc.mitra_id) === String(customerMitraId);
+    };
+
     // Build manual payment methods from payment_settings
     // Bank accounts
     if (paymentSettings.bank_accounts && Array.isArray(paymentSettings.bank_accounts)) {
       paymentSettings.bank_accounts
-        .filter(acc => acc.isActive !== false)
+        .filter(filterAccountForMitra)
         .forEach(acc => {
           manualMethods.push({
             id: `bank_${acc.id}`,
@@ -68,7 +89,7 @@ router.get('/methods', customerJwtAuth, asyncHandler(async (req, res) => {
       };
 
       paymentSettings.ewallets
-        .filter(wallet => wallet.isActive !== false)
+        .filter(filterAccountForMitra)
         .forEach(wallet => {
           const label = providerLabels[wallet.provider] || wallet.provider || 'E-Wallet';
           manualMethods.push({

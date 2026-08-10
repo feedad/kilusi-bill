@@ -32,6 +32,8 @@ interface BankAccount {
     accountNumber: string
     accountName: string
     isActive: boolean
+    is_company?: boolean
+    mitra_id?: string | null
 }
 
 interface EWallet {
@@ -40,6 +42,13 @@ interface EWallet {
     phoneNumber: string
     accountName: string
     isActive: boolean
+    is_company?: boolean
+    mitra_id?: string | null
+}
+
+interface MitraOption {
+    id: string
+    name: string
 }
 
 interface PaymentGateway {
@@ -81,13 +90,16 @@ export default function PaymentSettingsPage() {
 
     // State for bank accounts
     const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
+    const [mitraList, setMitraList] = useState<MitraOption[]>([])
     const [editingBank, setEditingBank] = useState<BankAccount | null>(null)
     const [showBankForm, setShowBankForm] = useState(false)
     const [bankForm, setBankForm] = useState<Partial<BankAccount>>({
         bankName: '',
         accountNumber: '',
         accountName: '',
-        isActive: true
+        isActive: true,
+        is_company: true,
+        mitra_id: ''
     })
 
     // State for e-wallets
@@ -98,7 +110,9 @@ export default function PaymentSettingsPage() {
         provider: '',
         phoneNumber: '',
         accountName: '',
-        isActive: true
+        isActive: true,
+        is_company: true,
+        mitra_id: ''
     })
 
     // State for payment gateway
@@ -159,6 +173,16 @@ export default function PaymentSettingsPage() {
             } catch (error) {
                 console.error('Error fetching cleanup retention:', error)
             }
+
+            // Fetch mitra list for bank account scope selection
+            try {
+                const mitraRes = await adminApi.get('/api/v1/mitra?limit=200')
+                if (mitraRes.data.success) {
+                    setMitraList(mitraRes.data.data || [])
+                }
+            } catch (error) {
+                console.error('Error fetching mitra list:', error)
+            }
         } catch (error) {
             console.error('Error fetching settings:', error)
             toast.error('Gagal memuat pengaturan')
@@ -210,7 +234,9 @@ export default function PaymentSettingsPage() {
             bankName: bankForm.bankName,
             accountNumber: bankForm.accountNumber,
             accountName: bankForm.accountName,
-            isActive: bankForm.isActive ?? true
+            isActive: bankForm.isActive ?? true,
+            is_company: bankForm.is_company ?? true,
+            mitra_id: bankForm.is_company ? null : (bankForm.mitra_id || null)
         }
 
         if (editingBank) {
@@ -219,7 +245,7 @@ export default function PaymentSettingsPage() {
             setBankAccounts(prev => [...prev, newAccount])
         }
 
-        setBankForm({ bankName: '', accountNumber: '', accountName: '', isActive: true })
+        setBankForm({ bankName: '', accountNumber: '', accountName: '', isActive: true, is_company: true, mitra_id: '' })
         setShowBankForm(false)
         setEditingBank(null)
         setHasChanges(true)
@@ -250,7 +276,9 @@ export default function PaymentSettingsPage() {
             provider: walletForm.provider,
             phoneNumber: walletForm.phoneNumber,
             accountName: walletForm.accountName,
-            isActive: walletForm.isActive ?? true
+            isActive: walletForm.isActive ?? true,
+            is_company: walletForm.is_company ?? true,
+            mitra_id: walletForm.is_company ? null : (walletForm.mitra_id || null)
         }
 
         if (editingWallet) {
@@ -259,7 +287,7 @@ export default function PaymentSettingsPage() {
             setEWallets(prev => [...prev, newWallet])
         }
 
-        setWalletForm({ provider: '', phoneNumber: '', accountName: '', isActive: true })
+        setWalletForm({ provider: '', phoneNumber: '', accountName: '', isActive: true, is_company: true, mitra_id: '' })
         setShowWalletForm(false)
         setEditingWallet(null)
         setHasChanges(true)
@@ -471,6 +499,33 @@ export default function PaymentSettingsPage() {
                                             />
                                         </div>
                                     </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="checkbox"
+                                                id="bank-is-company"
+                                                checked={bankForm.is_company ?? true}
+                                                onChange={(e) => setBankForm({ ...bankForm, is_company: e.target.checked })}
+                                            />
+                                            <label htmlFor="bank-is-company" className="text-sm font-medium">Rekening Perusahaan (Tampil untuk Semua Pelanggan)</label>
+                                        </div>
+
+                                        {!bankForm.is_company && (
+                                            <div>
+                                                <label className="text-sm font-medium">Mitra Pemilik Rekening</label>
+                                                <select
+                                                    value={bankForm.mitra_id || ''}
+                                                    onChange={(e) => setBankForm({ ...bankForm, mitra_id: e.target.value })}
+                                                    className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                                >
+                                                    <option value="">-- Pilih Mitra --</option>
+                                                    {mitraList.map(m => (
+                                                        <option key={m.id} value={m.id}>{m.name}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        )}
+                                    </div>
                                     <div className="flex items-center gap-2">
                                         <input
                                             type="checkbox"
@@ -510,6 +565,13 @@ export default function PaymentSettingsPage() {
                                                             <Badge variant="default" className="bg-green-600">Aktif</Badge>
                                                         ) : (
                                                             <Badge variant="secondary">Nonaktif</Badge>
+                                                        )}
+                                                        {account.is_company ? (
+                                                            <Badge variant="outline" className="border-blue-500 text-blue-500">Perusahaan</Badge>
+                                                        ) : (
+                                                            <Badge variant="outline" className="border-purple-500 text-purple-500">
+                                                                {mitraList.find(m => m.id === account.mitra_id)?.name || 'Pribadi Mitra'}
+                                                            </Badge>
                                                         )}
                                                     </div>
                                                     <p className="text-sm text-muted-foreground">
@@ -588,6 +650,33 @@ export default function PaymentSettingsPage() {
                                             />
                                         </div>
                                     </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="checkbox"
+                                                id="wallet-is-company"
+                                                checked={walletForm.is_company ?? true}
+                                                onChange={(e) => setWalletForm({ ...walletForm, is_company: e.target.checked })}
+                                            />
+                                            <label htmlFor="wallet-is-company" className="text-sm font-medium">Rekening Perusahaan (Tampil untuk Semua Pelanggan)</label>
+                                        </div>
+
+                                        {!walletForm.is_company && (
+                                            <div>
+                                                <label className="text-sm font-medium">Mitra Pemilik Rekening</label>
+                                                <select
+                                                    value={walletForm.mitra_id || ''}
+                                                    onChange={(e) => setWalletForm({ ...walletForm, mitra_id: e.target.value })}
+                                                    className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                                >
+                                                    <option value="">-- Pilih Mitra --</option>
+                                                    {mitraList.map(m => (
+                                                        <option key={m.id} value={m.id}>{m.name}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        )}
+                                    </div>
                                     <div className="flex items-center gap-2">
                                         <input
                                             type="checkbox"
@@ -623,12 +712,19 @@ export default function PaymentSettingsPage() {
                                                 <div>
                                                     <div className="flex items-center gap-2">
                                                         <span className="font-medium">
-                                                            {EWALLET_PROVIDERS.find(p => p.value === wallet.provider)?.label || wallet.provider}
+                                                            {EWALLET_PROVIDERS.find(p => p === wallet.provider) || wallet.provider}
                                                         </span>
                                                         {wallet.isActive ? (
                                                             <Badge variant="default" className="bg-green-600">Aktif</Badge>
                                                         ) : (
                                                             <Badge variant="secondary">Nonaktif</Badge>
+                                                        )}
+                                                        {wallet.is_company ? (
+                                                            <Badge variant="outline" className="border-blue-500 text-blue-500">Perusahaan</Badge>
+                                                        ) : (
+                                                            <Badge variant="outline" className="border-purple-500 text-purple-500">
+                                                                {mitraList.find(m => m.id === wallet.mitra_id)?.name || 'Pribadi Mitra'}
+                                                            </Badge>
                                                         )}
                                                     </div>
                                                     <p className="text-sm text-muted-foreground">

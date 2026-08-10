@@ -48,9 +48,37 @@ router.get('/settings', async (req, res) => {
 // Returns bank accounts + company info for the isolir page
 router.get('/bank-accounts', async (req, res) => {
     try {
+        const { customer_id, service_number } = req.query;
+        const { query } = require('../../../config/database');
         const company = await getSetting('company') || {};
         const paymentSettings = await getSetting('payment_settings') || {};
         const branding = await getSetting('branding') || {};
+
+        let customerMitraId = null;
+        if (customer_id || service_number) {
+            let whereClause = 'WHERE s.customer_id = $1';
+            let params = [customer_id];
+            if (service_number) {
+                whereClause = 'WHERE s.service_number = $1';
+                params = [service_number];
+            }
+            const mitraRes = await query(`
+                SELECT m.id as mitra_id
+                FROM services s
+                JOIN regions r ON r.id = s.region_id
+                JOIN mitra m ON m.id = r.mitra_id
+                ${whereClause}
+                LIMIT 1
+            `, params);
+            customerMitraId = mitraRes.rows[0]?.mitra_id || null;
+        }
+
+        const filterAccountForMitra = (acc) => {
+            if (acc.isActive === false) return false;
+            if (acc.is_company === true) return true;
+            if (!acc.mitra_id) return true;
+            return customerMitraId && String(acc.mitra_id) === String(customerMitraId);
+        };
 
         res.json({
             success: true,
@@ -69,8 +97,8 @@ router.get('/bank-accounts', async (req, res) => {
                     logoUrl: branding.logoUrl || '',
                     faviconUrl: branding.faviconUrl || ''
                 },
-                bankAccounts: (paymentSettings.bank_accounts || []).filter(b => b.isActive !== false),
-                ewallets: (paymentSettings.ewallets || []).filter(e => e.isActive !== false)
+                bankAccounts: (paymentSettings.bank_accounts || []).filter(filterAccountForMitra),
+                ewallets: (paymentSettings.ewallets || []).filter(filterAccountForMitra)
             }
         });
     } catch (error) {

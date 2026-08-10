@@ -135,8 +135,13 @@ async function getQRISDataUrl(invoiceId) {
  */
 async function generateBrandedPage(invoiceId) {
   const invResult = await query(`
-    SELECT i.invoice_number, i.amount, i.amount_with_code, i.due_date, c.name
-    FROM invoices i JOIN customers c ON i.customer_id = c.id
+    SELECT i.invoice_number, i.amount, i.amount_with_code, i.due_date, c.name,
+           m.id as customer_mitra_id, m.name as mitra_name
+    FROM invoices i
+    JOIN customers c ON i.customer_id = c.id
+    LEFT JOIN services s ON s.service_number = i.service_number
+    LEFT JOIN regions r ON r.id = s.region_id
+    LEFT JOIN mitra m ON m.id = r.mitra_id
     WHERE i.id = $1`, [invoiceId]
   );
   if (invResult.rows.length === 0) { logger.error(`[QRIS] Invoice ${invoiceId} not found`); return null; }
@@ -153,8 +158,18 @@ async function generateBrandedPage(invoiceId) {
   let banks = [], ewallets = [];
   try {
     const ps = typeof paymentSettings === 'string' ? JSON.parse(paymentSettings) : paymentSettings;
-    if (ps?.bank_accounts) banks = ps.bank_accounts.filter(b => b.isActive !== false);
-    if (ps?.ewallets) ewallets = ps.ewallets.filter(b => b.isActive !== false);
+    const filterAccountForMitra = (acc) => {
+      if (acc.isActive === false) return false;
+      // Company account (is_company === true) -> show for ALL customers
+      if (acc.is_company === true) return true;
+      // No mitra_id assigned -> show as fallback
+      if (!acc.mitra_id) return true;
+      // Mitra account -> only show if matches customer's mitra_id
+      return inv.customer_mitra_id && String(acc.mitra_id) === String(inv.customer_mitra_id);
+    };
+
+    if (ps?.bank_accounts) banks = ps.bank_accounts.filter(filterAccountForMitra);
+    if (ps?.ewallets) ewallets = ps.ewallets.filter(filterAccountForMitra);
   } catch { /* use empty */ }
 
   const bankRows = banks.map(b => `
@@ -212,7 +227,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .footer{text-align:center;margin-top:16px;font-size:11px;color:#475569}
 </style></head><body>
 <div class="card">
-  <div class="header">${logoSvg ? `<img src="${logoSvg}" alt="${companyName}" class="logo">` : `<h1>${companyName}</h1>`}<div class="sub">QRIS — Scan dengan e-wallet atau mobile banking</div></div>
+  <div class="header">${logoSvg ? `<img src="${logoSvg}" alt="${companyName}" class="logo">` : `<h1>${companyName}</h1>`}<div class="sub">${inv.mitra_name ? `${inv.mitra_name} — ` : ''}Scan dengan e-wallet atau mobile banking</div></div>
   <div class="qr-box"><img src="${qrDataUrl}" alt="QRIS"></div>
   <div class="info">
     <div class="invoice">${inv.invoice_number}</div>
