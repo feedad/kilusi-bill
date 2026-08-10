@@ -379,9 +379,9 @@ router.get('/connection-status/:query', chatbotPublicAuth, async (req, res) => {
         const phoneVariants = getPhoneVariants(queryStr);
         const radiusPostgres = require('../../../config/radius-postgres');
 
-        // Lookup customer & service by phone, service_number, pppoe_username, or customer_id
+        // Lookup customer & service by name, address, phone, service_number, pppoe_username, or customer_id
         const customerResult = await query(`
-            SELECT DISTINCT ON (s.id)
+            SELECT DISTINCT ON (COALESCE(s.id::text, c.id::text))
                 c.id as customer_id,
                 c.name as customer_name,
                 c.phone as customer_phone,
@@ -398,13 +398,16 @@ router.get('/connection-status/:query', chatbotPublicAuth, async (req, res) => {
             LEFT JOIN technical_details t ON t.service_id = s.id
             LEFT JOIN packages p ON s.package_id = p.id
             WHERE (
-                c.phone = ANY($1)
-                OR s.service_number = $2
-                OR LOWER(t.pppoe_username) = LOWER($2)
+                c.name ILIKE '%' || $2 || '%'
+                OR c.address ILIKE '%' || $2 || '%'
+                OR s.address_installation ILIKE '%' || $2 || '%'
+                OR c.phone = ANY($1)
+                OR s.service_number ILIKE '%' || $2 || '%'
+                OR LOWER(t.pppoe_username) ILIKE LOWER('%' || $2 || '%')
                 OR c.id = $2
             )
-            ORDER BY s.id, s.created_at DESC NULLS LAST
-            LIMIT 10
+            ORDER BY COALESCE(s.id::text, c.id::text), s.created_at DESC NULLS LAST
+            LIMIT 20
         `, [phoneVariants, queryStr]);
 
         if (customerResult.rows.length === 0) {

@@ -3566,28 +3566,59 @@ Terima kasih.
         }
     }
 
-    // Detect mitra by matching customer address against region names
+    // Detect mitra by matching customer address against region names and mitra names
     async detectMitraByAddress(address) {
         try {
             const addr = String(address || "").toLowerCase();
             if (!addr) return null;
 
+            // Alias keyword mapping from AGENTS.md
+            let aliasKeyword = null;
+            if (addr.includes("janaloka") || addr.includes("jagakarta")) aliasKeyword = "prima talaga sunda rt 67";
+            else if (addr.includes("tatakang") || addr.includes("jagadita")) aliasKeyword = "prima talaga sunda rt 66";
+            else if (addr.includes("jalatunda") || addr.includes("talaga raya")) aliasKeyword = "prima talaga sunda rt 68";
+            else if (addr.includes("cibogo")) aliasKeyword = "cibogo";
+            else if (addr.includes("kirana")) aliasKeyword = "kirana";
+            else if (addr.includes("cilaja")) aliasKeyword = "bukit cilaja";
+            else if (addr.includes("polandia") || addr.includes("pld")) aliasKeyword = "polandia";
+            else if (addr.includes("poncol")) aliasKeyword = "poncol";
+
+            const searchAddr = aliasKeyword || addr;
+
             const result = await query(`
-                SELECT m.id, m.name, m.phone
+                SELECT m.id, m.name as mitra_name, m.phone, r.name as region_name, r.district, r.regency, r.province
                 FROM regions r
                 JOIN mitra m ON m.id = r.mitra_id
                 WHERE m.disabled_at IS NULL
                   AND m.phone IS NOT NULL AND m.phone != ''
-                  AND LOWER(r.name) <> ''
             `);
             if (result.rows.length === 0) return null;
 
-            // Match whichever region name appears in the address
-            const matched = result.rows.find(r => {
-                const regionName = String(r.name || "").toLowerCase();
-                return regionName && addr.includes(regionName);
+            // 1. Match region_name, mitra_name, or alias
+            let matched = result.rows.find(r => {
+                const regName = String(r.region_name || "").toLowerCase();
+                const mitName = String(r.mitra_name || "").toLowerCase();
+                return (regName && (searchAddr.includes(regName) || regName.includes(searchAddr)))
+                    || (mitName && (searchAddr.includes(mitName) || mitName.includes(searchAddr)));
             });
-            return matched || null;
+
+            // 2. Token match fallback
+            if (!matched) {
+                const tokens = searchAddr.split(/[\s,.-]+/).filter(t => t.length >= 4);
+                matched = result.rows.find(r => {
+                    const regName = String(r.region_name || "").toLowerCase();
+                    const mitName = String(r.mitra_name || "").toLowerCase();
+                    return tokens.some(t => regName.includes(t) || mitName.includes(t));
+                });
+            }
+
+            if (matched) {
+                logger.info(`[RegNotif] Detected mitra ${matched.mitra_name} (${matched.phone}) for address "${address}"`);
+                return { id: matched.id, name: matched.mitra_name, phone: matched.phone };
+            }
+
+            logger.warn(`[RegNotif] No mitra matched for address: "${address}"`);
+            return null;
         } catch (error) {
             logger.warn(`Error detecting mitra by address: ${error.message}`);
             return null;
