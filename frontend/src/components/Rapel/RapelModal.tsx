@@ -87,22 +87,40 @@ export default function RapelModal({ isOpen, onClose, onSuccess }: RapelModalPro
     if (!searchTerm.trim()) return
     setSearching(true)
     try {
-      // Search customers directly instead of invoices
-      const res = await adminApi.get(`${endpoints.admin.customers}?search=${encodeURIComponent(searchTerm)}&limit=20&include_address=false`)
+      // Search customers directly
+      const res = await adminApi.get(`${endpoints.admin.customers}?search=${encodeURIComponent(searchTerm)}&limit=20`)
       if (res.data?.success && res.data?.data) {
         const customers = res.data.data
         // Also try invoice search as fallback
         const invRes = await adminApi.get(`${endpoints.admin.billing}/invoices/search?q=${encodeURIComponent(searchTerm)}`)
         const invoiceCustomers = invRes.data?.data || []
         
-        // Merge and deduplicate
+        // Merge and deduplicate by service_number (or customer_id if no service_number)
         const unique = new Map()
         customers.forEach((c: any) => {
-          if (!unique.has(c.id)) unique.set(c.id, { customer_id: c.id, customer_name: c.name, customer_phone: c.phone })
+          const key = c.service_number || c.id
+          if (!unique.has(key)) {
+            unique.set(key, {
+              customer_id: c.id,
+              customer_name: c.name,
+              customer_phone: c.phone,
+              service_number: c.service_number,
+              package_name: c.package_name,
+              package_price: c.package_price
+            })
+          }
         })
         invoiceCustomers.forEach((item: any) => {
-          if (!unique.has(item.customer_id)) {
-            unique.set(item.customer_id, { customer_id: item.customer_id, customer_name: item.customer_name, customer_phone: item.customer_phone })
+          const key = item.service_number || item.customer_id
+          if (!unique.has(key)) {
+            unique.set(key, {
+              customer_id: item.customer_id,
+              customer_name: item.customer_name,
+              customer_phone: item.customer_phone,
+              service_number: item.service_number,
+              package_name: item.package_name,
+              package_price: item.amount
+            })
           }
         })
         setSearchResults(Array.from(unique.values()))
@@ -117,12 +135,13 @@ export default function RapelModal({ isOpen, onClose, onSuccess }: RapelModalPro
   const handleSelectCustomer = async (customer: any) => {
     setSelectedCustomer(customer)
     setSearchResults([])
-    setSearchTerm(customer.customer_name)
-    await handleCalculate(customer.customer_id, selectedMonths)
+    setSearchTerm(`${customer.customer_name}${customer.service_number ? ` (${customer.service_number})` : ''}`)
+    await handleCalculate(customer.customer_id, selectedMonths, customer.service_number)
   }
 
-  const handleCalculate = async (customerId?: string, months?: number) => {
+  const handleCalculate = async (customerId?: string, months?: number, serviceNumber?: string) => {
     const cid = customerId || selectedCustomer?.customer_id
+    const snum = serviceNumber || selectedCustomer?.service_number
     const m = months || selectedMonths
     if (!cid) return
 
@@ -130,6 +149,7 @@ export default function RapelModal({ isOpen, onClose, onSuccess }: RapelModalPro
     try {
       const res = await adminApi.post(`${endpoints.admin.billing}/invoices/rapel/calculate`, {
         customer_id: cid,
+        service_number: snum,
         months: m
       })
       if (res.data?.success) {
@@ -147,7 +167,7 @@ export default function RapelModal({ isOpen, onClose, onSuccess }: RapelModalPro
   const handleMonthsChange = (months: number) => {
     setSelectedMonths(months)
     if (selectedCustomer) {
-      handleCalculate(selectedCustomer.customer_id, months)
+      handleCalculate(selectedCustomer.customer_id, months, selectedCustomer.service_number)
     }
   }
 
@@ -157,6 +177,7 @@ export default function RapelModal({ isOpen, onClose, onSuccess }: RapelModalPro
     try {
       const res = await adminApi.post(`${endpoints.admin.billing}/invoices/rapel`, {
         customer_id: selectedCustomer.customer_id,
+        service_number: selectedCustomer.service_number,
         months: selectedMonths,
         payment_method: paymentMethod || undefined,
         payment_date: paymentDate || undefined
@@ -227,15 +248,24 @@ export default function RapelModal({ isOpen, onClose, onSuccess }: RapelModalPro
               </Button>
             </div>
             {searchResults.length > 0 && (
-              <div className="border rounded-lg max-h-40 overflow-y-auto">
-                {searchResults.map((item: any) => (
+              <div className="border rounded-lg max-h-56 overflow-y-auto">
+                {searchResults.map((item: any, idx: number) => (
                   <div
-                    key={item.customer_id}
+                    key={`${item.service_number || item.customer_id}-${idx}`}
                     onClick={() => handleSelectCustomer(item)}
                     className="px-3 py-2 hover:bg-muted cursor-pointer text-sm border-b last:border-b-0"
                   >
-                    <p className="font-medium">{item.customer_name}</p>
-                    <p className="text-xs text-muted-foreground">{item.customer_phone || '-'}</p>
+                    <div className="flex justify-between items-center">
+                      <p className="font-medium">{item.customer_name}</p>
+                      {item.service_number && (
+                        <span className="font-mono text-xs text-blue-600 bg-blue-50 dark:bg-blue-950 px-1.5 py-0.5 rounded">
+                          {item.service_number}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {item.customer_phone || '-'} {item.package_name ? `• ${item.package_name}` : ''}
+                    </p>
                   </div>
                 ))}
               </div>
