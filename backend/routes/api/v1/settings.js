@@ -218,6 +218,21 @@ router.get('/payment-methods', async (req, res) => {
         const paymentSettings = JSON.parse(result.rows[0].value);
         logger.info('[PAYMENT-METHODS] Payment settings from DB:', JSON.stringify(paymentSettings));
 
+        // Load mitra map for tagging accounts
+        const mitraMap = new Map();
+        try {
+            const mitraRes = await query('SELECT id, name FROM mitra');
+            mitraRes.rows.forEach(m => mitraMap.set(String(m.id), m.name));
+        } catch (e) { /* fallback */ }
+
+        const getMitraTag = (acc) => {
+            if (acc.is_company === true) return ' (Perusahaan)';
+            const ids = Array.isArray(acc.mitra_ids) ? acc.mitra_ids : (acc.mitra_id ? [acc.mitra_id] : []);
+            if (ids.length === 0) return '';
+            const names = ids.map(id => mitraMap.get(String(id))).filter(Boolean);
+            return names.length > 0 ? ` (${names.join(', ')})` : '';
+        };
+
         let methods = [];
 
         // Manual payment methods
@@ -243,7 +258,7 @@ router.get('/payment-methods', async (req, res) => {
                         code: acc.bankName?.toLowerCase() || 'bank',
                         method: acc.bankName?.toUpperCase() || 'BANK',
                         name: acc.bankName || 'Bank',
-                        displayName: `${acc.bankName} - ${acc.accountNumber}`,
+                        displayName: `${acc.bankName} - ${acc.accountNumber}${getMitraTag(acc)}`,
                         bankName: acc.bankName,
                         accountNumber: acc.accountNumber,
                         accountName: acc.accountName,
@@ -274,7 +289,7 @@ router.get('/payment-methods', async (req, res) => {
                         code: wallet.provider || 'ewallet',
                         method: label,
                         name: label,
-                        displayName: `${label} - ${wallet.phoneNumber}`,
+                        displayName: `${label} - ${wallet.phoneNumber}${getMitraTag(wallet)}`,
                         provider: wallet.provider,
                         phoneNumber: wallet.phoneNumber,
                         accountName: wallet.accountName,

@@ -564,17 +564,19 @@ Terima kasih telah menggunakan layanan kami.
             ctx.customData?.invoice_number ||
             "",
         amount:          (ctx) => {
+            // Explicit amount passed in customData (e.g. Rapel total amount)
+            if (ctx.customData?.amount != null) {
+                const customAmt = parseFloat(ctx.customData.amount);
+                if (!isNaN(customAmt) && customAmt > 0) return this.formatCurrency(customAmt);
+            }
+            // Payment record amount (total paid for payment confirmation notifications)
+            if (ctx.payment?.amount != null) {
+                const payAmt = parseFloat(ctx.payment.amount);
+                if (!isNaN(payAmt) && payAmt > 0) return this.formatCurrency(payAmt);
+            }
             // Autopay: amount_with_code works regardless of payment state
             if (ctx.invoice?.amount_with_code != null)
                 return this.formatCurrency(ctx.invoice.amount_with_code);
-            // Autopay payment confirmation fallback (payment.gateway check)
-            if (
-                ctx.payment?.gateway === "autopay" ||
-                ctx.invoice?.payment_gateway === "autopay"
-            ) {
-                if (ctx.customData?.amount)
-                    return this.formatCurrency(ctx.customData.amount);
-            }
             // Tripay: base + admin fee = what customer actually paid
             if (
                 ctx.payment?.gateway === "tripay" ||
@@ -594,7 +596,6 @@ Terima kasih telah menggunakan layanan kami.
                 return this.formatCurrency(ctx.invoice.final_amount);
             if (ctx.invoice?.amount != null)
                 return this.formatCurrency(ctx.invoice.amount);
-            if (ctx.customData?.amount) return ctx.customData.amount;
             if (ctx.package?.price != null)
                 return this.formatCurrency(ctx.package.price);
             return "";
