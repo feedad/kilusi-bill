@@ -640,7 +640,7 @@ router.get('/summary', async (req, res) => {
 // GET /api/v1/accounting/report/profit-loss - Generate profit & loss report
 router.get('/report/profit-loss', async (req, res) => {
   try {
-    const { start_date, end_date, group_by = 'month' } = req.query
+    const { start_date, end_date, mitra_id, group_by = 'month' } = req.query
 
     // Validate group_by
     const validGroups = ['day', 'week', 'month', 'quarter', 'year']
@@ -674,6 +674,11 @@ router.get('/report/profit-loss', async (req, res) => {
     if (end_date) {
       queryText += ` AND at.date <= $${paramIndex++}`
       queryParams.push(end_date)
+    }
+
+    if (mitra_id) {
+      queryText += ` AND at.mitra_id = $${paramIndex++}::uuid`
+      queryParams.push(mitra_id)
     }
 
     queryText += ` GROUP BY DATE_TRUNC($1, at.date) ORDER BY period DESC`

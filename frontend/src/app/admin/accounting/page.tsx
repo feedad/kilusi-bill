@@ -464,18 +464,19 @@ export default function AccountingPage() {
 
   useEffect(() => {
     loadAllData()
-  }, [filterType, filterCategory, filterStartDate, filterEndDate, searchTerm])
+  }, [filterType, filterCategory, filterMitra, filterStartDate, filterEndDate, searchTerm])
 
   const fetchProfitLoss = async () => {
     try {
       const params = new URLSearchParams()
       if (filterStartDate) params.append('start_date', filterStartDate)
       if (filterEndDate) params.append('end_date', filterEndDate)
+      if (filterMitra) params.append('mitra_id', filterMitra)
       params.append('group_by', 'month')
 
       const response = await adminApi.get(`/api/v1/accounting/report/profit-loss?${params}`)
       if (response.data.success) {
-        setProfitLossData(response.data.data.report_data)
+        setProfitLossData(response.data.data.report_data || [])
       }
     } catch (error) {
       console.error('Error fetching profit loss data:', error)
