@@ -25,7 +25,8 @@ import {
   Settings,
   Tag,
   Wrench,
-  Trash
+  Trash,
+  Loader2
 } from 'lucide-react'
 import { adminApi, endpoints, handleApiError } from '@/lib/api-clients'
 
