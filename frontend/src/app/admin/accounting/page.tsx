@@ -177,57 +177,6 @@ export default function AccountingPage() {
   }
 
   // Quick date filter functions
-  const setQuickDateRange = (range: 'today' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'last7Days' | 'last30Days' | 'last3Months' | 'lastMonth' | 'clear') => {
-    if (range === 'clear') {
-      clearDateFilters()
-      return
-    }
-    const today = new Date()
-    const startDate = new Date()
-    const endDate = new Date()
-
-    switch (range) {
-      case 'today':
-        startDate.setDate(today.getDate())
-        endDate.setDate(today.getDate())
-        break
-      case 'thisWeek':
-        startDate.setDate(today.getDate() - today.getDay())
-        endDate.setDate(today.getDate() - today.getDay() + 6)
-        break
-      case 'thisMonth':
-        startDate.setDate(1)
-        endDate.setMonth(today.getMonth() + 1, 0)
-        break
-      case 'lastMonth': {
-        // Previous month: 1st to last day of previous month
-        const firstOfThisMonth = new Date(today.getFullYear(), today.getMonth(), 1)
-        const lastDayOfLastMonth = new Date(firstOfThisMonth.getTime() - 1) // last day of previous month
-        const firstOfLastMonth = new Date(lastDayOfLastMonth.getFullYear(), lastDayOfLastMonth.getMonth(), 1)
-        startDate.setFullYear(firstOfLastMonth.getFullYear(), firstOfLastMonth.getMonth(), 1)
-        endDate.setFullYear(lastDayOfLastMonth.getFullYear(), lastDayOfLastMonth.getMonth(), lastDayOfLastMonth.getDate())
-        break
-      }
-      case 'thisYear':
-        startDate.setMonth(0, 1)
-        endDate.setMonth(11, 31)
-        break
-      case 'last7Days':
-        startDate.setDate(today.getDate() - 7)
-        break
-      case 'last30Days':
-        startDate.setDate(today.getDate() - 30)
-        break
-      case 'last3Months':
-        startDate.setMonth(today.getMonth() - 3)
-        break
-    }
-
-    const p = (n: number) => String(n).padStart(2, '0')
-    setFilterStartDate(`${startDate.getFullYear()}-${p(startDate.getMonth()+1)}-${p(startDate.getDate())}`)
-    setFilterEndDate(`${endDate.getFullYear()}-${p(endDate.getMonth()+1)}-${p(endDate.getDate())}`)
-  }
-
   const clearDateFilters = () => {
     // Reset to current month instead of clearing to empty
     const d = new Date(); const p = (n: number) => String(n).padStart(2, '0')
@@ -235,6 +184,33 @@ export default function AccountingPage() {
     setFilterStartDate(`${d.getFullYear()}-${p(d.getMonth()+1)}-01`)
     setFilterEndDate(`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(lastDay)}`)
   }
+
+  // ISO date string from a Date value
+  const isoDate = (date: Date) => {
+    const p = (n: number) => String(n).padStart(2, '0')
+    return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}`
+  }
+
+  // Bulan: 1st .. last day of chosen month/year
+  const applyMonthFilter = (monthIndex: number, year: number) => {
+    const first = new Date(year, monthIndex, 1)
+    const lastDay = new Date(year, monthIndex + 1, 0).getDate()
+    setFilterStartDate(isoDate(first))
+    setFilterEndDate(isoDate(new Date(year, monthIndex, lastDay)))
+  }
+
+  const monthsInYear = [
+    'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+    'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+  ]
+  const yearsList = (() => {
+    const currentYear = new Date().getFullYear()
+    const years = []
+    for (let y = currentYear; y >= currentYear - 5; y--) years.push(y)
+    return years
+  })()
+  const [quickMonth, setQuickMonth] = useState(new Date().getMonth())
+  const [quickYear, setQuickYear] = useState(new Date().getFullYear())
 
   const filteredTransactions = (transactions || []).filter(transaction => {
     const matchesType = filterType === 'all' || transaction.type === filterType
@@ -1121,31 +1097,35 @@ export default function AccountingPage() {
                 </div>
 
                 <div className="col-span-2">
-                  <Label>Periode</Label>
-                  <select
-                    value=""
-                    onChange={(e) => {
-                      const value = e.target.value
-                      if (value === 'all') {
-                        setFilterStartDate('')
-                        setFilterEndDate('')
-                        return
-                      }
-                      if (value) setQuickDateRange(value as any)
-                      e.target.value = ''
-                    }}
-                    className="rounded-md border border-input bg-background px-3 py-2 text-sm w-full"
-                  >
-                    <option value="">Pilih periode...</option>
-                    <option value="today">Hari Ini</option>
-                    <option value="thisWeek">Minggu Ini</option>
-                    <option value="thisMonth">Bulan Ini</option>
-                    <option value="lastMonth">Bulan Lalu</option>
-                    <option value="last3Months">3 Bulan Terakhir</option>
-                    <option value="thisYear">Tahun Ini</option>
-                    <option value="all">Semua Data</option>
-                    <option value="clear">Reset Bulan Ini</option>
-                  </select>
+                  <Label>Bulan</Label>
+                  <div className="flex gap-1.5">
+                    <select
+                      value={quickMonth}
+                      onChange={(e) => {
+                        const m = parseInt(e.target.value, 10)
+                        setQuickMonth(m)
+                        applyMonthFilter(m, quickYear)
+                      }}
+                      className="rounded-md border border-input bg-background px-2 py-2 text-sm w-full"
+                    >
+                      {monthsInYear.map((name, idx) => (
+                        <option key={name} value={idx}>{name}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={quickYear}
+                      onChange={(e) => {
+                        const y = parseInt(e.target.value, 10)
+                        setQuickYear(y)
+                        applyMonthFilter(quickMonth, y)
+                      }}
+                      className="rounded-md border border-input bg-background px-1 py-2 text-sm w-24"
+                    >
+                      {yearsList.map((y) => (
+                        <option key={y} value={y}>{y}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
 
                 <div>
