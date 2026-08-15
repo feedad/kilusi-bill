@@ -236,6 +236,74 @@ export default function AccountingPage() {
     setFilterEndDate(`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(lastDay)}`)
   }
 
+  // Common: build ISO date string from a Date value
+  const isoDate = (date: Date) => {
+    const p = (n: number) => String(n).padStart(2, '0')
+    return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}`
+  }
+
+  // Bulan: pick specific month of a given year -> 1st .. lastDay of that month
+  const applyMonthFilter = (monthIndex: number, year: number) => {
+    const first = new Date(year, monthIndex, 1)
+    const lastDay = new Date(year, monthIndex + 1, 0).getDate()
+    const last = new Date(year, monthIndex, lastDay)
+    setFilterStartDate(isoDate(first))
+    setFilterEndDate(isoDate(last))
+  }
+
+  // Harian: single day
+  const applyDailyFilter = (dateStr: string) => {
+    if (!dateStr) return
+    setFilterStartDate(dateStr)
+    setFilterEndDate(dateStr)
+  }
+
+  // Mingguan: pick a week input value "2026-W33" -> Monday..Sunday
+  const applyWeeklyFilter = (weekStr: string) => {
+    if (!weekStr) return
+    const match = weekStr.match(/^(\d{4})-W(\d{2})$/)
+    if (!match) return
+    const year = parseInt(match[1], 10)
+    const week = parseInt(match[2], 10)
+    // ISO week: get Monday of the given week
+    const jan4 = new Date(year, 0, 4)
+    const mondayJan = new Date(year, 0, 1 + (4 - (jan4.getDay() || 7)))
+    const monday = new Date(mondayJan.getTime() + (week - 1) * 7 * 24 * 3600 * 1000)
+    const sunday = new Date(monday.getTime() + 6 * 24 * 3600 * 1000)
+    setFilterStartDate(isoDate(monday))
+    setFilterEndDate(isoDate(sunday))
+  }
+
+  // Tahunan: specific year -> 1 Jan .. 31 Des
+  const applyYearFilter = (year: number) => {
+    setFilterStartDate(`${year}-01-01`)
+    setFilterEndDate(`${year}-12-31`)
+  }
+
+  // List of months & years for dropdowns
+  const monthsInYear = [
+    'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+    'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+  ]
+  const yearsList = (() => {
+    const currentYear = new Date().getFullYear()
+    const years = []
+    for (let y = currentYear; y >= currentYear - 5; y--) years.push(y)
+    return years
+  })()
+  // Week input default to current ISO week
+  const getCurrentWeekValue = () => {
+    const now = new Date()
+    const jan4 = new Date(now.getFullYear(), 0, 4)
+    const mondayJan = new Date(now.getFullYear(), 0, 1 + (4 - (jan4.getDay() || 7)))
+    const week = Math.round((now.getTime() - mondayJan.getTime()) / (7 * 24 * 3600 * 1000)) + 1
+    return `${now.getFullYear()}-W${String(week).padStart(2, '0')}`
+  }
+  const [quickWeek, setQuickWeek] = useState(getCurrentWeekValue())
+  const [quickMonth, setQuickMonth] = useState(new Date().getMonth())
+  const [quickYear, setQuickYear] = useState(new Date().getFullYear())
+  const [quickDay, setQuickDay] = useState(isoDate(new Date()))
+
   const filteredTransactions = (transactions || []).filter(transaction => {
     const matchesType = filterType === 'all' || transaction.type === filterType
     const matchesCategory = !filterCategory || String(transaction.category_id || '') === filterCategory
@@ -1065,7 +1133,7 @@ export default function AccountingPage() {
           {/* Filters */}
           <Card>
             <CardContent className="pt-6">
-              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-7 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-10 gap-4">
                 <div>
                   <Label>Search</Label>
                   <Input
@@ -1121,28 +1189,69 @@ export default function AccountingPage() {
                 </div>
 
                 <div>
-                  <Label>Quick Filter Tanggal</Label>
+                  <Label>Bulan</Label>
+                  <div className="flex gap-1.5">
+                    <select
+                      value={quickMonth}
+                      onChange={(e) => {
+                        const m = parseInt(e.target.value, 10)
+                        setQuickMonth(m)
+                        applyMonthFilter(m, quickYear)
+                      }}
+                      className="rounded-md border border-input bg-background px-2 py-2 text-sm w-full"
+                    >
+                      {monthsInYear.map((name, idx) => (
+                        <option key={name} value={idx}>{name}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={quickYear}
+                      onChange={(e) => {
+                        const y = parseInt(e.target.value, 10)
+                        setQuickYear(y)
+                        applyMonthFilter(quickMonth, y)
+                      }}
+                      className="rounded-md border border-input bg-background px-1 py-2 text-sm w-20"
+                    >
+                      {yearsList.map((y) => (
+                        <option key={y} value={y}>{y}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <Label>Harian</Label>
+                  <Input
+                    type="date"
+                    value={quickDay}
+                    onChange={(e) => { setQuickDay(e.target.value); applyDailyFilter(e.target.value) }}
+                  />
+                </div>
+
+                <div>
+                  <Label>Mingguan</Label>
+                  <Input
+                    type="week"
+                    value={quickWeek}
+                    onChange={(e) => { setQuickWeek(e.target.value); applyWeeklyFilter(e.target.value) }}
+                  />
+                </div>
+
+                <div>
+                  <Label>Tahunan</Label>
                   <select
-                    value=""
+                    value={quickYear}
                     onChange={(e) => {
-                      const value = e.target.value
-                      if (value) {
-                        setQuickDateRange(value as any)
-                        e.target.value = '' // Reset select after choosing
-                      }
+                      const y = parseInt(e.target.value, 10)
+                      setQuickYear(y)
+                      applyYearFilter(y)
                     }}
                     className="rounded-md border border-input bg-background px-3 py-2 text-sm w-full"
                   >
-                    <option value="">Pilih periode...</option>
-                    <option value="today">Hari Ini</option>
-                    <option value="last7Days">7 Hari Terakhir</option>
-                    <option value="thisWeek">Minggu Ini</option>
-                    <option value="last30Days">30 Hari Terakhir</option>
-                    <option value="thisMonth">Bulan Ini</option>
-                    <option value="lastMonth">Bulan Lalu</option>
-                    <option value="last3Months">3 Bulan Terakhir</option>
-                    <option value="thisYear">Tahun Ini</option>
-                    <option value="clear">Reset Bulan Ini</option>
+                    {yearsList.map((y) => (
+                      <option key={y} value={y}>Tahun {y}</option>
+                    ))}
                   </select>
                 </div>
 
