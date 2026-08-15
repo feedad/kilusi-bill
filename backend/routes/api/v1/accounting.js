@@ -191,6 +191,8 @@ router.get('/transactions', async (req, res) => {
       description: tx.description,
       reference_type: tx.reference_type,
       reference_id: tx.reference_id,
+      mitra_id: tx.mitra_id,
+      mitra_name: tx.mitra_name,
       date: tx.date,
       attachment_url: tx.attachment_url,
       notes: tx.notes,

@@ -216,12 +216,16 @@ export default function AccountingPage() {
     setFilterEndDate('')
   }
 
-  const filteredTransactions = transactions.filter(transaction => {
+  const filteredTransactions = (transactions || []).filter(transaction => {
     const matchesType = filterType === 'all' || transaction.type === filterType
-    const matchesCategory = !filterCategory || transaction.category?.toString() === filterCategory
+    const matchesCategory = !filterCategory || String(transaction.category_id || '') === filterCategory
+    const desc = transaction.description || ''
+    const catName = transaction.category?.name || ''
+    const mitra = transaction.mitra_name || ''
     const matchesSearch = !searchTerm ||
-      transaction.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      transaction.category?.name.toLowerCase().includes(searchTerm.toLowerCase())
+      desc.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      catName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      mitra.toLowerCase().includes(searchTerm.toLowerCase())
     return matchesType && matchesCategory && matchesSearch
   })
 
