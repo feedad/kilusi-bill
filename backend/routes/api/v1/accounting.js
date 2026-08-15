@@ -530,10 +530,20 @@ router.delete('/transactions/:id', async (req, res) => {
   }
 })
 
-// GET /api/v1/accounting/summary - Get accounting summary
+// GET /api/v1/accounting/summary - Get accounting summary (defaults to current month)
 router.get('/summary', async (req, res) => {
   try {
     const { start_date, end_date, mitra_id } = req.query
+
+    // Default to current month if no date range provided
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, '0');
+    const defaultStart = `${d.getFullYear()}-${p(d.getMonth() + 1)}-01`;
+    const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    const defaultEnd = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(lastDay)}`;
+
+    const startDateToUse = start_date || defaultStart;
+    const endDateToUse = end_date || defaultEnd;
 
     let queryText = `
       SELECT
@@ -547,14 +557,14 @@ router.get('/summary', async (req, res) => {
     const queryParams = []
     let paramIndex = 1
 
-    if (start_date) {
+    if (startDateToUse) {
       queryText += ` AND date >= $${paramIndex++}`
-      queryParams.push(start_date)
+      queryParams.push(startDateToUse)
     }
 
-    if (end_date) {
+    if (endDateToUse) {
       queryText += ` AND date <= $${paramIndex++}`
-      queryParams.push(end_date)
+      queryParams.push(endDateToUse)
     }
 
     if (mitra_id) {
@@ -574,25 +584,9 @@ router.get('/summary', async (req, res) => {
         COALESCE(SUM(payment_fee_amount) FILTER (WHERE fee_bearer = 'customer'), 0) as customer_borne_fee,
         COALESCE(SUM(payment_fee_amount), 0) as total_admin_fee
       FROM invoices WHERE status = 'paid' AND payment_fee_amount > 0
+        AND payment_date >= $1 AND payment_date <= $2
     `
-    let feeParams = []
-    let feeIdx = 1
-    if (start_date) {
-      feeQuery = `
-        SELECT
-          COALESCE(SUM(payment_fee_amount) FILTER (WHERE fee_bearer = 'merchant'), 0) as merchant_borne_fee,
-          COALESCE(SUM(payment_fee_amount) FILTER (WHERE fee_bearer = 'customer'), 0) as customer_borne_fee,
-          COALESCE(SUM(payment_fee_amount), 0) as total_admin_fee
-        FROM invoices WHERE status = 'paid' AND payment_fee_amount > 0
-          AND payment_date >= $1 AND payment_date <= $2
-      `
-      feeParams = [start_date, end_date]
-    } else if (start_date) {
-      feeQuery += ` AND payment_date >= $${feeIdx++}`
-      feeParams.push(start_date)
-    }
-
-    const feeResult = await query(feeQuery, feeParams)
+    const feeResult = await query(feeQuery, [startDateToUse, endDateToUse])
     const merchantFee = parseFloat(feeResult.rows[0].merchant_borne_fee) || 0
     const adminFee = parseFloat(feeResult.rows[0].total_admin_fee) || 0
 

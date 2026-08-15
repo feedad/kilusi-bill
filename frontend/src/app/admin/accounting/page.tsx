@@ -105,8 +105,15 @@ export default function AccountingPage() {
   const [mitraList, setMitraList] = useState<Array<{ id: string, name: string }>>([])
   const [mitraSettlementData, setMitraSettlementData] = useState<any>(null)
   const [loadingSettlement, setLoadingSettlement] = useState(false)
-  const [filterStartDate, setFilterStartDate] = useState('')
-  const [filterEndDate, setFilterEndDate] = useState('')
+  const [filterStartDate, setFilterStartDate] = useState(() => {
+    const d = new Date(); const p = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${p(d.getMonth()+1)}-01`
+  })
+  const [filterEndDate, setFilterEndDate] = useState(() => {
+    const d = new Date(); const p = (n: number) => String(n).padStart(2, '0')
+    const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
+    return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(lastDay)}`
+  })
   const [searchTerm, setSearchTerm] = useState('')
 
   const [allTransactionsForPDF, setAllTransactionsForPDF] = useState<AccountingTransaction[]>([])
@@ -170,7 +177,7 @@ export default function AccountingPage() {
   }
 
   // Quick date filter functions
-  const setQuickDateRange = (range: 'today' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'last7Days' | 'last30Days' | 'last3Months' | 'clear') => {
+  const setQuickDateRange = (range: 'today' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'last7Days' | 'last30Days' | 'last3Months' | 'lastMonth' | 'clear') => {
     if (range === 'clear') {
       clearDateFilters()
       return
@@ -192,6 +199,15 @@ export default function AccountingPage() {
         startDate.setDate(1)
         endDate.setMonth(today.getMonth() + 1, 0)
         break
+      case 'lastMonth': {
+        // Previous month: 1st to last day of previous month
+        const firstOfThisMonth = new Date(today.getFullYear(), today.getMonth(), 1)
+        const lastDayOfLastMonth = new Date(firstOfThisMonth.getTime() - 1) // last day of previous month
+        const firstOfLastMonth = new Date(lastDayOfLastMonth.getFullYear(), lastDayOfLastMonth.getMonth(), 1)
+        startDate.setFullYear(firstOfLastMonth.getFullYear(), firstOfLastMonth.getMonth(), 1)
+        endDate.setFullYear(lastDayOfLastMonth.getFullYear(), lastDayOfLastMonth.getMonth(), lastDayOfLastMonth.getDate())
+        break
+      }
       case 'thisYear':
         startDate.setMonth(0, 1)
         endDate.setMonth(11, 31)
@@ -213,8 +229,11 @@ export default function AccountingPage() {
   }
 
   const clearDateFilters = () => {
-    setFilterStartDate('')
-    setFilterEndDate('')
+    // Reset to current month instead of clearing to empty
+    const d = new Date(); const p = (n: number) => String(n).padStart(2, '0')
+    const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
+    setFilterStartDate(`${d.getFullYear()}-${p(d.getMonth()+1)}-01`)
+    setFilterEndDate(`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(lastDay)}`)
   }
 
   const filteredTransactions = (transactions || []).filter(transaction => {
@@ -985,6 +1004,14 @@ export default function AccountingPage() {
       </div>
 
       {/* Summary Cards */}
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-sm text-muted-foreground">
+          <Calendar className="h-3.5 w-3.5 inline mr-1.5" />
+          {filterStartDate && filterEndDate
+            ? `Periode: ${formatDate(filterStartDate)} s/d ${formatDate(filterEndDate)}`
+            : 'Bulan Berjalan'}
+        </p>
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {summary && (
           <>
@@ -1112,9 +1139,10 @@ export default function AccountingPage() {
                     <option value="thisWeek">Minggu Ini</option>
                     <option value="last30Days">30 Hari Terakhir</option>
                     <option value="thisMonth">Bulan Ini</option>
+                    <option value="lastMonth">Bulan Lalu</option>
                     <option value="last3Months">3 Bulan Terakhir</option>
                     <option value="thisYear">Tahun Ini</option>
-                    <option value="clear">Hapus Filter</option>
+                    <option value="clear">Reset Bulan Ini</option>
                   </select>
                 </div>
 
