@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -105,6 +105,8 @@ export default function AccountingPage() {
   const [mitraList, setMitraList] = useState<Array<{ id: string, name: string }>>([])
   const [mitraSettlementData, setMitraSettlementData] = useState<any>(null)
   const [loadingSettlement, setLoadingSettlement] = useState(false)
+  const startDateRef = useRef<HTMLInputElement>(null)
+  const endDateRef = useRef<HTMLInputElement>(null)
   const [filterStartDate, setFilterStartDate] = useState(() => {
     const d = new Date(); const p = (n: number) => String(n).padStart(2, '0')
     return `${d.getFullYear()}-${p(d.getMonth()+1)}-01`
@@ -1130,20 +1132,46 @@ export default function AccountingPage() {
 
                 <div>
                   <Label>Tanggal Mulai</Label>
-                  <Input
-                    type="date"
-                    value={filterStartDate}
-                    onChange={(e) => setFilterStartDate(e.target.value)}
-                  />
+                  <div className="relative">
+                    <Input
+                      ref={startDateRef}
+                      type="date"
+                      value={filterStartDate}
+                      onChange={(e) => setFilterStartDate(e.target.value)}
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="absolute right-0 top-1/2 transform -translate-y-1/2 h-[calc(100%-8px)] w-10 mr-1 text-gray-500 dark:text-gray-300"
+                      onClick={() => startDateRef.current?.showPicker?.()}
+                      title="Buka kalender"
+                    >
+                      <Calendar className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
 
                 <div>
                   <Label>Tanggal Selesai</Label>
-                  <Input
-                    type="date"
-                    value={filterEndDate}
-                    onChange={(e) => setFilterEndDate(e.target.value)}
-                  />
+                  <div className="relative">
+                    <Input
+                      ref={endDateRef}
+                      type="date"
+                      value={filterEndDate}
+                      onChange={(e) => setFilterEndDate(e.target.value)}
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="absolute right-0 top-1/2 transform -translate-y-1/2 h-[calc(100%-8px)] w-10 mr-1 text-gray-500 dark:text-gray-300"
+                      onClick={() => endDateRef.current?.showPicker?.()}
+                      title="Buka kalender"
+                    >
+                      <Calendar className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
               </div>
               <div className="flex justify-end gap-2 mt-4 pt-4 border-t">
