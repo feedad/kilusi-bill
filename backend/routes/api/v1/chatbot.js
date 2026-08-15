@@ -96,10 +96,10 @@ router.get('/billing/:phone', chatbotAuth, async (req, res) => {
             `SELECT s.id as service_id, s.service_number, s.status as service_status,
                     s.address_installation, s.siklus, s.billing_type,
                     p.name as package_name, p.speed as package_speed,
-                    r.name as region_name, m.name as mitra_name
+                    r.name as region_name, m.id as mitra_id, m.name as mitra_name
              FROM services s
-             LEFT JOIN packages p ON s.package_id = p.id
-             LEFT JOIN regions r ON s.region_id = r.id
+             LEFT JOIN packages p ON p.id = s.package_id
+             LEFT JOIN regions r ON r.id = s.region_id
              LEFT JOIN mitra m ON m.id = r.mitra_id
              WHERE s.customer_id = $1
              ORDER BY s.created_at DESC`,
@@ -152,7 +152,8 @@ router.get('/billing/:phone', chatbotAuth, async (req, res) => {
             };
         });
 
-        // 5. Get payment methods
+        // 5. Get payment methods (filtered by customer's mitra + company accounts)
+        const customerMitraId = servicesResult.rows[0]?.mitra_id || null;
         const paymentMethods = [];
         try {
             const { getSetting } = require('../../../config/settingsManager');
@@ -161,16 +162,22 @@ router.get('/billing/:phone', chatbotAuth, async (req, res) => {
             const bankAccounts = settings.bank_accounts || settings.bankAccounts || [];
             const ewallets = settings.ewallets || settings.eWallets || [];
 
-            for (const acc of bankAccounts) {
-                if (acc.isActive === false) continue;
+            const filterAccountForMitra = (acc) => {
+                if (acc.isActive === false) return false;
+                if (acc.is_company === true) return true;
+                const mIds = Array.isArray(acc.mitra_ids) ? acc.mitra_ids : (acc.mitra_id ? [acc.mitra_id] : []);
+                if (mIds.length === 0) return true;
+                return customerMitraId && mIds.map(String).includes(String(customerMitraId));
+            };
+
+            for (const acc of bankAccounts.filter(filterAccountForMitra)) {
                 paymentMethods.push({
                     bank: acc.bankName || acc.bank_name || 'Bank',
                     number: acc.accountNumber || acc.account_number || '',
                     name: acc.accountName || acc.account_name || '',
                 });
             }
-            for (const w of ewallets) {
-                if (w.isActive === false) continue;
+            for (const w of ewallets.filter(filterAccountForMitra)) {
                 paymentMethods.push({
                     bank: w.provider || 'E-Wallet',
                     number: w.phoneNumber || w.phone_number || '',
@@ -1004,23 +1011,46 @@ router.get('/admin-users', chatbotPublicAuth, async (req, res) => {
  */
 router.get('/bank-accounts', chatbotPublicAuth, async (req, res) => {
     try {
+        const { mitra_id, phone } = req.query;
+        let customerMitraId = mitra_id || null;
+
+        if (!customerMitraId && phone) {
+            const phoneVariants = getPhoneVariants(phone);
+            const mRes = await query(`
+                SELECT m.id as mitra_id
+                FROM customers c
+                JOIN services s ON s.customer_id = c.id
+                JOIN regions r ON s.region_id = r.id
+                JOIN mitra m ON r.mitra_id = m.id
+                WHERE c.phone = ANY($1)
+                ORDER BY s.created_at DESC LIMIT 1
+            `, [phoneVariants]);
+            customerMitraId = mRes.rows[0]?.mitra_id || null;
+        }
+
         const { getSetting } = require('../../../config/settingsManager');
         const raw = getSetting('payment_settings', '');
         const settings = typeof raw === 'string' ? JSON.parse(raw || '{}') : (raw || {});
         const bankAccounts = settings.bank_accounts || settings.bankAccounts || [];
         const ewallets = settings.ewallets || settings.eWallets || [];
 
+        const filterAccountForMitra = (acc) => {
+            if (acc.isActive === false) return false;
+            if (acc.is_company === true) return true;
+            const mIds = Array.isArray(acc.mitra_ids) ? acc.mitra_ids : (acc.mitra_id ? [acc.mitra_id] : []);
+            if (mIds.length === 0) return true;
+            return customerMitraId && mIds.map(String).includes(String(customerMitraId));
+        };
+
         const accounts = [];
-        for (const acc of bankAccounts) {
-            if (acc.isActive === false) continue;
+        for (const acc of bankAccounts.filter(filterAccountForMitra)) {
             accounts.push({
                 bank: acc.bankName || acc.bank_name || 'Bank',
                 number: acc.accountNumber || acc.account_number || '',
                 name: acc.accountName || acc.account_name || '',
             });
         }
-        for (const w of ewallets) {
-            if (w.isActive === false) continue;
+        for (const w of ewallets.filter(filterAccountForMitra)) {
             accounts.push({
                 bank: w.provider || 'E-Wallet',
                 number: w.phoneNumber || w.phone_number || '',

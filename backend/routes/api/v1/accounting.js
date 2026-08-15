@@ -67,6 +67,7 @@ router.get('/transactions', async (req, res) => {
       limit = 20,
       type,
       category_id,
+      mitra_id,
       start_date,
       end_date,
       search
@@ -81,6 +82,8 @@ router.get('/transactions', async (req, res) => {
         at.description,
         at.reference_type,
         at.reference_id,
+        at.mitra_id,
+        m.name as mitra_name,
         at.date,
         at.attachment_url,
         at.notes,
@@ -93,6 +96,7 @@ router.get('/transactions', async (req, res) => {
       FROM accounting_transactions at
       LEFT JOIN accounting_categories ac ON at.category_id = ac.id
       LEFT JOIN users u ON at.created_by = u.id
+      LEFT JOIN mitra m ON at.mitra_id = m.id
       WHERE 1=1
     `
 
@@ -107,6 +111,11 @@ router.get('/transactions', async (req, res) => {
     if (category_id) {
       queryText += ` AND at.category_id = $${paramIndex++}`
       queryParams.push(category_id)
+    }
+
+    if (mitra_id) {
+      queryText += ` AND at.mitra_id = $${paramIndex++}::uuid`
+      queryParams.push(mitra_id)
     }
 
     if (start_date) {
@@ -144,6 +153,11 @@ router.get('/transactions', async (req, res) => {
     if (category_id) {
       countQuery += ` AND at.category_id = $${countParamIndex++}`
       countParams.push(category_id)
+    }
+
+    if (mitra_id) {
+      countQuery += ` AND at.mitra_id = $${countParamIndex++}::uuid`
+      countParams.push(mitra_id)
     }
 
     if (start_date) {
@@ -517,7 +531,7 @@ router.delete('/transactions/:id', async (req, res) => {
 // GET /api/v1/accounting/summary - Get accounting summary
 router.get('/summary', async (req, res) => {
   try {
-    const { start_date, end_date } = req.query
+    const { start_date, end_date, mitra_id } = req.query
 
     let queryText = `
       SELECT
@@ -539,6 +553,11 @@ router.get('/summary', async (req, res) => {
     if (end_date) {
       queryText += ` AND date <= $${paramIndex++}`
       queryParams.push(end_date)
+    }
+
+    if (mitra_id) {
+      queryText += ` AND mitra_id = $${paramIndex++}::uuid`
+      queryParams.push(mitra_id)
     }
 
     queryText += ' GROUP BY type'
@@ -952,5 +971,368 @@ router.delete('/categories/:id', async (req, res) => {
     })
   }
 })
+
+// GET /api/v1/accounting/report/daily - Get daily breakdown report
+router.get('/report/daily', async (req, res) => {
+  try {
+    const { start_date, end_date, mitra_id, type } = req.query;
+
+    let queryText = `
+      SELECT
+        at.id,
+        at.date,
+        at.type,
+        at.amount,
+        at.description,
+        at.reference_type,
+        at.reference_id,
+        at.mitra_id,
+        m.name as mitra_name,
+        ac.name as category_name,
+        ac.color as category_color,
+        at.created_at
+      FROM accounting_transactions at
+      LEFT JOIN accounting_categories ac ON at.category_id = ac.id
+      LEFT JOIN mitra m ON at.mitra_id = m.id
+      WHERE 1=1
+    `;
+    const params = [];
+    let idx = 1;
+
+    if (start_date) {
+      queryText += ` AND at.date >= $${idx++}`;
+      params.push(start_date);
+    }
+    if (end_date) {
+      queryText += ` AND at.date <= $${idx++}`;
+      params.push(end_date);
+    }
+    if (mitra_id) {
+      queryText += ` AND at.mitra_id = $${idx++}::uuid`;
+      params.push(mitra_id);
+    }
+    if (type && ['revenue', 'expense'].includes(type)) {
+      queryText += ` AND at.type = $${idx++}`;
+      params.push(type);
+    }
+
+    queryText += ` ORDER BY at.date ASC, at.created_at ASC`;
+
+    const result = await query(queryText, params);
+    const rows = result.rows;
+
+    // Group by date
+    const daysMap = new Map();
+    let grandRevenue = 0;
+    let grandExpense = 0;
+
+    rows.forEach(r => {
+      const dateKey = r.date ? new Date(r.date).toISOString().split('T')[0] : 'Tanpa Tanggal';
+      if (!daysMap.has(dateKey)) {
+        daysMap.set(dateKey, {
+          date: dateKey,
+          transactions: [],
+          totalRevenue: 0,
+          totalExpense: 0,
+          netBalance: 0
+        });
+      }
+      const dayObj = daysMap.get(dateKey);
+      const amt = parseFloat(r.amount) || 0;
+      if (r.type === 'revenue') {
+        dayObj.totalRevenue += amt;
+        grandRevenue += amt;
+      } else {
+        dayObj.totalExpense += amt;
+        grandExpense += amt;
+      }
+      dayObj.netBalance = dayObj.totalRevenue - dayObj.totalExpense;
+      dayObj.transactions.push({
+        id: r.id,
+        type: r.type,
+        amount: amt,
+        description: r.description,
+        category_name: r.category_name || '-',
+        mitra_name: r.mitra_name || '-',
+        created_at: r.created_at
+      });
+    });
+
+    const dailyData = Array.from(daysMap.values());
+
+    res.json({
+      success: true,
+      data: {
+        daily: dailyData,
+        summary: {
+          totalRevenue: grandRevenue,
+          totalExpense: grandExpense,
+          netProfit: grandRevenue - grandExpense,
+          totalTransactions: rows.length,
+          daysCount: dailyData.length
+        }
+      }
+    });
+  } catch (error) {
+    logger.error('Error in daily accounting report:', error);
+    res.status(500).json({ success: false, message: 'Gagal mengambil laporan harian' });
+  }
+});
+
+// GET /api/v1/accounting/report/mitra-settlement - Cross-settlement report between company and mitras
+router.get('/report/mitra-settlement', async (req, res) => {
+  try {
+    const { start_date, end_date, mitra_id } = req.query;
+
+    const { getSetting } = require('../../../config/settingsManager');
+    const rawPS = getSetting('payment_settings');
+    let paymentSettings = {};
+    try { paymentSettings = typeof rawPS === 'string' ? JSON.parse(rawPS) : (rawPS || {}); } catch (e) {}
+
+    const bankAccounts = paymentSettings.bank_accounts || [];
+    const ewallets = paymentSettings.ewallets || [];
+
+    // Helper: determine destination category of payment_method
+    const getDestinationCategory = (method) => {
+      if (!method) return { type: 'unknown', name: 'Unknown' };
+      const m = String(method).toLowerCase();
+      if (m === 'cash' || m === 'tunai') return { type: 'cash', name: 'Kas Tunai' };
+      if (m.startsWith('autopay')) return { type: 'company', name: 'Autopay (Pusat)' };
+      if (m.startsWith('tripay') || m === 'qris') return { type: 'company', name: 'QRIS / Tripay (Pusat)' };
+
+      if (method.startsWith('bank_')) {
+        const id = method.replace('bank_', '');
+        const acc = bankAccounts.find(b => String(b.id) === String(id));
+        if (acc) {
+          if (acc.is_company === true) return { type: 'company', name: `${acc.bankName} (Perusahaan)` };
+          const mIds = Array.isArray(acc.mitra_ids) ? acc.mitra_ids : (acc.mitra_id ? [acc.mitra_id] : []);
+          return { type: 'mitra', mitra_ids: mIds, name: `${acc.bankName} (${acc.accountNumber})` };
+        }
+      }
+
+      if (method.startsWith('ewallet_')) {
+        const id = method.replace('ewallet_', '');
+        const w = ewallets.find(e => String(e.id) === String(id));
+        if (w) {
+          if (w.is_company === true) return { type: 'company', name: `${w.provider} (Perusahaan)` };
+          const mIds = Array.isArray(w.mitra_ids) ? w.mitra_ids : (w.mitra_id ? [w.mitra_id] : []);
+          return { type: 'mitra', mitra_ids: mIds, name: `${w.provider} (${w.phoneNumber})` };
+        }
+      }
+
+      return { type: 'other', name: method };
+    };
+
+    let queryText = `
+      SELECT
+        p.id as payment_id,
+        p.amount,
+        p.payment_date,
+        p.payment_method,
+        p.notes,
+        i.invoice_number,
+        c.name as customer_name,
+        m.id as customer_mitra_id,
+        m.name as customer_mitra_name,
+        r.name as region_name
+      FROM payments p
+      JOIN invoices i ON p.invoice_id = i.id
+      JOIN customers c ON i.customer_id = c.id
+      LEFT JOIN services s ON s.service_number = i.service_number
+      LEFT JOIN regions r ON r.id = s.region_id
+      LEFT JOIN mitra m ON r.mitra_id = m.id
+      WHERE p.is_rolled_back = FALSE
+    `;
+    const params = [];
+    let idx = 1;
+
+    if (start_date) {
+      queryText += ` AND p.payment_date >= $${idx++}`;
+      params.push(start_date);
+    }
+    if (end_date) {
+      queryText += ` AND p.payment_date <= $${idx++}`;
+      params.push(end_date);
+    }
+    if (mitra_id) {
+      queryText += ` AND m.id = $${idx++}::uuid`;
+      params.push(mitra_id);
+    }
+
+    queryText += ` ORDER BY p.payment_date DESC, p.created_at DESC`;
+
+    const result = await query(queryText, params);
+    const payments = result.rows;
+
+    // Build Mitra settlement summary
+    const mitraSummaries = new Map();
+
+    payments.forEach(p => {
+      const mitraKey = p.customer_mitra_id || 'pusat_direct';
+      const mitraName = p.customer_mitra_name || 'Pelanggan Pusat (Tanpa Mitra)';
+
+      if (!mitraSummaries.has(mitraKey)) {
+        mitraSummaries.set(mitraKey, {
+          mitra_id: p.customer_mitra_id || null,
+          mitra_name: mitraName,
+          total_revenue: 0,
+          received_in_mitra_account: 0,
+          received_in_company_account: 0, // Pusat owes to Mitra
+          received_in_other_mitra: 0,
+          received_in_cash: 0,
+          transactions: []
+        });
+      }
+
+      const summaryObj = mitraSummaries.get(mitraKey);
+      const amt = parseFloat(p.amount) || 0;
+      summaryObj.total_revenue += amt;
+
+      const dest = getDestinationCategory(p.payment_method);
+      let classification = 'other';
+
+      if (dest.type === 'cash') {
+        summaryObj.received_in_cash += amt;
+        classification = 'cash';
+      } else if (dest.type === 'company') {
+        summaryObj.received_in_company_account += amt;
+        classification = 'company_account';
+      } else if (dest.type === 'mitra') {
+        const matchesCustomerMitra = p.customer_mitra_id && dest.mitra_ids?.map(String).includes(String(p.customer_mitra_id));
+        if (matchesCustomerMitra) {
+          summaryObj.received_in_mitra_account += amt;
+          classification = 'own_mitra_account';
+        } else {
+          summaryObj.received_in_other_mitra += amt;
+          classification = 'other_mitra_account';
+        }
+      } else {
+        summaryObj.received_in_company_account += amt;
+        classification = 'company_account';
+      }
+
+      summaryObj.transactions.push({
+        payment_id: p.payment_id,
+        invoice_number: p.invoice_number,
+        customer_name: p.customer_name,
+        region_name: p.region_name || '-',
+        amount: amt,
+        payment_date: p.payment_date,
+        payment_method: p.payment_method,
+        destination_name: dest.name,
+        classification
+      });
+    });
+
+    res.json({
+      success: true,
+      data: {
+        mitras: Array.from(mitraSummaries.values()),
+        total_payments_count: payments.length,
+        period: { start_date: start_date || null, end_date: end_date || null }
+      }
+    });
+  } catch (error) {
+    logger.error('Error in mitra settlement report:', error);
+    res.status(500).json({ success: false, message: 'Gagal memuat laporan rekonsiliasi mitra' });
+  }
+});
+
+// GET /api/v1/accounting/export/excel - Export transactions to true .xlsx workbook
+router.get('/export/excel', async (req, res) => {
+  try {
+    const XLSX = require('xlsx');
+    const { start_date, end_date, mitra_id, type } = req.query;
+
+    let queryText = `
+      SELECT
+        at.id,
+        at.date,
+        at.description,
+        ac.name as category_name,
+        at.type,
+        at.amount,
+        m.name as mitra_name,
+        u.username as created_by_name
+      FROM accounting_transactions at
+      LEFT JOIN accounting_categories ac ON at.category_id = ac.id
+      LEFT JOIN mitra m ON at.mitra_id = m.id
+      LEFT JOIN users u ON at.created_by = u.id
+      WHERE 1=1
+    `;
+    const params = [];
+    let idx = 1;
+
+    if (start_date) {
+      queryText += ` AND at.date >= $${idx++}`;
+      params.push(start_date);
+    }
+    if (end_date) {
+      queryText += ` AND at.date <= $${idx++}`;
+      params.push(end_date);
+    }
+    if (mitra_id) {
+      queryText += ` AND at.mitra_id = $${idx++}::uuid`;
+      params.push(mitra_id);
+    }
+    if (type && ['revenue', 'expense'].includes(type)) {
+      queryText += ` AND at.type = $${idx++}`;
+      params.push(type);
+    }
+
+    queryText += ` ORDER BY at.date ASC, at.created_at ASC`;
+
+    const result = await query(queryText, params);
+    const rows = result.rows;
+
+    let runningBalance = 0;
+    const excelData = rows.map((r, i) => {
+      const amt = parseFloat(r.amount) || 0;
+      const isRev = r.type === 'revenue';
+      if (isRev) runningBalance += amt;
+      else runningBalance -= amt;
+
+      return {
+        'No': i + 1,
+        'Tanggal': r.date ? new Date(r.date).toISOString().split('T')[0] : '-',
+        'Keterangan': r.description,
+        'Kategori': r.category_name || '-',
+        'Mitra': r.mitra_name || '-',
+        'Pemasukan (Debet)': isRev ? amt : 0,
+        'Pengeluaran (Kredit)': !isRev ? amt : 0,
+        'Saldo': runningBalance,
+        'Admin/User': r.created_by_name || '-'
+      };
+    });
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(excelData);
+
+    // Auto-width columns
+    ws['!cols'] = [
+      { wch: 6 },  // No
+      { wch: 12 }, // Tanggal
+      { wch: 40 }, // Keterangan
+      { wch: 18 }, // Kategori
+      { wch: 18 }, // Mitra
+      { wch: 18 }, // Debet
+      { wch: 18 }, // Kredit
+      { wch: 20 }, // Saldo
+      { wch: 15 }  // Admin
+    ];
+
+    XLSX.utils.book_append_sheet(wb, ws, 'Buku Kas Harian');
+
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const filename = `Laporan_Keuangan_${start_date || 'Awal'}_sd_${end_date || 'Akhir'}.xlsx`;
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (error) {
+    logger.error('Error generating Excel report:', error);
+    res.status(500).json({ success: false, message: 'Gagal membuat file Excel' });
+  }
+});
 
 module.exports = router

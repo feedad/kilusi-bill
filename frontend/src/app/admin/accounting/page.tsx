@@ -44,6 +44,8 @@ interface AccountingTransaction {
   }
   reference_type?: string
   reference_id?: number
+  mitra_id?: string
+  mitra_name?: string
   date: string
   attachment_url?: string
   notes?: string
@@ -98,6 +100,10 @@ export default function AccountingPage() {
 
   const [filterType, setFilterType] = useState<'all' | 'revenue' | 'expense'>('all')
   const [filterCategory, setFilterCategory] = useState('')
+  const [filterMitra, setFilterMitra] = useState('')
+  const [mitraList, setMitraList] = useState<Array<{ id: string, name: string }>>([])
+  const [mitraSettlementData, setMitraSettlementData] = useState<any>(null)
+  const [loadingSettlement, setLoadingSettlement] = useState(false)
   const [filterStartDate, setFilterStartDate] = useState('')
   const [filterEndDate, setFilterEndDate] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
@@ -261,6 +267,16 @@ export default function AccountingPage() {
       width: '120px'
     },
     {
+      key: 'mitra_name' as any,
+      title: 'Mitra',
+      render: (_, record) => (
+        <span className="text-xs text-muted-foreground font-medium">
+          {record.mitra_name || '-'}
+        </span>
+      ),
+      width: '120px'
+    },
+    {
       key: 'amount',
       title: 'Jumlah',
       sortable: true,
@@ -302,6 +318,7 @@ export default function AccountingPage() {
       const params = new URLSearchParams()
       if (filterType !== 'all') params.append('type', filterType)
       if (filterCategory) params.append('category_id', filterCategory)
+      if (filterMitra) params.append('mitra_id', filterMitra)
       if (filterStartDate) params.append('start_date', filterStartDate)
       if (filterEndDate) params.append('end_date', filterEndDate)
       if (searchTerm) params.append('search', searchTerm)
@@ -312,6 +329,36 @@ export default function AccountingPage() {
       }
     } catch (error) {
       console.error('Error fetching transactions:', error)
+    }
+  }
+
+  const fetchMitraList = async () => {
+    try {
+      const response = await adminApi.get('/api/v1/mitra?limit=200')
+      if (response.data.success) {
+        setMitraList(response.data.data || [])
+      }
+    } catch (error) {
+      console.error('Error fetching mitra list:', error)
+    }
+  }
+
+  const fetchMitraSettlement = async () => {
+    try {
+      setLoadingSettlement(true)
+      const params = new URLSearchParams()
+      if (filterStartDate) params.append('start_date', filterStartDate)
+      if (filterEndDate) params.append('end_date', filterEndDate)
+      if (filterMitra) params.append('mitra_id', filterMitra)
+
+      const response = await adminApi.get(`/api/v1/accounting/report/mitra-settlement?${params}`)
+      if (response.data.success) {
+        setMitraSettlementData(response.data.data)
+      }
+    } catch (error) {
+      console.error('Error fetching mitra settlement:', error)
+    } finally {
+      setLoadingSettlement(false)
     }
   }
 
@@ -334,6 +381,7 @@ export default function AccountingPage() {
       const params = new URLSearchParams()
       if (filterStartDate) params.append('start_date', filterStartDate)
       if (filterEndDate) params.append('end_date', filterEndDate)
+      if (filterMitra) params.append('mitra_id', filterMitra)
 
       const response = await adminApi.get(`/api/v1/accounting/summary?${params}`)
       if (response.data.success) {
@@ -365,6 +413,8 @@ export default function AccountingPage() {
       fetchCategories(),
       fetchSummary(),
       fetchProfitLoss(),
+      fetchMitraList(),
+      fetchMitraSettlement(),
       fetchAutoExpenseSettings()
     ])
     setLoading(false)
@@ -706,43 +756,29 @@ export default function AccountingPage() {
 
   const exportToExcel = async () => {
     try {
-      // Ambil data untuk export
       const params = new URLSearchParams()
       if (filterType !== 'all') params.append('type', filterType)
       if (filterCategory) params.append('category_id', filterCategory)
+      if (filterMitra) params.append('mitra_id', filterMitra)
       if (filterStartDate) params.append('start_date', filterStartDate)
       if (filterEndDate) params.append('end_date', filterEndDate)
-      params.append('limit', '1000')
 
-      const response = await adminApi.get(`/api/v1/accounting/transactions?${params}`)
-      if (response.data.success) {
-        const allTransactions = response.data.data.transactions
+      const response = await adminApi.get(`/api/v1/accounting/export/excel?${params}`, {
+        responseType: 'blob'
+      })
 
-        // Create CSV content
-        let csvContent = "No,Tanggal,Deskripsi,Kategori,Tipe,Jumlah\n"
-
-        allTransactions.forEach((transaction: AccountingTransaction, index: number) => {
-          csvContent += `${index + 1},${transaction.date},"${transaction.description}","${transaction.category?.name || '-'}","${transaction.type === 'revenue' ? 'Pemasukan' : 'Pengeluaran'}",${transaction.amount}\n`
-        })
-
-        // Add summary row
-        csvContent += "\nRINGKASAN\n"
-        csvContent += `Total Pemasukan,${summary?.revenue || 0}\n`
-        csvContent += `Total Pengeluaran,${summary?.expense || 0}\n`
-        csvContent += `Laba Bersih,${summary?.profit || 0}\n`
-
-        // Create blob and download
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        const d = new Date(); const p = (n: number) => String(n).padStart(2, '0'); const ts = `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`
-        a.download = `laporan-keuangan-${ts}.csv`
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-        URL.revokeObjectURL(url)
-      }
+      const blob = new Blob([response.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      const d = new Date(); const p = (n: number) => String(n).padStart(2, '0'); const ts = `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`
+      a.download = `Laporan_Keuangan_${ts}.xlsx`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
     } catch (error) {
       console.error('Error exporting to Excel:', error)
       alert('Gagal export ke Excel. Silakan coba lagi.')
@@ -755,9 +791,12 @@ export default function AccountingPage() {
       const params = new URLSearchParams()
       if (filterType !== 'all') params.append('type', filterType)
       if (filterCategory) params.append('category_id', filterCategory)
+      if (filterMitra) params.append('mitra_id', filterMitra)
       if (filterStartDate) params.append('start_date', filterStartDate)
       if (filterEndDate) params.append('end_date', filterEndDate)
       params.append('limit', '1000')
+
+      const selectedMitraName = filterMitra ? mitraList.find(m => m.id === filterMitra)?.name : null
 
       const response = await adminApi.get(`/api/v1/accounting/transactions?${params}`)
       if (response.data.success) {
@@ -771,20 +810,21 @@ export default function AccountingPage() {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Laporan Keuangan</title>
+    <title>Laporan Keuangan ${selectedMitraName ? `— ${selectedMitraName}` : ''}</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.4; }
-        h1 { text-align: center; color: #333; margin-bottom: 20px; }
+        h1 { text-align: center; color: #333; margin-bottom: 8px; }
+        .subtitle { text-align: center; color: #666; font-size: 14px; margin-bottom: 20px; }
         h2 { color: #333; margin-top: 30px; margin-bottom: 15px; }
-        h3 { background-color: #f3f4f6; padding: 8px; margin: 15px 0 10px 0; }
-        table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+        h3 { background-color: #f3f4f6; padding: 8px; margin: 15px 0 10px 0; font-size: 14px; }
+        table { width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 13px; }
         th, td { padding: 8px; text-align: left; border: 1px solid #ddd; }
         th { background-color: #f8f9fa; font-weight: bold; }
         .text-right { text-align: right; }
         .text-center { text-align: center; }
-        .revenue { color: #16a34a; }
-        .expense { color: #dc2626; }
-        .summary { font-weight: bold; }
+        .revenue { color: #16a34a; font-weight: bold; }
+        .expense { color: #dc2626; font-weight: bold; }
+        .summary { font-weight: bold; margin-bottom: 20px; }
         .summary th { background-color: #e5e7eb; }
         @media print {
             body { margin: 10px; }
@@ -796,6 +836,7 @@ export default function AccountingPage() {
 </head>
 <body>
     <h1>LAPORAN KEUANGAN</h1>
+    ${selectedMitraName ? `<div class="subtitle"><strong>Mitra:</strong> ${selectedMitraName}</div>` : ''}
     <p style="text-align: center;">
         Periode: ${filterStartDate && filterEndDate
             ? `${formatDate(filterStartDate)} - ${formatDate(filterEndDate)}`
@@ -981,16 +1022,17 @@ export default function AccountingPage() {
 
       {/* Tabs */}
       <Tabs defaultValue="transactions">
-        <TabsList>
+        <TabsList className="grid w-full grid-cols-3 max-w-md">
           <TabsTrigger value="transactions">Transaksi</TabsTrigger>
           <TabsTrigger value="reports">Laporan</TabsTrigger>
+          <TabsTrigger value="settlement">Rekonsiliasi Mitra</TabsTrigger>
         </TabsList>
 
         <TabsContent value="transactions" className="space-y-4">
           {/* Filters */}
           <Card>
             <CardContent className="pt-6">
-              <div className="grid grid-cols-1 lg:grid-cols-6 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-7 gap-4">
                 <div>
                   <Label>Search</Label>
                   <Input
@@ -1030,6 +1072,22 @@ export default function AccountingPage() {
                 </div>
 
                 <div>
+                  <Label>Mitra</Label>
+                  <select
+                    value={filterMitra}
+                    onChange={(e) => setFilterMitra(e.target.value)}
+                    className="rounded-md border border-input bg-background px-3 py-2 text-sm w-full"
+                  >
+                    <option value="">Semua Mitra</option>
+                    {mitraList.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
                   <Label>Quick Filter Tanggal</Label>
                   <select
                     value=""
@@ -1040,7 +1098,7 @@ export default function AccountingPage() {
                         e.target.value = '' // Reset select after choosing
                       }
                     }}
-                    className="rounded-md border border-input bg-background px-3 py-2 text-sm w-full mt-1"
+                    className="rounded-md border border-input bg-background px-3 py-2 text-sm w-full"
                   >
                     <option value="">Pilih periode...</option>
                     <option value="today">Hari Ini</option>
@@ -1056,40 +1114,35 @@ export default function AccountingPage() {
 
                 <div>
                   <Label>Tanggal Mulai</Label>
-                  <div className="relative">
-                    <Input
-                      type="date"
-                      value={filterStartDate}
-                      onChange={(e) => setFilterStartDate(e.target.value)}
-                      className="mt-1 pr-10 [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:pointer-events-none"
-                    />
-                    <Calendar
-                      className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500 dark:text-gray-300 pointer-events-none hover:cursor-pointer"
-                    />
-                  </div>
+                  <Input
+                    type="date"
+                    value={filterStartDate}
+                    onChange={(e) => setFilterStartDate(e.target.value)}
+                  />
                 </div>
 
                 <div>
                   <Label>Tanggal Selesai</Label>
-                  <div className="relative">
-                    <Input
-                      type="date"
-                      value={filterEndDate}
-                      onChange={(e) => setFilterEndDate(e.target.value)}
-                      className="mt-1 pr-10 [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:pointer-events-none"
-                    />
-                    <Calendar
-                      className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500 dark:text-gray-300 pointer-events-none hover:cursor-pointer"
-                    />
-                  </div>
+                  <Input
+                    type="date"
+                    value={filterEndDate}
+                    onChange={(e) => setFilterEndDate(e.target.value)}
+                  />
                 </div>
-
-                <div className="flex items-end">
-                  <Button onClick={loadAllData}>
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Refresh
-                  </Button>
-                </div>
+              </div>
+              <div className="flex justify-end gap-2 mt-4 pt-4 border-t">
+                <Button variant="outline" size="sm" onClick={loadAllData}>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Refresh
+                </Button>
+                <Button variant="outline" size="sm" onClick={exportToExcel}>
+                  <Download className="h-4 w-4 mr-2" />
+                  Unduh Excel (.xlsx)
+                </Button>
+                <Button variant="outline" size="sm" onClick={exportToHTML}>
+                  <Calendar className="h-4 w-4 mr-2" />
+                  Cetak PDF
+                </Button>
               </div>
             </CardContent>
           </Card>
@@ -1240,6 +1293,116 @@ export default function AccountingPage() {
                         </div>
                       </div>
                     ))}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="settlement" className="space-y-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Laporan Rekonsiliasi & Arus Transaksi Mitra</CardTitle>
+                <CardDescription>
+                  Rekapitulasi pembayaran pelanggan per-mitra: uang yang masuk ke Rekening Mitra vs Rekening Pusat (Hutang Pusat ke Mitra).
+                </CardDescription>
+              </div>
+              <Button onClick={fetchMitraSettlement} disabled={loadingSettlement} size="sm">
+                <RefreshCw className={`h-4 w-4 mr-2 ${loadingSettlement ? 'animate-spin' : ''}`} />
+                Hitung Rekonsiliasi
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {loadingSettlement ? (
+                <div className="flex justify-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                </div>
+              ) : !mitraSettlementData || mitraSettlementData.mitras?.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  Belum ada data transaksi untuk periode yang dipilih.
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {/* Mitra Summary Cards */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {mitraSettlementData.mitras.map((m: any) => (
+                      <Card key={m.mitra_id || 'pusat'} className="border-2 border-slate-200 dark:border-slate-800">
+                        <CardHeader className="pb-2">
+                          <div className="flex justify-between items-start">
+                            <CardTitle className="text-lg font-bold text-foreground">{m.mitra_name}</CardTitle>
+                            <Badge variant="outline" className="text-xs">{m.transactions?.length || 0} Trx</Badge>
+                          </div>
+                          <CardDescription className="text-xs font-mono">Total Pendapatan: {formatCurrency(m.total_revenue)}</CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-2 text-xs">
+                          <div className="flex justify-between p-2 rounded bg-muted/40">
+                            <span className="text-muted-foreground">Masuk Rekening Mitra:</span>
+                            <span className="font-semibold text-green-600">{formatCurrency(m.received_in_mitra_account)}</span>
+                          </div>
+                          <div className="flex justify-between p-2 rounded bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900">
+                            <span className="font-medium text-blue-800 dark:text-blue-300">Masuk Rekening Pusat (Hutang Pusat):</span>
+                            <span className="font-bold text-blue-700 dark:text-blue-400">{formatCurrency(m.received_in_company_account)}</span>
+                          </div>
+                          {m.received_in_other_mitra > 0 && (
+                            <div className="flex justify-between p-2 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300">
+                              <span>Masuk Mitra Lain:</span>
+                              <span className="font-semibold">{formatCurrency(m.received_in_other_mitra)}</span>
+                            </div>
+                          )}
+                          {m.received_in_cash > 0 && (
+                            <div className="flex justify-between p-2 rounded bg-muted/40">
+                              <span className="text-muted-foreground">Kas Tunai:</span>
+                              <span className="font-semibold">{formatCurrency(m.received_in_cash)}</span>
+                            </div>
+                          )}
+                          <div className="pt-2 border-t flex justify-between items-center text-sm font-bold">
+                            <span>Wajib Disetor Pusat:</span>
+                            <span className="text-blue-600">{formatCurrency(m.received_in_company_account)}</span>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+
+                  {/* Transaction breakdown table */}
+                  <div className="pt-4 border-t">
+                    <h4 className="font-semibold text-sm mb-3">Rincian Transaksi Pembayaran Mitra</h4>
+                    <div className="overflow-x-auto border rounded-lg">
+                      <table className="w-full text-xs">
+                        <thead className="bg-muted/50 border-b">
+                          <tr>
+                            <th className="p-2.5 text-left font-medium">Invoice</th>
+                            <th className="p-2.5 text-left font-medium">Pelanggan</th>
+                            <th className="p-2.5 text-left font-medium">Mitra</th>
+                            <th className="p-2.5 text-left font-medium">Tanggal</th>
+                            <th className="p-2.5 text-left font-medium">Metode</th>
+                            <th className="p-2.5 text-left font-medium">Tujuan Uang Masuk</th>
+                            <th className="p-2.5 text-right font-medium">Jumlah</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {mitraSettlementData.mitras.flatMap((m: any) =>
+                            (m.transactions || []).map((tx: any) => (
+                              <tr key={tx.payment_id} className="border-b last:border-b-0 hover:bg-muted/30">
+                                <td className="p-2.5 font-mono">{tx.invoice_number}</td>
+                                <td className="p-2.5 font-medium">{tx.customer_name}</td>
+                                <td className="p-2.5 text-muted-foreground">{m.mitra_name}</td>
+                                <td className="p-2.5">{tx.payment_date ? new Date(tx.payment_date).toLocaleDateString('id-ID') : '-'}</td>
+                                <td className="p-2.5"><Badge variant="outline" className="text-[10px]">{tx.payment_method}</Badge></td>
+                                <td className="p-2.5">
+                                  <span className={`px-1.5 py-0.5 rounded font-medium ${tx.classification === 'company_account' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' : 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'}`}>
+                                    {tx.destination_name}
+                                  </span>
+                                </td>
+                                <td className="p-2.5 text-right font-semibold">{formatCurrency(tx.amount)}</td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
               )}
