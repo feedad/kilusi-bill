@@ -221,21 +221,41 @@ class BillingService {
 
             // Generate unique code for autopay if enabled
             const invoice = result.rows[0];
+            let uniqueCode = null;
+            let amountWithCode = null;
             try {
                 const uniqueCodeGenerator = require('../config/unique-code');
                 if (uniqueCodeGenerator.isEnabled()) {
-                    const code = await uniqueCodeGenerator.generateCode();
-                    const amountWithCode = uniqueCodeGenerator.calculateAmountWithCode(amount, code);
+                    uniqueCode = await uniqueCodeGenerator.generateCode();
+                    amountWithCode = uniqueCodeGenerator.calculateAmountWithCode(amount, uniqueCode);
                     await query(
                         `UPDATE invoices SET unique_code = $1, amount_with_code = $2 WHERE id = $3`,
-                        [code, amountWithCode, invoice.id]
+                        [uniqueCode, amountWithCode, invoice.id]
                     );
-                    invoice.unique_code = code;
+                    invoice.unique_code = uniqueCode;
                     invoice.amount_with_code = amountWithCode;
-                    logger.info(`Unique code ${code} generated for invoice ${invoiceNumber}`);
+                    logger.info(`Unique code ${uniqueCode} generated for invoice ${invoiceNumber}`);
                 }
             } catch (ucError) {
                 logger.error(`Unique code generation failed for ${invoiceNumber}:`, ucError.message);
+            }
+
+            // Autopay integration: push invoice for auto-matching
+            try {
+                const autopayService = require('./autopay-service');
+                if (autopayService.isEnabled()) {
+                    const customerResult = await query('SELECT name FROM customers WHERE id = $1', [customerId]);
+                    const customerName = customerResult.rows[0]?.name || 'Unknown';
+                    const pushAmount = amountWithCode || invoice.final_amount || invoice.amount;
+                    await autopayService.pushInvoice({
+                        ...invoice,
+                        customer_name: customerName,
+                        amount: pushAmount,
+                        unique_code: uniqueCode || 0
+                    });
+                }
+            } catch (autopayError) {
+                logger.error(`[Autopay] Failed to push invoice ${invoiceNumber}:`, autopayError.message);
             }
 
             return invoice;

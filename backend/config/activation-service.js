@@ -55,7 +55,18 @@ class ActivationService {
             logger.error(`Failed to create installation invoice for ${customerId}:`, e);
         }
 
-        // 5. Send installation completed notification
+        // 5. Trigger referral discounts & rewards before notification
+        if (invoice) {
+            try {
+                const ReferralService = require('../services/referral-service');
+                await ReferralService.processFixedCodeCashReward(customerId);
+                await ReferralService.applyReferredFirstInvoiceDiscount(invoice.id, customerId);
+            } catch (e) {
+                logger.warn(`Failed to process referral rewards for ${customerId}: ${e.message}`);
+            }
+        }
+
+        // 6. Send installation completed notification
         try {
             const whatsappNotifications = require('./whatsapp-notifications');
             const pkg = await getOne(
@@ -75,7 +86,7 @@ class ActivationService {
                 }
             );
 
-            // 6. If invoice created, send invoice notification
+            // If invoice created, send invoice notification
             if (invoice) {
                 await whatsappNotifications.sendInvoiceCreatedNotificationWithDetails(
                     customerId, invoice.id
@@ -99,17 +110,6 @@ class ActivationService {
             await autoExpenseService.triggerMarketingFee(customerId);
         } catch (e) {
             logger.warn(`Failed to trigger technician/marketing fee for ${customerId}: ${e.message}`);
-        }
-
-        // 7b. Process cash reward + referred discount (non-blocking)
-        try {
-            const ReferralService = require('../services/referral-service');
-            await ReferralService.processFixedCodeCashReward(customerId);
-            if (invoice) {
-                await ReferralService.applyReferredFirstInvoiceDiscount(invoice.id, customerId);
-            }
-        } catch (e) {
-            logger.warn(`Failed to process referral rewards for ${customerId}: ${e.message}`);
         }
 
         // 8. If prepaid, set trial timer (non-blocking)

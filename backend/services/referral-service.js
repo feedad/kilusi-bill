@@ -702,7 +702,7 @@ class ReferralService {
         UPDATE invoices SET
           discount_amount = COALESCE(discount_amount, 0) + $1,
           final_amount = amount - (COALESCE(discount_amount, 0) + $1)
-        WHERE id = $2 AND status = 'draft'
+        WHERE id = $2 AND status IN ('draft', 'unpaid')
       `, [discountAmount, invoiceId])
 
       if (updateResult.rowCount === 0) {
