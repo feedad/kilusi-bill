@@ -751,16 +751,69 @@ class CustomerService {
                             throw Object.assign(new Error(`Tidak dapat mengubah paket. Anda memiliki pembayaran di muka hingga ${dueStr}`), { code: 'BLOCKED_BY_PREPAID' });
                         }
 
-                        // Update all unpaid invoices to new package price
-                        const updResult = await query(`
-                            UPDATE invoices SET
-                                amount = $1, total_amount = $1,
-                                package_id = $2, updated_at = NOW()
-                            WHERE customer_id = $3 AND status IN ('unpaid', 'sent', 'draft')
-                              AND service_number = $4
-                        `, [newPackage.price, newPkgId, id, updatedCustomer.service_number]);
+                        // Find all unpaid invoices to update
+                        const unpaidInvoicesRes = await query(`
+                            SELECT id, invoice_number, due_date, unique_code, discount_amount, final_amount, notes
+                            FROM invoices
+                            WHERE customer_id = $1 AND status IN ('unpaid', 'sent', 'draft')
+                              AND service_number = $2
+                        `, [id, updatedCustomer.service_number]);
 
-                        invoiceUpdated = updResult.rowCount > 0;
+                        const unpaidInvoices = unpaidInvoicesRes.rows;
+                        const uniqueCodeGenerator = require('../config/unique-code');
+                        const autopayService = require('../services/autopay-service');
+                        const isUniqueCodeEnabled = uniqueCodeGenerator.isEnabled();
+
+                        const newPrice = parseFloat(newPackage.price);
+
+                        for (const inv of unpaidInvoices) {
+                            let uniqueCode = inv.unique_code;
+                            if (isUniqueCodeEnabled && !uniqueCode) {
+                                try {
+                                    uniqueCode = await uniqueCodeGenerator.generateCode();
+                                } catch (e) {
+                                    logger.warn(`Failed to generate unique code for invoice ${inv.invoice_number}: ${e.message}`);
+                                }
+                            }
+
+                            const discountAmount = parseFloat(inv.discount_amount || 0);
+                            const finalAmount = Math.max(0, newPrice - discountAmount);
+                            const amountWithCode = (isUniqueCodeEnabled && uniqueCode)
+                                ? uniqueCodeGenerator.calculateAmountWithCode(finalAmount, uniqueCode)
+                                : null;
+
+                            await query(`
+                                UPDATE invoices SET
+                                    amount = $1,
+                                    total_amount = $1,
+                                    final_amount = $2,
+                                    unique_code = $3,
+                                    amount_with_code = $4,
+                                    package_id = $5,
+                                    updated_at = NOW()
+                                WHERE id = $6
+                            `, [newPrice, finalAmount, uniqueCode, amountWithCode, newPkgId, inv.id]);
+
+                            // Re-push updated invoice to Autopay
+                            try {
+                                if (autopayService.isEnabled()) {
+                                    const pushAmount = amountWithCode || finalAmount || newPrice;
+                                    await autopayService.pushInvoice({
+                                        id: inv.id,
+                                        invoice_number: inv.invoice_number,
+                                        customer_name: updatedCustomer.name || current.name || 'Unknown',
+                                        amount: pushAmount,
+                                        unique_code: uniqueCode || 0,
+                                        due_date: inv.due_date
+                                    });
+                                    logger.info(`[Autopay] Re-pushed invoice ${inv.invoice_number} after package change (amount: ${pushAmount}, code: ${uniqueCode})`);
+                                }
+                            } catch (autopayErr) {
+                                logger.error(`[Autopay] Failed to re-push invoice ${inv.invoice_number} after package change: ${autopayErr.message}`);
+                            }
+                        }
+
+                        invoiceUpdated = unpaidInvoices.length > 0;
                     }
 
                     // Record package change history
