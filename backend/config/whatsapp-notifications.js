@@ -569,27 +569,62 @@ Terima kasih telah menggunakan layanan kami.
                 const customAmt = parseFloat(ctx.customData.amount);
                 if (!isNaN(customAmt) && customAmt > 0) return this.formatCurrency(customAmt);
             }
-            // Payment record amount (total paid for payment confirmation notifications)
-            if (ctx.payment?.amount != null) {
-                const payAmt = parseFloat(ctx.payment.amount);
-                if (!isNaN(payAmt) && payAmt > 0) return this.formatCurrency(payAmt);
+
+            // Check payment gateway / method
+            const isTripay = ctx.payment?.gateway === "tripay" || ctx.invoice?.payment_gateway === "tripay";
+            const isAutopay = ctx.payment?.gateway === "autopay" || ctx.invoice?.payment_gateway === "autopay"
+                || (typeof ctx.payment?.payment_method === "string" && ctx.payment.payment_method.toLowerCase().startsWith("autopay"));
+
+            // 1. Payment confirmation or paid state
+            if (ctx.payment?.amount != null || ctx.invoice?.status === 'paid') {
+                if (isTripay) {
+                    const base = parseFloat(ctx.payment?.amount || ctx.invoice?.amount || 0);
+                    const fee = parseFloat(
+                        ctx.invoice?.payment_fee_amount ||
+                        ctx.payment?.fee_amount ||
+                        0,
+                    );
+                    return this.formatCurrency(fee > 0 ? base + fee : base);
+                }
+
+                if (isAutopay) {
+                    if (ctx.payment?.amount != null) {
+                        const payAmt = parseFloat(ctx.payment.amount);
+                        if (!isNaN(payAmt) && payAmt > 0) return this.formatCurrency(payAmt);
+                    }
+                    if (ctx.invoice?.amount_with_code != null) {
+                        return this.formatCurrency(ctx.invoice.amount_with_code);
+                    }
+                }
+
+                // Manual / cash / transfer / other payment method: use actual payment amount or base amount
+                if (ctx.payment?.amount != null) {
+                    const payAmt = parseFloat(ctx.payment.amount);
+                    if (!isNaN(payAmt) && payAmt > 0) return this.formatCurrency(payAmt);
+                }
+                if (ctx.invoice?.final_amount != null && ctx.invoice?.amount != null
+                    && parseFloat(ctx.invoice.final_amount) !== parseFloat(ctx.invoice.amount)) {
+                    return this.formatCurrency(ctx.invoice.final_amount);
+                }
+                if (ctx.invoice?.amount != null) {
+                    return this.formatCurrency(ctx.invoice.amount);
+                }
             }
-            // Autopay: amount_with_code works regardless of payment state
+
+            // 2. Unpaid invoice / notification / reminder: show amount with unique code if available
             if (ctx.invoice?.amount_with_code != null)
                 return this.formatCurrency(ctx.invoice.amount_with_code);
-            // Tripay: base + admin fee = what customer actually paid
-            if (
-                ctx.payment?.gateway === "tripay" ||
-                ctx.invoice?.payment_gateway === "tripay"
-            ) {
+
+            // Tripay pending: base + admin fee
+            if (isTripay) {
                 const base = parseFloat(ctx.invoice?.amount || 0);
                 const fee = parseFloat(
                     ctx.invoice?.payment_fee_amount ||
-                        ctx.payment?.fee_amount ||
-                        0,
+                    0,
                 );
                 return this.formatCurrency(fee > 0 ? base + fee : base);
             }
+
             // Prefer final_amount if differs from amount (saldo marketing / referral discount applied)
             if (ctx.invoice?.final_amount != null && ctx.invoice?.amount != null
                 && parseFloat(ctx.invoice.final_amount) !== parseFloat(ctx.invoice.amount))
