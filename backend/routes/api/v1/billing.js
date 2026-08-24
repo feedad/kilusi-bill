@@ -931,6 +931,21 @@ router.post('/invoices/rapel', asyncHandler(async (req, res) => {
                      WHERE id = $3`,
                     [payDate, payment_method, inv.id]
                 );
+
+                // Cancel/delete any existing unpaid/suspended invoices for this service on the same due_date to avoid duplicates
+                if (inv.due_date) {
+                    await client.query(
+                        `UPDATE invoices
+                         SET status = 'cancelled',
+                             notes = COALESCE(notes, '') || ' [Dibatalkan: tertutup pembayaran rapel #' || $1 || ']',
+                             updated_at = NOW()
+                         WHERE service_number = $2
+                           AND status IN ('unpaid', 'suspended', 'draft')
+                           AND due_date = $3
+                           AND id != $4`,
+                        [inv.invoice_number, svc.service_number, inv.due_date, inv.id]
+                    );
+                }
             }
         }
 
@@ -974,7 +989,11 @@ router.post('/invoices/rapel', asyncHandler(async (req, res) => {
 
             if (newActiveDateStr && newIsolirDateStr) {
                 await query(`
-                    UPDATE services SET active_date = $1::date, isolir_date = $2::date, updated_at = NOW()
+                    UPDATE services
+                    SET active_date = $1::date,
+                        isolir_date = $2::date,
+                        suspension_notified_at = NULL,
+                        updated_at = NOW()
                     WHERE id = $3
                 `, [newActiveDateStr, newIsolirDateStr, result.serviceId]);
                 logger.info(`Rapel: Updated service dates for ${result.customer_id}: active=${newActiveDateStr}, isolir=${newIsolirDateStr}`);

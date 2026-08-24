@@ -562,11 +562,12 @@ class BillingCycleService {
                 newIsolirDate = new Date(adjY, adjM, Math.min(fixedDay, lastDay));
             }
 
-            // Update service dates
+            // Update service dates and reset suspension notification flag
             await query(`
                 UPDATE services
                 SET active_date = $1,
                     isolir_date = $2,
+                    suspension_notified_at = NULL,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = $3
             `, [newActiveDate, newIsolirDate, invoice.service_id]);
