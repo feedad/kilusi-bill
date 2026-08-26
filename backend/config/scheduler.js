@@ -612,16 +612,52 @@ class InvoiceScheduler {
 
             for (const service of eligibleServices) {
                 try {
-                    // Check if invoice already exists for this service with same due_date
-                    const existingInvoice = await getOne(`
+                    // Check if active (unpaid/draft/suspended) invoice already exists for this service with same due_date
+                    const existingActiveInvoice = await getOne(`
                         SELECT id FROM invoices
-                        WHERE service_number = $1 AND due_date = $2
+                        WHERE service_number = $1
+                          AND due_date = $2
+                          AND status IN ('unpaid', 'sent', 'draft', 'suspended')
                     `, [service.service_number, service.isolir_date]);
 
-                    if (existingInvoice) {
-                        logger.info(`Invoice already exists for service ${service.service_number} due ${service.isolir_date}`);
+                    if (existingActiveInvoice) {
+                        logger.info(`Active invoice already exists for service ${service.service_number} due ${service.isolir_date}`);
                         skipped++;
                         continue;
+                    }
+
+                    // Check if there is an existing PAID invoice for this service with the same due_date
+                    const existingPaidInvoice = await getOne(`
+                        SELECT id FROM invoices
+                        WHERE service_number = $1
+                          AND due_date = $2
+                          AND status = 'paid'
+                    `, [service.service_number, service.isolir_date]);
+
+                    // If a paid invoice already covers this isolir_date (e.g. from previous rapel or early payment),
+                    // determine the next target due date (advance 1 month for fixed/profile)
+                    let targetDueDate = service.isolir_date;
+                    if (existingPaidInvoice) {
+                        const isoDateObj = new Date(service.isolir_date);
+                        const nextMonthDue = new Date(isoDateObj);
+                        nextMonthDue.setMonth(nextMonthDue.getMonth() + 1);
+                        const nextDueStr = `${nextMonthDue.getFullYear()}-${String(nextMonthDue.getMonth() + 1).padStart(2, '0')}-${String(nextMonthDue.getDate()).padStart(2, '0')}`;
+
+                        // Check if invoice for next month already exists
+                        const existingNextInvoice = await getOne(`
+                            SELECT id FROM invoices
+                            WHERE service_number = $1
+                              AND due_date = $2
+                        `, [service.service_number, nextDueStr]);
+
+                        if (existingNextInvoice) {
+                            logger.info(`Invoice for next cycle already exists for service ${service.service_number} due ${nextDueStr}`);
+                            skipped++;
+                            continue;
+                        }
+
+                        targetDueDate = nextDueStr;
+                        logger.info(`Service ${service.service_number} already paid due ${service.isolir_date}, generating invoice for next cycle due ${targetDueDate}`);
                     }
 
                     // Get tax settings from customer_default_settings
@@ -665,7 +701,7 @@ class InvoiceScheduler {
                         total_amount: amountWithTax,
                         base_amount: basePrice,
                         tax_rate: taxRate,
-                        due_date: service.isolir_date,
+                        due_date: targetDueDate,
                         notes: `Tagihan ${isFixedCycle ? 'siklus tetap' : 'siklus profile'} - ${today.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}`
                     };
 
