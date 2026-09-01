@@ -569,6 +569,17 @@ router.post('/payment-proof', chatbotAuth, async (req, res) => {
             return res.json({ success: false, message: 'Phone and image_url are required' });
         }
 
+        const parsedAmount = parseFloat(scanned_amount);
+        if (!scanned_amount || isNaN(parsedAmount) || parsedAmount <= 0 || !scanned_bank) {
+            logger.warn(`[Chatbot] Payment proof rejected: incomplete scan data (amount: ${scanned_amount}, bank: ${scanned_bank}) from phone ${cleanPhone}`);
+            return res.json({
+                success: false,
+                message: 'Data bukti pembayaran tidak lengkap (nominal atau bank tujuan transfer tidak terdeteksi).',
+                rejected_reason: 'incomplete_scan_data',
+                scanned: { amount: scanned_amount || null, bank: scanned_bank || null, date: scanned_date || null }
+            });
+        }
+
         // Create transaction first (record everything)
         const txResult = await query(
             `INSERT INTO payment_transactions (
@@ -863,12 +874,17 @@ router.post('/approve-payment', chatbotAuth, async (req, res) => {
             : null;
         const adminName = adminUser?.username || verified_by || 'unknown';
 
+        // Fallback to invoice amount if transaction amount is 0/null/invalid
+        const finalPayAmount = parseFloat(tx.amount) > 0
+            ? parseFloat(tx.amount)
+            : parseFloat(invoice.amount);
+
         // Process payment via shared service (INSERT payments, restore service, WA notif, accounting)
         const paymentService = require('../../../services/payment-service');
         const result = await paymentService.processPaymentAfterVerification({
             transactionId: transaction_id,
             invoiceId: tx.invoice_id,
-            amount: tx.amount,
+            amount: finalPayAmount,
             paymentMethod: tx.payment_method || 'Transfer',
             paymentDate: new Date(),
             customerId: customerId,
