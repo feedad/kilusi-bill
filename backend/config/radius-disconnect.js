@@ -27,7 +27,7 @@ class RadiusDisconnect {
             nasIp,
             sessionId,
             framedIp,
-            freeradiusServer = '172.22.10.101',
+            freeradiusServer = process.env.RADIUS_HOST || '172.22.10.101',
             freeradiusSecret = 'kilusi-coa-secret'
         } = params;
 

@@ -19,7 +19,8 @@ const logger = {
 function checkFreeRadiusStatus() {
   return new Promise((resolve) => {
     const { exec } = require('child_process');
-    const cmd = 'echo "Message-Authenticator = 0x00, User-Name = \\"status\\"" | timeout 5 radclient -s 172.22.10.101:18121 status adminsecret 2>&1';
+    const radiusHost = process.env.RADIUS_HOST || '172.22.10.101';
+    const cmd = `echo "Message-Authenticator = 0x00, User-Name = \\"status\\"" | timeout 5 radclient -s ${radiusHost}:18121 status adminsecret 2>&1`;
     exec(cmd, (err, stdout) => {
       const out = stdout || '';
       if (out.includes('Accepted') || out.includes('Access-Accept')) {

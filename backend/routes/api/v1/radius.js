@@ -14,9 +14,17 @@ function reloadFreeRadiusClients() {
 }
 
 // Regenerate CoA proxy config on FreeRADIUS server and restart
+function getRegenerateCoaCmd() {
+    const radiusHost = process.env.RADIUS_HOST || '172.22.10.101';
+    if (radiusHost === 'localhost' || radiusHost === '127.0.0.1') {
+        return 'sudo /usr/local/bin/gen-coa-config.sh && sudo systemctl restart freeradius';
+    }
+    return `ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 feedad@${radiusHost} 'sudo /usr/local/bin/gen-coa-config.sh && sudo systemctl restart freeradius'`;
+}
+
 function regenerateCoaConfig() {
     const { exec } = require('child_process');
-    const cmd = "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 feedad@172.22.10.101 'sudo /usr/local/bin/gen-coa-config.sh && sudo systemctl restart freeradius'";
+    const cmd = getRegenerateCoaCmd();
     exec(cmd, (err, stdout, stderr) => {
         if (err) {
             logger.error('FreeRADIUS CoA config regeneration failed:', stderr || err.message);
@@ -82,7 +90,7 @@ router.delete('/nas/:id', asyncHandler(async (req, res) => {
 // POST /api/v1/radius/nas/regenerate-coa - Manual trigger for CoA config regeneration
 router.post('/nas/regenerate-coa', asyncHandler(async (req, res) => {
     const { exec } = require('child_process');
-    const cmd = "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 feedad@172.22.10.101 'sudo /usr/local/bin/gen-coa-config.sh && sudo systemctl restart freeradius'";
+    const cmd = getRegenerateCoaCmd();
     exec(cmd, (err, stdout, stderr) => {
         if (err) {
             logger.error('CoA config regeneration failed:', stderr || err.message);
