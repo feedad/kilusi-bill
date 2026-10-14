@@ -1,7 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const { logger } = require('../../../config/logger')
-const { query } = require('../../../config/database')
+const { query, transaction } = require('../../../config/database')
 
 // GET /api/v1/accounting/categories - Get all accounting categories
 router.get('/categories', async (req, res) => {
@@ -1080,11 +1080,51 @@ router.get('/report/daily', async (req, res) => {
   }
 });
 
-// GET /api/v1/accounting/report/mitra-settlement - Cross-settlement report between company and mitras
+// GET /api/v1/accounting/report/mitra-settlement - Simplified mitra reconciliation & debt tracking
 router.get('/report/mitra-settlement', async (req, res) => {
   try {
     const { start_date, end_date, mitra_id } = req.query;
 
+    // 1. Auto-detect Talaga Sunda as Pusat (HQ)
+    const pusatRes = await query(`SELECT id, name FROM mitra WHERE UPPER(name) LIKE '%TALAGA SUNDA%' LIMIT 1`);
+    const pusatMitraId = pusatRes.rows[0]?.id || 'b2aaaeaf-89ef-449a-99a0-39f13270a057';
+    const pusatMitraName = pusatRes.rows[0]?.name || 'TALAGA SUNDA';
+
+    // 2. Cycle schedule & presets in WIB
+    const now = new Date();
+    const wibTime = new Date(now.getTime() + (7 * 3600000) + (now.getTimezoneOffset() * 60000));
+    const curY = wibTime.getFullYear();
+    const curM = wibTime.getMonth(); // 0-based
+    const curD = wibTime.getDate();
+
+    const pad = (n) => String(n).padStart(2, '0');
+    const formatYMD = (y, m, d) => `${y}-${pad(m)}-${pad(d)}`;
+
+    const cycle1Start = formatYMD(curY, curM + 1, 1);
+    const cycle1End = formatYMD(curY, curM + 1, 15);
+    const cycle1Settlement = formatYMD(curY, curM + 1, 15);
+
+    const lastDayCurMonth = new Date(curY, curM + 1, 0).getDate();
+    const cycle2Start = formatYMD(curY, curM + 1, 16);
+    const cycle2End = formatYMD(curY, curM + 1, lastDayCurMonth);
+
+    const nextMonthD = new Date(curY, curM + 1, 1);
+    const cycle2Settlement = formatYMD(nextMonthD.getFullYear(), nextMonthD.getMonth() + 1, 1);
+
+    const currentCycle = curD <= 15 ? 'cycle_1' : 'cycle_2';
+    const nextSettlementDate = curD <= 15 ? cycle1Settlement : cycle2Settlement;
+
+    const thisMonthStart = formatYMD(curY, curM + 1, 1);
+    const thisMonthEnd = formatYMD(curY, curM + 1, lastDayCurMonth);
+
+    const lastMonthD = new Date(curY, curM, 0);
+    const lastMonthStart = formatYMD(lastMonthD.getFullYear(), lastMonthD.getMonth() + 1, 1);
+    const lastMonthEnd = formatYMD(lastMonthD.getFullYear(), lastMonthD.getMonth() + 1, lastMonthD.getDate());
+
+    const startDateToUse = start_date || (curD <= 15 ? cycle1Start : cycle2Start);
+    const endDateToUse = end_date || (curD <= 15 ? cycle1End : cycle2End);
+
+    // 3. Payment settings for account classification
     const { getSetting } = require('../../../config/settingsManager');
     const rawPS = getSetting('payment_settings');
     let paymentSettings = {};
@@ -1093,20 +1133,22 @@ router.get('/report/mitra-settlement', async (req, res) => {
     const bankAccounts = paymentSettings.bank_accounts || [];
     const ewallets = paymentSettings.ewallets || [];
 
-    // Helper: determine destination category of payment_method
     const getDestinationCategory = (method) => {
-      if (!method) return { type: 'unknown', name: 'Unknown' };
-      const m = String(method).toLowerCase();
+      if (!method) return { type: 'company', name: 'Unknown (Pusat)' };
+      const m = String(method).toLowerCase().trim();
       if (m === 'cash' || m === 'tunai') return { type: 'cash', name: 'Kas Tunai' };
       if (m.startsWith('autopay')) return { type: 'company', name: 'Autopay (Pusat)' };
       if (m.startsWith('tripay') || m === 'qris') return { type: 'company', name: 'QRIS / Tripay (Pusat)' };
+      if (m.includes('ocbc')) return { type: 'company', name: 'OCBC (Perusahaan)' };
 
       if (method.startsWith('bank_')) {
         const id = method.replace('bank_', '');
         const acc = bankAccounts.find(b => String(b.id) === String(id));
         if (acc) {
-          if (acc.is_company === true) return { type: 'company', name: `${acc.bankName} (Perusahaan)` };
-          const mIds = Array.isArray(acc.mitra_ids) ? acc.mitra_ids : (acc.mitra_id ? [acc.mitra_id] : []);
+          const mIds = Array.isArray(acc.mitra_ids) ? acc.mitra_ids.map(String) : (acc.mitra_id ? [String(acc.mitra_id)] : []);
+          if (acc.is_company === true || mIds.includes(String(pusatMitraId))) {
+            return { type: 'company', name: `${acc.bankName} (Perusahaan / Pusat)` };
+          }
           return { type: 'mitra', mitra_ids: mIds, name: `${acc.bankName} (${acc.accountNumber})` };
         }
       }
@@ -1115,15 +1157,53 @@ router.get('/report/mitra-settlement', async (req, res) => {
         const id = method.replace('ewallet_', '');
         const w = ewallets.find(e => String(e.id) === String(id));
         if (w) {
-          if (w.is_company === true) return { type: 'company', name: `${w.provider} (Perusahaan)` };
-          const mIds = Array.isArray(w.mitra_ids) ? w.mitra_ids : (w.mitra_id ? [w.mitra_id] : []);
+          const mIds = Array.isArray(w.mitra_ids) ? w.mitra_ids.map(String) : (w.mitra_id ? [String(w.mitra_id)] : []);
+          if (w.is_company === true || mIds.includes(String(pusatMitraId))) {
+            return { type: 'company', name: `${w.provider} (Perusahaan / Pusat)` };
+          }
           return { type: 'mitra', mitra_ids: mIds, name: `${w.provider} (${w.phoneNumber})` };
         }
       }
 
-      return { type: 'other', name: method };
+      const matchedBank = bankAccounts.find(b => b.bankName && m.includes(b.bankName.toLowerCase()));
+      if (matchedBank) {
+        const mIds = Array.isArray(matchedBank.mitra_ids) ? matchedBank.mitra_ids.map(String) : (matchedBank.mitra_id ? [String(matchedBank.mitra_id)] : []);
+        if (matchedBank.is_company === true || mIds.includes(String(pusatMitraId))) {
+          return { type: 'company', name: `${matchedBank.bankName} (Perusahaan / Pusat)` };
+        }
+        return { type: 'mitra', mitra_ids: mIds, name: `${matchedBank.bankName} (${matchedBank.accountNumber})` };
+      }
+
+      return { type: 'company', name: `${method} (Pusat)` };
     };
 
+    // 4. Initialize summaries for active non-Pusat mitras
+    let mitraListQuery = `SELECT id, name FROM mitra WHERE (disabled_at IS NULL) AND id != $1::uuid`;
+    const mitraListParams = [pusatMitraId];
+    if (mitra_id) {
+      mitraListQuery += ` AND id = $2::uuid`;
+      mitraListParams.push(mitra_id);
+    }
+    mitraListQuery += ` ORDER BY name ASC`;
+    const activeMitrasRes = await query(mitraListQuery, mitraListParams);
+
+    const mitraSummaries = new Map();
+    activeMitrasRes.rows.forEach(m => {
+      mitraSummaries.set(String(m.id), {
+        mitra_id: m.id,
+        mitra_name: m.name,
+        total_revenue: 0,
+        received_in_mitra_account: 0,
+        received_in_company_account: 0, // Pusat owes to Mitra
+        received_in_cash: 0,
+        settled_amount: 0,              // Already paid out by Pusat
+        remaining_debt: 0,              // Still owed by Pusat
+        settlement_status: 'no_debt',    // 'no_debt' | 'settled' | 'partial' | 'unsettled'
+        transactions: []
+      });
+    });
+
+    // 5. Query customer payments excluding Talaga Sunda and customers without mitra
     let queryText = `
       SELECT
         p.id as payment_id,
@@ -1135,25 +1215,36 @@ router.get('/report/mitra-settlement', async (req, res) => {
         c.name as customer_name,
         m.id as customer_mitra_id,
         m.name as customer_mitra_name,
-        r.name as region_name
+        r.name as region_name,
+        st.settlement_id,
+        st.settlement_number,
+        st.settlement_date
       FROM payments p
       JOIN invoices i ON p.invoice_id = i.id
       JOIN customers c ON i.customer_id = c.id
       LEFT JOIN services s ON s.service_number = i.service_number
       LEFT JOIN regions r ON r.id = s.region_id
       LEFT JOIN mitra m ON r.mitra_id = m.id
+      LEFT JOIN (
+        SELECT msi.payment_id, msi.settlement_id, ms.settlement_number, ms.settlement_date
+        FROM mitra_settlement_items msi
+        JOIN mitra_settlements ms ON msi.settlement_id = ms.id
+        WHERE ms.status = 'completed'
+      ) st ON st.payment_id = p.id
       WHERE p.is_rolled_back = FALSE
+        AND m.id IS NOT NULL
+        AND m.id != $1::uuid
     `;
-    const params = [];
-    let idx = 1;
+    const params = [pusatMitraId];
+    let idx = 2;
 
-    if (start_date) {
-      queryText += ` AND p.payment_date >= $${idx++}`;
-      params.push(start_date);
+    if (startDateToUse) {
+      queryText += ` AND p.payment_date::date >= $${idx++}::date`;
+      params.push(startDateToUse);
     }
-    if (end_date) {
-      queryText += ` AND p.payment_date <= $${idx++}`;
-      params.push(end_date);
+    if (endDateToUse) {
+      queryText += ` AND p.payment_date::date <= $${idx++}::date`;
+      params.push(endDateToUse);
     }
     if (mitra_id) {
       queryText += ` AND m.id = $${idx++}::uuid`;
@@ -1165,22 +1256,19 @@ router.get('/report/mitra-settlement', async (req, res) => {
     const result = await query(queryText, params);
     const payments = result.rows;
 
-    // Build Mitra settlement summary
-    const mitraSummaries = new Map();
-
     payments.forEach(p => {
-      const mitraKey = p.customer_mitra_id || 'pusat_direct';
-      const mitraName = p.customer_mitra_name || 'Pelanggan Pusat (Tanpa Mitra)';
-
+      const mitraKey = String(p.customer_mitra_id);
       if (!mitraSummaries.has(mitraKey)) {
         mitraSummaries.set(mitraKey, {
-          mitra_id: p.customer_mitra_id || null,
-          mitra_name: mitraName,
+          mitra_id: p.customer_mitra_id,
+          mitra_name: p.customer_mitra_name || 'Mitra',
           total_revenue: 0,
           received_in_mitra_account: 0,
-          received_in_company_account: 0, // Pusat owes to Mitra
-          received_in_other_mitra: 0,
+          received_in_company_account: 0,
           received_in_cash: 0,
+          settled_amount: 0,
+          remaining_debt: 0,
+          settlement_status: 'no_debt',
           transactions: []
         });
       }
@@ -1190,26 +1278,27 @@ router.get('/report/mitra-settlement', async (req, res) => {
       summaryObj.total_revenue += amt;
 
       const dest = getDestinationCategory(p.payment_method);
-      let classification = 'other';
+      let classification = 'company_account';
+      const isSettled = Boolean(p.settlement_id);
 
       if (dest.type === 'cash') {
         summaryObj.received_in_cash += amt;
         classification = 'cash';
-      } else if (dest.type === 'company') {
-        summaryObj.received_in_company_account += amt;
-        classification = 'company_account';
       } else if (dest.type === 'mitra') {
         const matchesCustomerMitra = p.customer_mitra_id && dest.mitra_ids?.map(String).includes(String(p.customer_mitra_id));
         if (matchesCustomerMitra) {
           summaryObj.received_in_mitra_account += amt;
           classification = 'own_mitra_account';
         } else {
-          summaryObj.received_in_other_mitra += amt;
-          classification = 'other_mitra_account';
+          summaryObj.received_in_company_account += amt;
+          classification = 'company_account';
+          if (isSettled) summaryObj.settled_amount += amt;
         }
       } else {
+        // dest.type === 'company'
         summaryObj.received_in_company_account += amt;
         classification = 'company_account';
+        if (isSettled) summaryObj.settled_amount += amt;
       }
 
       summaryObj.transactions.push({
@@ -1221,8 +1310,26 @@ router.get('/report/mitra-settlement', async (req, res) => {
         payment_date: p.payment_date,
         payment_method: p.payment_method,
         destination_name: dest.name,
-        classification
+        classification,
+        is_settled: isSettled,
+        settlement_id: p.settlement_id || null,
+        settlement_number: p.settlement_number || null,
+        settlement_date: p.settlement_date || null
       });
+    });
+
+    // 6. Calculate remaining debt and final status per mitra
+    mitraSummaries.forEach(s => {
+      s.remaining_debt = Math.max(0, s.received_in_company_account - s.settled_amount);
+      if (s.received_in_company_account === 0) {
+        s.settlement_status = 'no_debt';
+      } else if (s.remaining_debt <= 0) {
+        s.settlement_status = 'settled';
+      } else if (s.settled_amount > 0) {
+        s.settlement_status = 'partial';
+      } else {
+        s.settlement_status = 'unsettled';
+      }
     });
 
     res.json({
@@ -1230,12 +1337,380 @@ router.get('/report/mitra-settlement', async (req, res) => {
       data: {
         mitras: Array.from(mitraSummaries.values()),
         total_payments_count: payments.length,
-        period: { start_date: start_date || null, end_date: end_date || null }
+        period: { start_date: startDateToUse, end_date: endDateToUse },
+        pusat: { id: pusatMitraId, name: pusatMitraName },
+        cycle_info: {
+          next_settlement_date: nextSettlementDate,
+          current_cycle: currentCycle,
+          presets: {
+            cycle_1: { start_date: cycle1Start, end_date: cycle1End, settlement_date: cycle1Settlement, label: `Siklus 1 (1 - 15 ${new Intl.DateTimeFormat('id-ID', { month: 'short' }).format(wibTime)})` },
+            cycle_2: { start_date: cycle2Start, end_date: cycle2End, settlement_date: cycle2Settlement, label: `Siklus 2 (16 - ${lastDayCurMonth} ${new Intl.DateTimeFormat('id-ID', { month: 'short' }).format(wibTime)})` },
+            this_month: { start_date: thisMonthStart, end_date: thisMonthEnd, label: 'Bulan Ini' },
+            last_month: { start_date: lastMonthStart, end_date: lastMonthEnd, label: 'Bulan Lalu' }
+          }
+        }
       }
     });
   } catch (error) {
     logger.error('Error in mitra settlement report:', error);
     res.status(500).json({ success: false, message: 'Gagal memuat laporan rekonsiliasi mitra' });
+  }
+});
+
+// POST /api/v1/accounting/mitra-settlement/process - Process settlement payout with double-entry accounting
+router.post('/mitra-settlement/process', async (req, res) => {
+  try {
+    const {
+      mitra_id,
+      period_start,
+      period_end,
+      settlement_date,
+      amount,
+      payment_method = 'transfer',
+      bank_account_source,
+      notes
+    } = req.body;
+
+    if (!mitra_id || !period_start || !period_end || !settlement_date || !amount) {
+      return res.status(400).json({
+        success: false,
+        message: 'mitra_id, period_start, period_end, settlement_date, dan amount wajib diisi'
+      });
+    }
+
+    const settleAmount = parseFloat(amount);
+    if (isNaN(settleAmount) || settleAmount <= 0) {
+      return res.status(400).json({ success: false, message: 'Jumlah penyetoran harus lebih dari 0' });
+    }
+
+    // Verify mitra exists and is not Pusat
+    const pusatRes = await query(`SELECT id, name FROM mitra WHERE UPPER(name) LIKE '%TALAGA SUNDA%' LIMIT 1`);
+    const pusatMitraId = pusatRes.rows[0]?.id || 'b2aaaeaf-89ef-449a-99a0-39f13270a057';
+    const pusatMitraName = pusatRes.rows[0]?.name || 'TALAGA SUNDA';
+
+    if (String(mitra_id) === String(pusatMitraId)) {
+      return res.status(400).json({ success: false, message: 'Pusat (Talaga Sunda) tidak dapat disetor ke diri sendiri' });
+    }
+
+    const mitraRes = await query(`SELECT id, name FROM mitra WHERE id = $1::uuid`, [mitra_id]);
+    if (mitraRes.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Mitra tidak ditemukan' });
+    }
+    const targetMitra = mitraRes.rows[0];
+
+    // Generate official settlement number: SETTLE-[MITRA]-[YYYYMMDD]-[SEQ]
+    const mitraCode = (targetMitra.name || 'MITRA').replace(/[^a-zA-Z0-9]/g, '').slice(0, 10).toUpperCase();
+    const dateClean = settlement_date.replace(/[^0-9]/g, '').slice(0, 8);
+    const prefix = `SETTLE-${mitraCode}-${dateClean}-`;
+
+    const lastNumRes = await query(
+      `SELECT settlement_number FROM mitra_settlements WHERE settlement_number LIKE $1 ORDER BY id DESC LIMIT 1`,
+      [`${prefix}%`]
+    );
+    let seqNum = 1;
+    if (lastNumRes.rows.length > 0) {
+      const parts = lastNumRes.rows[0].settlement_number.split('-');
+      const parsed = parseInt(parts[parts.length - 1], 10);
+      if (!isNaN(parsed)) seqNum = parsed + 1;
+    }
+    const settlementNumber = `${prefix}${String(seqNum).padStart(3, '0')}`;
+
+    // Payment settings for classifying payments to link
+    const { getSetting } = require('../../../config/settingsManager');
+    const rawPS = getSetting('payment_settings');
+    let paymentSettings = {};
+    try { paymentSettings = typeof rawPS === 'string' ? JSON.parse(rawPS) : (rawPS || {}); } catch (e) {}
+    const bankAccounts = paymentSettings.bank_accounts || [];
+    const ewallets = paymentSettings.ewallets || [];
+
+    const isCompanyAccount = (method) => {
+      if (!method) return true;
+      const m = String(method).toLowerCase().trim();
+      if (m === 'cash' || m === 'tunai') return false;
+      if (m.startsWith('autopay') || m.startsWith('tripay') || m === 'qris' || m.includes('ocbc')) return true;
+
+      if (method.startsWith('bank_')) {
+        const id = method.replace('bank_', '');
+        const acc = bankAccounts.find(b => String(b.id) === String(id));
+        if (acc) {
+          const mIds = Array.isArray(acc.mitra_ids) ? acc.mitra_ids.map(String) : (acc.mitra_id ? [String(acc.mitra_id)] : []);
+          return acc.is_company === true || mIds.includes(String(pusatMitraId)) || !mIds.includes(String(mitra_id));
+        }
+      }
+      if (method.startsWith('ewallet_')) {
+        const id = method.replace('ewallet_', '');
+        const w = ewallets.find(e => String(e.id) === String(id));
+        if (w) {
+          const mIds = Array.isArray(w.mitra_ids) ? w.mitra_ids.map(String) : (w.mitra_id ? [String(w.mitra_id)] : []);
+          return w.is_company === true || mIds.includes(String(pusatMitraId)) || !mIds.includes(String(mitra_id));
+        }
+      }
+      return true;
+    };
+
+    // Execute in transaction
+    const settlementResult = await transaction(async (client) => {
+      // 1. Insert header
+      const insertHeaderQuery = `
+        INSERT INTO mitra_settlements (
+          settlement_number, mitra_id, period_start, period_end,
+          settlement_date, amount, payment_method, bank_account_source,
+          notes, status, created_by
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'completed', $10)
+        RETURNING id
+      `;
+      const headerRes = await client.query(insertHeaderQuery, [
+        settlementNumber,
+        mitra_id,
+        period_start,
+        period_end,
+        settlement_date,
+        settleAmount,
+        payment_method,
+        bank_account_source || null,
+        notes || null,
+        req.user?.id || null
+      ]);
+      const settlementId = headerRes.rows[0].id;
+
+      // 2. Find unsettled payments in this period for this mitra
+      const candidatePaymentsQuery = `
+        SELECT
+          p.id as payment_id,
+          p.amount,
+          p.payment_method
+        FROM payments p
+        JOIN invoices i ON p.invoice_id = i.id
+        JOIN customers c ON i.customer_id = c.id
+        LEFT JOIN services s ON s.service_number = i.service_number
+        LEFT JOIN regions r ON r.id = s.region_id
+        WHERE p.is_rolled_back = FALSE
+          AND r.mitra_id = $1::uuid
+          AND p.payment_date::date >= $2::date AND p.payment_date::date <= $3::date
+          AND p.id NOT IN (
+            SELECT msi.payment_id FROM mitra_settlement_items msi
+            JOIN mitra_settlements ms ON msi.settlement_id = ms.id
+            WHERE ms.status = 'completed'
+          )
+        ORDER BY p.payment_date ASC, p.id ASC
+      `;
+      const candRes = await client.query(candidatePaymentsQuery, [mitra_id, period_start, period_end]);
+
+      let linkedCount = 0;
+      for (const p of candRes.rows) {
+        if (isCompanyAccount(p.payment_method)) {
+          await client.query(
+            `INSERT INTO mitra_settlement_items (settlement_id, payment_id, amount) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+            [settlementId, p.payment_id, parseFloat(p.amount)]
+          );
+          linkedCount++;
+        }
+      }
+
+      // 3. Ensure accounting categories exist
+      let pusatCatRes = await client.query(
+        `SELECT id FROM accounting_categories WHERE name = 'Penyetoran Mitra' AND type = 'expense' LIMIT 1`
+      );
+      let pusatCatId = pusatCatRes.rows[0]?.id;
+      if (!pusatCatId) {
+        const newCat = await client.query(
+          `INSERT INTO accounting_categories (name, type, description, color, icon, is_active)
+           VALUES ('Penyetoran Mitra', 'expense', 'Pengeluaran Pusat untuk penyetoran bagi hasil ke Mitra', '#ef4444', 'arrow-up-right', true)
+           RETURNING id`
+        );
+        pusatCatId = newCat.rows[0].id;
+      }
+
+      let mitraCatRes = await client.query(
+        `SELECT id FROM accounting_categories WHERE name = 'Penyetoran dari Pusat' AND type = 'revenue' LIMIT 1`
+      );
+      let mitraCatId = mitraCatRes.rows[0]?.id;
+      if (!mitraCatId) {
+        const newCat = await client.query(
+          `INSERT INTO accounting_categories (name, type, description, color, icon, is_active)
+           VALUES ('Penyetoran dari Pusat', 'revenue', 'Pemasukan Mitra dari hasil penyetoran Pusat', '#10b981', 'arrow-down-left', true)
+           RETURNING id`
+        );
+        mitraCatId = newCat.rows[0].id;
+      }
+
+      // 4. Double Entry Accounting
+      // 4a. Pusat Expense
+      const pusatDesc = `Penyetoran bagi hasil ke Mitra ${targetMitra.name} periode ${period_start} s/d ${period_end}`;
+      const pusatTxRes = await client.query(
+        `INSERT INTO accounting_transactions (
+           category_id, type, amount, description, reference_type,
+           reference_id, mitra_id, date, notes, created_by
+         ) VALUES ($1, 'expense', $2, $3, 'mitra_settlement', $4, $5, $6, $7, $8)
+         RETURNING id`,
+        [
+          pusatCatId,
+          settleAmount,
+          pusatDesc,
+          String(settlementId),
+          pusatMitraId,
+          settlement_date,
+          notes || null,
+          req.user?.id || null
+        ]
+      );
+      const pusatTxId = pusatTxRes.rows[0].id;
+
+      // 4b. Mitra Revenue
+      const mitraDesc = `Penerimaan penyetoran bagi hasil dari Pusat periode ${period_start} s/d ${period_end}`;
+      const mitraTxRes = await client.query(
+        `INSERT INTO accounting_transactions (
+           category_id, type, amount, description, reference_type,
+           reference_id, mitra_id, date, notes, created_by
+         ) VALUES ($1, 'revenue', $2, $3, 'mitra_settlement', $4, $5, $6, $7, $8)
+         RETURNING id`,
+        [
+          mitraCatId,
+          settleAmount,
+          mitraDesc,
+          String(settlementId),
+          mitra_id,
+          settlement_date,
+          notes || null,
+          req.user?.id || null
+        ]
+      );
+      const mitraTxId = mitraTxRes.rows[0].id;
+
+      // 5. Update settlement header with transaction IDs
+      await client.query(
+        `UPDATE mitra_settlements SET pusat_transaction_id = $1, mitra_transaction_id = $2 WHERE id = $3`,
+        [pusatTxId, mitraTxId, settlementId]
+      );
+
+      return {
+        id: settlementId,
+        settlement_number: settlementNumber,
+        mitra_id,
+        mitra_name: targetMitra.name,
+        amount: settleAmount,
+        period_start,
+        period_end,
+        settlement_date,
+        pusat_transaction_id: pusatTxId,
+        mitra_transaction_id: mitraTxId,
+        linked_items_count: linkedCount
+      };
+    });
+
+    res.json({
+      success: true,
+      message: `Penyetoran ke Mitra ${targetMitra.name} berhasil diproses (${settlementNumber})`,
+      data: settlementResult
+    });
+  } catch (error) {
+    logger.error('Error processing mitra settlement:', error);
+    res.status(500).json({ success: false, message: 'Gagal memproses penyetoran mitra: ' + error.message });
+  }
+});
+
+// GET /api/v1/accounting/mitra-settlements - History of official mitra settlements
+router.get('/mitra-settlements', async (req, res) => {
+  try {
+    const { mitra_id, status = 'completed', start_date, end_date } = req.query;
+
+    let queryText = `
+      SELECT
+        ms.id,
+        ms.settlement_number,
+        ms.mitra_id,
+        m.name as mitra_name,
+        TO_CHAR(ms.period_start, 'YYYY-MM-DD') as period_start,
+        TO_CHAR(ms.period_end, 'YYYY-MM-DD') as period_end,
+        TO_CHAR(ms.settlement_date, 'YYYY-MM-DD') as settlement_date,
+        ms.amount::numeric as amount,
+        ms.payment_method,
+        ms.bank_account_source,
+        ms.notes,
+        ms.status,
+        ms.pusat_transaction_id,
+        ms.mitra_transaction_id,
+        ms.created_by,
+        u.username as created_by_name,
+        TO_CHAR(ms.created_at, 'YYYY-MM-DD HH24:MI:SS') as created_at,
+        COUNT(msi.id)::int as items_count
+      FROM mitra_settlements ms
+      JOIN mitra m ON ms.mitra_id = m.id
+      LEFT JOIN users u ON ms.created_by = u.id
+      LEFT JOIN mitra_settlement_items msi ON msi.settlement_id = ms.id
+      WHERE 1=1
+    `;
+    const params = [];
+    let idx = 1;
+
+    if (mitra_id) {
+      queryText += ` AND ms.mitra_id = $${idx++}::uuid`;
+      params.push(mitra_id);
+    }
+    if (status && status !== 'all') {
+      queryText += ` AND ms.status = $${idx++}`;
+      params.push(status);
+    }
+    if (start_date) {
+      queryText += ` AND ms.settlement_date >= $${idx++}::date`;
+      params.push(start_date);
+    }
+    if (end_date) {
+      queryText += ` AND ms.settlement_date <= $${idx++}::date`;
+      params.push(end_date);
+    }
+
+    queryText += `
+      GROUP BY ms.id, m.name, u.username
+      ORDER BY ms.settlement_date DESC, ms.created_at DESC
+    `;
+
+    const result = await query(queryText, params);
+    res.json({
+      success: true,
+      data: result.rows
+    });
+  } catch (error) {
+    logger.error('Error fetching mitra settlements:', error);
+    res.status(500).json({ success: false, message: 'Gagal memuat riwayat penyetoran mitra' });
+  }
+});
+
+// DELETE /api/v1/accounting/mitra-settlement/:id - Rollback settlement and its accounting transactions
+router.delete('/mitra-settlement/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const rollbackResult = await transaction(async (client) => {
+      const checkRes = await client.query('SELECT * FROM mitra_settlements WHERE id = $1', [id]);
+      if (checkRes.rows.length === 0) {
+        throw new Error('NOT_FOUND');
+      }
+      const st = checkRes.rows[0];
+
+      // Delete linked accounting transactions
+      if (st.pusat_transaction_id) {
+        await client.query('DELETE FROM accounting_transactions WHERE id = $1', [st.pusat_transaction_id]);
+      }
+      if (st.mitra_transaction_id) {
+        await client.query('DELETE FROM accounting_transactions WHERE id = $1', [st.mitra_transaction_id]);
+      }
+
+      // Delete settlement items & header
+      await client.query('DELETE FROM mitra_settlement_items WHERE settlement_id = $1', [id]);
+      await client.query('DELETE FROM mitra_settlements WHERE id = $1', [id]);
+      return st;
+    });
+
+    res.json({
+      success: true,
+      message: `Penyetoran ${rollbackResult.settlement_number} berhasil dibatalkan dan transaksi akunting dihapus`
+    });
+  } catch (error) {
+    if (error.message === 'NOT_FOUND') {
+      return res.status(404).json({ success: false, message: 'Data penyetoran tidak ditemukan' });
+    }
+    logger.error('Error rolling back mitra settlement:', error);
+    res.status(500).json({ success: false, message: 'Gagal membatalkan penyetoran mitra: ' + error.message });
   }
 });
 

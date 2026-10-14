@@ -26,7 +26,17 @@ import {
   Tag,
   Wrench,
   Trash,
-  Loader2
+  Loader2,
+  CheckCircle2,
+  AlertCircle,
+  ArrowUpRight,
+  ArrowDownLeft,
+  Send,
+  History,
+  RotateCcw,
+  Building2,
+  Check,
+  Clock
 } from 'lucide-react'
 import { adminApi, endpoints, handleApiError } from '@/lib/api-clients'
 
@@ -83,6 +93,75 @@ interface ProfitLossData {
   profit_margin: string
 }
 
+interface MitraSettlementTransaction {
+  payment_id: number
+  invoice_number: string
+  customer_name: string
+  amount: number
+  payment_date: string
+  payment_method: string
+  destination_name: string
+  classification: 'company_account' | 'own_mitra_account' | 'cash'
+  is_settled: boolean
+  settlement_number: string | null
+  settlement_date: string | null
+}
+
+interface MitraSummary {
+  mitra_id: string
+  mitra_name: string
+  total_revenue: number
+  received_in_mitra_account: number
+  received_in_company_account: number
+  received_in_cash: number
+  received_in_other_mitra: number
+  settled_amount: number
+  remaining_debt: number
+  settlement_status: 'no_debt' | 'settled' | 'partial' | 'unsettled'
+  settlement_info?: {
+    last_settlement_date?: string
+    settlement_count?: number
+  }
+  transactions: MitraSettlementTransaction[]
+}
+
+interface MitraSettlementItem {
+  id: number
+  settlement_number: string
+  mitra_id: string
+  mitra_name: string
+  period_start: string
+  period_end: string
+  settlement_date: string
+  amount: number
+  payment_method: string
+  bank_account_source: string
+  notes?: string
+  status: string
+  pusat_transaction_id?: number
+  mitra_transaction_id?: number
+  created_by?: number
+  created_by_name?: string
+  created_at: string
+  items_count: number
+}
+
+interface MitraSettlementReportData {
+  mitras: MitraSummary[]
+  total_payments_count: number
+  period: { start_date: string | null; end_date: string | null }
+  pusat: { id: string | null; name: string }
+  cycle_info: {
+    next_settlement_date: string
+    current_cycle: string
+    presets: {
+      cycle_1: { start_date: string; end_date: string; settlement_date: string; label: string }
+      cycle_2: { start_date: string; end_date: string; settlement_date: string; label: string }
+      this_month: { start_date: string; end_date: string; label: string }
+      last_month: { start_date: string; end_date: string; label: string }
+    }
+  }
+}
 export default function AccountingPage() {
   const [transactions, setTransactions] = useState<AccountingTransaction[]>([])
   const [categories, setCategories] = useState<AccountingCategory[]>([])
@@ -103,8 +182,24 @@ export default function AccountingPage() {
   const [filterCategory, setFilterCategory] = useState('')
   const [filterMitra, setFilterMitra] = useState('')
   const [mitraList, setMitraList] = useState<Array<{ id: string, name: string }>>([])
-  const [mitraSettlementData, setMitraSettlementData] = useState<any>(null)
+  const [mitraSettlementData, setMitraSettlementData] = useState<MitraSettlementReportData | null>(null)
   const [loadingSettlement, setLoadingSettlement] = useState(false)
+  const [settlementHistory, setSettlementHistory] = useState<MitraSettlementItem[]>([])
+  const [loadingHistory, setLoadingHistory] = useState(false)
+  const [settlementSubTab, setSettlementSubTab] = useState<'breakdown' | 'history'>('breakdown')
+  const [showSettlementDialog, setShowSettlementDialog] = useState(false)
+  const [selectedMitraForSettlement, setSelectedMitraForSettlement] = useState<MitraSummary | null>(null)
+  const [settlementForm, setSettlementForm] = useState({
+    amount: '',
+    settlement_date: '',
+    payment_method: 'transfer',
+    bank_account_source: 'BCA - 1234567890 (Pusat)',
+    notes: ''
+  })
+  const [settlementSubmitting, setSettlementSubmitting] = useState(false)
+  const [showRollbackDialog, setShowRollbackDialog] = useState(false)
+  const [settlementToRollback, setSettlementToRollback] = useState<MitraSettlementItem | null>(null)
+  const [rollbackSubmitting, setRollbackSubmitting] = useState(false)
   const startDateRef = useRef<HTMLInputElement>(null)
   const endDateRef = useRef<HTMLInputElement>(null)
   const [filterStartDate, setFilterStartDate] = useState(() => {
@@ -162,7 +257,8 @@ export default function AccountingPage() {
     icon: 'trending-up'
   })
 
-  const formatDate = (dateString: string) => {
+  const formatDate = (dateString?: string | null) => {
+    if (!dateString) return '-'
     const date = new Date(dateString)
     return date.toLocaleDateString('id-ID', {
       day: 'numeric',
@@ -363,6 +459,124 @@ export default function AccountingPage() {
       setLoadingSettlement(false)
     }
   }
+  const fetchSettlementHistory = async () => {
+    try {
+      setLoadingHistory(true)
+      const params = new URLSearchParams()
+      if (filterMitra) params.append('mitra_id', filterMitra)
+      const response = await adminApi.get(`/api/v1/accounting/mitra-settlements?${params}`)
+      if (response.data.success) {
+        setSettlementHistory(response.data.data || [])
+      }
+    } catch (error) {
+      console.error('Error fetching settlement history:', error)
+    } finally {
+      setLoadingHistory(false)
+    }
+  }
+
+  const handleApplyPreset = (startDate: string, endDate: string) => {
+    setFilterStartDate(startDate)
+    setFilterEndDate(endDate)
+    const params = new URLSearchParams()
+    params.append('start_date', startDate)
+    params.append('end_date', endDate)
+    if (filterMitra) params.append('mitra_id', filterMitra)
+
+    setLoadingSettlement(true)
+    adminApi.get(`/api/v1/accounting/report/mitra-settlement?${params}`)
+      .then(res => {
+        if (res.data.success) setMitraSettlementData(res.data.data)
+      })
+      .catch(err => console.error('Error fetching preset settlement:', err))
+      .finally(() => setLoadingSettlement(false))
+  }
+
+  const handleOpenSettlementModal = (mitra: MitraSummary) => {
+    const today = new Date()
+    const p = (n: number) => String(n).padStart(2, '0')
+    const todayStr = `${today.getFullYear()}-${p(today.getMonth() + 1)}-${p(today.getDate())}`
+    setSelectedMitraForSettlement(mitra)
+    setSettlementForm({
+      amount: String(mitra.remaining_debt || ''),
+      settlement_date: todayStr,
+      payment_method: 'transfer',
+      bank_account_source: 'BCA - 1234567890 (Pusat)',
+      notes: `Penyetoran bagi hasil ${mitra.mitra_name} periode ${formatDate(mitraSettlementData?.period?.start_date)} s/d ${formatDate(mitraSettlementData?.period?.end_date)}`
+    })
+    setShowSettlementDialog(true)
+  }
+
+  const handleSubmitSettlement = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedMitraForSettlement) return
+    const amt = parseFloat(settlementForm.amount)
+    if (isNaN(amt) || amt <= 0) {
+      alert('Nominal penyetoran harus berupa angka lebih besar dari 0')
+      return
+    }
+
+    try {
+      setSettlementSubmitting(true)
+      const payload = {
+        mitra_id: selectedMitraForSettlement.mitra_id,
+        period_start: mitraSettlementData?.period?.start_date,
+        period_end: mitraSettlementData?.period?.end_date,
+        settlement_date: settlementForm.settlement_date,
+        amount: amt,
+        payment_method: settlementForm.payment_method,
+        bank_account_source: settlementForm.bank_account_source,
+        notes: settlementForm.notes
+      }
+
+      const res = await adminApi.post('/api/v1/accounting/mitra-settlement/process', payload)
+      if (res.data.success) {
+        alert(res.data.message || 'Penyetoran berhasil diproses!')
+        setShowSettlementDialog(false)
+        await Promise.all([
+          fetchMitraSettlement(),
+          fetchSettlementHistory(),
+          fetchSummary(),
+          fetchTransactions()
+        ])
+      } else {
+        alert(res.data.message || 'Gagal memproses penyetoran')
+      }
+    } catch (error: unknown) {
+      console.error('Error processing settlement:', error)
+      const apiErr = error as { response?: { data?: { message?: string } } }
+      alert(apiErr.response?.data?.message || (error instanceof Error ? error.message : 'Gagal memproses penyetoran ke mitra'))
+    } finally {
+      setSettlementSubmitting(false)
+    }
+  }
+
+  const handleRollbackSettlement = async () => {
+    if (!settlementToRollback) return
+    try {
+      setRollbackSubmitting(true)
+      const res = await adminApi.delete(`/api/v1/accounting/mitra-settlement/${settlementToRollback.id}`)
+      if (res.data.success) {
+        alert(res.data.message || 'Penyetoran berhasil dibatalkan')
+        setShowRollbackDialog(false)
+        setSettlementToRollback(null)
+        await Promise.all([
+          fetchMitraSettlement(),
+          fetchSettlementHistory(),
+          fetchSummary(),
+          fetchTransactions()
+        ])
+      } else {
+        alert(res.data.message || 'Gagal membatalkan penyetoran')
+      }
+    } catch (error: unknown) {
+      console.error('Error rollback settlement:', error)
+      const apiErr = error as { response?: { data?: { message?: string } } }
+      alert(apiErr.response?.data?.message || (error instanceof Error ? error.message : 'Gagal membatalkan penyetoran'))
+    } finally {
+      setRollbackSubmitting(false)
+    }
+  }
 
   const fetchCategories = async () => {
     try {
@@ -417,6 +631,7 @@ export default function AccountingPage() {
       fetchProfitLoss(),
       fetchMitraList(),
       fetchMitraSettlement(),
+      fetchSettlementHistory(),
       fetchAutoExpenseSettings()
     ])
     setLoading(false)
@@ -1345,54 +1560,190 @@ export default function AccountingPage() {
         </TabsContent>
 
         <TabsContent value="settlement" className="space-y-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle>Laporan Rekonsiliasi & Arus Transaksi Mitra</CardTitle>
-                <CardDescription>
-                  Rekapitulasi pembayaran pelanggan per-mitra: uang yang masuk ke Rekening Mitra vs Rekening Pusat (Hutang Pusat ke Mitra).
-                </CardDescription>
+          {/* Banner Jadwal Penyetoran */}
+          <div className="bg-linear-to-r from-blue-50 to-indigo-50 dark:from-blue-950/40 dark:to-indigo-950/40 border border-blue-200 dark:border-blue-900 rounded-lg p-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <Calendar className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                <h3 className="font-semibold text-sm text-foreground">Jadwal Penyetoran Pusat ke Mitra</h3>
+                <Badge variant="outline" className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 border-blue-300">
+                  Setiap tgl 15 & 1
+                </Badge>
               </div>
-              <Button onClick={fetchMitraSettlement} disabled={loadingSettlement} size="sm">
-                <RefreshCw className={`h-4 w-4 mr-2 ${loadingSettlement ? 'animate-spin' : ''}`} />
-                Hitung Rekonsiliasi
-              </Button>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {loadingSettlement ? (
-                <div className="flex justify-center py-12">
-                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              <p className="text-xs text-muted-foreground mt-1">
+                Siklus 1 (tgl 1 - 15): setor tgl 15 • Siklus 2 (tgl 16 - akhir bulan): setor tgl 1 bulan berikutnya.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge variant="secondary" className="px-3 py-1.5 text-xs font-medium bg-white dark:bg-slate-900 border shadow-xs">
+                <Clock className="h-3.5 w-3.5 mr-1.5 text-blue-600 inline" />
+                Jadwal Terdekat: <strong className="ml-1 text-blue-700 dark:text-blue-300">{formatDate(mitraSettlementData?.cycle_info?.next_settlement_date || '2026-10-15')}</strong>
+              </Badge>
+            </div>
+          </div>
+
+          {/* Quick Presets & Filter Bar */}
+          <Card>
+            <CardContent className="pt-4 pb-4">
+              <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
+                {/* Preset Buttons */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-medium text-muted-foreground mr-1">Preset Siklus:</span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs"
+                    onClick={() => {
+                      const p = mitraSettlementData?.cycle_info?.presets?.cycle_1
+                      if (p) handleApplyPreset(p.start_date, p.end_date)
+                    }}
+                  >
+                    {mitraSettlementData?.cycle_info?.presets?.cycle_1?.label || 'Siklus 1 (1 - 15)'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs"
+                    onClick={() => {
+                      const p = mitraSettlementData?.cycle_info?.presets?.cycle_2
+                      if (p) handleApplyPreset(p.start_date, p.end_date)
+                    }}
+                  >
+                    {mitraSettlementData?.cycle_info?.presets?.cycle_2?.label || 'Siklus 2 (16 - 31)'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs"
+                    onClick={() => {
+                      const p = mitraSettlementData?.cycle_info?.presets?.this_month
+                      if (p) handleApplyPreset(p.start_date, p.end_date)
+                    }}
+                  >
+                    Bulan Ini
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs"
+                    onClick={() => {
+                      const p = mitraSettlementData?.cycle_info?.presets?.last_month
+                      if (p) handleApplyPreset(p.start_date, p.end_date)
+                    }}
+                  >
+                    Bulan Lalu
+                  </Button>
                 </div>
-              ) : !mitraSettlementData || mitraSettlementData.mitras?.length === 0 ? (
-                <div className="text-center py-12 text-muted-foreground">
-                  Belum ada data transaksi untuk periode yang dipilih.
+
+                {/* Filters */}
+                <div className="flex items-center gap-2 flex-wrap w-full lg:w-auto">
+                  <div className="w-36">
+                    <Input
+                      type="date"
+                      value={filterStartDate}
+                      onChange={(e) => setFilterStartDate(e.target.value)}
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <span className="text-xs text-muted-foreground">s/d</span>
+                  <div className="w-36">
+                    <Input
+                      type="date"
+                      value={filterEndDate}
+                      onChange={(e) => setFilterEndDate(e.target.value)}
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div className="w-40">
+                    <select
+                      value={filterMitra}
+                      onChange={(e) => setFilterMitra(e.target.value)}
+                      className="rounded-md border border-input bg-background px-2.5 py-1 text-xs w-full h-8"
+                    >
+                      <option value="">Semua Mitra</option>
+                      {mitraList.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <Button onClick={() => { fetchMitraSettlement(); fetchSettlementHistory(); }} disabled={loadingSettlement} size="sm" className="h-8 text-xs">
+                    <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${loadingSettlement ? 'animate-spin' : ''}`} />
+                    Hitung
+                  </Button>
                 </div>
-              ) : (
-                <div className="space-y-6">
-                  {/* Mitra Summary Cards */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {mitraSettlementData.mitras.map((m: any) => (
-                      <Card key={m.mitra_id || 'pusat'} className="border-2 border-slate-200 dark:border-slate-800">
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Mitra Cards Grid */}
+          {loadingSettlement ? (
+            <div className="flex justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : !mitraSettlementData || mitraSettlementData.mitras?.length === 0 ? (
+            <div className="text-center py-12 text-muted-foreground">
+              Belum ada data transaksi untuk periode yang dipilih.
+            </div>
+          ) : (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {mitraSettlementData.mitras.map((m) => {
+                  const hasDebt = m.remaining_debt > 0
+                  const isSettled = m.remaining_debt <= 0 && m.settled_amount > 0
+                  const isPartial = m.settled_amount > 0 && m.remaining_debt > 0
+
+                  return (
+                    <Card key={m.mitra_id || 'mitra'} className="border-2 border-slate-200 dark:border-slate-800 flex flex-col justify-between">
+                      <div>
                         <CardHeader className="pb-2">
-                          <div className="flex justify-between items-start">
-                            <CardTitle className="text-lg font-bold text-foreground">{m.mitra_name}</CardTitle>
-                            <Badge variant="outline" className="text-xs">{m.transactions?.length || 0} Trx</Badge>
+                          <div className="flex justify-between items-start gap-2">
+                            <div>
+                              <CardTitle className="text-lg font-bold text-foreground">{m.mitra_name}</CardTitle>
+                              <CardDescription className="text-xs font-mono mt-0.5">
+                                Total Omset: {formatCurrency(m.total_revenue)}
+                              </CardDescription>
+                            </div>
+                            <div className="flex flex-col items-end gap-1">
+                              <Badge variant="outline" className="text-[11px]">{m.transactions?.length || 0} Trx</Badge>
+                              {isSettled ? (
+                                <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 text-[10px] font-medium border-emerald-300">
+                                  Lunas
+                                </Badge>
+                              ) : isPartial ? (
+                                 <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 text-[10px] font-medium border-amber-300">
+                                  Sebagian
+                                </Badge>
+                              ) : hasDebt ? (
+                                <Badge className="bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300 text-[10px] font-medium border-red-300">
+                                  Belum Disetor
+                                </Badge>
+                              ) : (
+                                <Badge variant="secondary" className="text-[10px] text-muted-foreground">
+                                  Tidak Ada Hutang
+                                </Badge>
+                              )}
+                            </div>
                           </div>
-                          <CardDescription className="text-xs font-mono">Total Pendapatan: {formatCurrency(m.total_revenue)}</CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-2 text-xs">
                           <div className="flex justify-between p-2 rounded bg-muted/40">
                             <span className="text-muted-foreground">Masuk Rekening Mitra:</span>
-                            <span className="font-semibold text-green-600">{formatCurrency(m.received_in_mitra_account)}</span>
+                            <span className="font-semibold text-emerald-600">{formatCurrency(m.received_in_mitra_account)}</span>
                           </div>
-                          <div className="flex justify-between p-2 rounded bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900">
-                            <span className="font-medium text-blue-800 dark:text-blue-300">Masuk Rekening Pusat (Hutang Pusat):</span>
+                          <div className="flex justify-between p-2 rounded bg-blue-50/60 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900">
+                            <span className="font-medium text-blue-900 dark:text-blue-300">Masuk Rekening Pusat (Awal):</span>
                             <span className="font-bold text-blue-700 dark:text-blue-400">{formatCurrency(m.received_in_company_account)}</span>
                           </div>
-                          {m.received_in_other_mitra > 0 && (
-                            <div className="flex justify-between p-2 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300">
-                              <span>Masuk Mitra Lain:</span>
-                              <span className="font-semibold">{formatCurrency(m.received_in_other_mitra)}</span>
+                          {m.settled_amount > 0 && (
+                            <div className="flex justify-between p-2 rounded bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900">
+                              <span className="font-medium text-emerald-800 dark:text-emerald-300">Sudah Disetor Periode Ini:</span>
+                              <span className="font-bold text-emerald-700 dark:text-emerald-400">{formatCurrency(m.settled_amount)}</span>
                             </div>
                           )}
                           {m.received_in_cash > 0 && (
@@ -1401,18 +1752,55 @@ export default function AccountingPage() {
                               <span className="font-semibold">{formatCurrency(m.received_in_cash)}</span>
                             </div>
                           )}
-                          <div className="pt-2 border-t flex justify-between items-center text-sm font-bold">
-                            <span>Wajib Disetor Pusat:</span>
-                            <span className="text-blue-600">{formatCurrency(m.received_in_company_account)}</span>
+                          <div className={`p-2.5 rounded-lg border flex justify-between items-center text-xs ${hasDebt ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-900' : 'bg-muted/40 border-border'}`}>
+                            <span className="font-semibold text-foreground">Sisa Hutang Pusat:</span>
+                            <span className={`text-sm font-bold ${hasDebt ? 'text-amber-700 dark:text-amber-400' : 'text-emerald-600'}`}>
+                              {formatCurrency(m.remaining_debt)}
+                            </span>
                           </div>
                         </CardContent>
-                      </Card>
-                    ))}
+                      </div>
+
+                      <div className="p-4 pt-0">
+                        {hasDebt ? (
+                          <Button
+                            onClick={() => handleOpenSettlementModal(m)}
+                            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs h-9 shadow-xs"
+                          >
+                            <Send className="h-3.5 w-3.5 mr-1.5" />
+                            Proses Penyetoran ({formatCurrency(m.remaining_debt)})
+                          </Button>
+                        ) : isSettled ? (
+                          <div className="flex items-center justify-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400 font-semibold py-2 bg-emerald-50 dark:bg-emerald-950/50 rounded border border-emerald-200 dark:border-emerald-900">
+                            <CheckCircle2 className="h-4 w-4" />
+                            Setoran Sudah Lunas
+                          </div>
+                        ) : (
+                          <div className="text-center text-xs text-muted-foreground py-2 bg-muted/30 rounded border border-dashed">
+                            Tidak ada kewajiban setor
+                          </div>
+                        )}
+                      </div>
+                    </Card>
+                  )
+                })}
+              </div>
+
+              {/* Sub-Tabs: Rincian Pembayaran & Riwayat Penyetoran */}
+              <div className="pt-2">
+                <Tabs value={settlementSubTab} onValueChange={(v) => setSettlementSubTab(v as 'breakdown' | 'history')}>
+                  <div className="flex justify-between items-center border-b pb-2 mb-4">
+                    <TabsList className="grid grid-cols-2 w-72">
+                      <TabsTrigger value="breakdown" className="text-xs">
+                        Rincian Pembayaran ({mitraSettlementData.total_payments_count})
+                      </TabsTrigger>
+                      <TabsTrigger value="history" className="text-xs">
+                        Riwayat Penyetoran ({settlementHistory.length})
+                      </TabsTrigger>
+                    </TabsList>
                   </div>
 
-                  {/* Transaction breakdown table */}
-                  <div className="pt-4 border-t">
-                    <h4 className="font-semibold text-sm mb-3">Rincian Transaksi Pembayaran Mitra</h4>
+                  <TabsContent value="breakdown" className="mt-0">
                     <div className="overflow-x-auto border rounded-lg">
                       <table className="w-full text-xs">
                         <thead className="bg-muted/50 border-b">
@@ -1423,12 +1811,13 @@ export default function AccountingPage() {
                             <th className="p-2.5 text-left font-medium">Tanggal</th>
                             <th className="p-2.5 text-left font-medium">Metode</th>
                             <th className="p-2.5 text-left font-medium">Tujuan Uang Masuk</th>
+                            <th className="p-2.5 text-center font-medium">Status Setor</th>
                             <th className="p-2.5 text-right font-medium">Jumlah</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {mitraSettlementData.mitras.flatMap((m: any) =>
-                            (m.transactions || []).map((tx: any) => (
+                          {mitraSettlementData.mitras.flatMap((m) =>
+                            (m.transactions || []).map((tx) => (
                               <tr key={tx.payment_id} className="border-b last:border-b-0 hover:bg-muted/30">
                                 <td className="p-2.5 font-mono">{tx.invoice_number}</td>
                                 <td className="p-2.5 font-medium">{tx.customer_name}</td>
@@ -1440,6 +1829,23 @@ export default function AccountingPage() {
                                     {tx.destination_name}
                                   </span>
                                 </td>
+                                <td className="p-2.5 text-center">
+                                  {tx.is_settled ? (
+                                    <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 text-[10px] border-emerald-300">
+                                      Disetor ({tx.settlement_number})
+                                    </Badge>
+                                  ) : tx.classification === 'company_account' ? (
+                                    <Badge className="bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300 text-[10px] border-red-300">
+                                      Belum Disetor
+                                    </Badge>
+                                  ) : tx.classification === 'own_mitra_account' ? (
+                                    <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 text-[10px] border-blue-300">
+                                      Rekening Mitra
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="outline" className="text-[10px]">Kas Tunai</Badge>
+                                  )}
+                                </td>
                                 <td className="p-2.5 text-right font-semibold">{formatCurrency(tx.amount)}</td>
                               </tr>
                             ))
@@ -1447,11 +1853,74 @@ export default function AccountingPage() {
                         </tbody>
                       </table>
                     </div>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                  </TabsContent>
+
+                  <TabsContent value="history" className="mt-0">
+                    {loadingHistory ? (
+                      <div className="flex justify-center py-8">
+                        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                      </div>
+                    ) : settlementHistory.length === 0 ? (
+                      <div className="text-center py-8 text-muted-foreground border rounded-lg bg-muted/20">
+                        Belum ada riwayat penyetoran bagi hasil mitra.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto border rounded-lg">
+                        <table className="w-full text-xs">
+                          <thead className="bg-muted/50 border-b">
+                            <tr>
+                              <th className="p-2.5 text-left font-medium">No. Setoran</th>
+                              <th className="p-2.5 text-left font-medium">Mitra</th>
+                              <th className="p-2.5 text-left font-medium">Periode</th>
+                              <th className="p-2.5 text-left font-medium">Tanggal Setor</th>
+                              <th className="p-2.5 text-right font-medium">Nominal</th>
+                              <th className="p-2.5 text-left font-medium">Rekening Sumber</th>
+                              <th className="p-2.5 text-center font-medium">Status</th>
+                              <th className="p-2.5 text-left font-medium">Dibuat Oleh</th>
+                              <th className="p-2.5 text-center font-medium">Aksi</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {settlementHistory.map((item) => (
+                              <tr key={item.id} className="border-b last:border-b-0 hover:bg-muted/30">
+                                <td className="p-2.5 font-mono font-medium">{item.settlement_number}</td>
+                                <td className="p-2.5 font-semibold">{item.mitra_name}</td>
+                                <td className="p-2.5 text-muted-foreground">{formatDate(item.period_start)} s/d {formatDate(item.period_end)}</td>
+                                <td className="p-2.5">{formatDate(item.settlement_date)}</td>
+                                <td className="p-2.5 text-right font-bold text-blue-700 dark:text-blue-400">{formatCurrency(item.amount)}</td>
+                                <td className="p-2.5 font-mono">{item.bank_account_source || '-'}</td>
+                                <td className="p-2.5 text-center">
+                                  <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 text-[10px] border-emerald-300">
+                                    {item.status === 'completed' ? 'Selesai' : item.status}
+                                  </Badge>
+                                </td>
+                                <td className="p-2.5 text-muted-foreground">{item.created_by_name || '-'}</td>
+                                <td className="p-2.5 text-center">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      setSettlementToRollback(item)
+                                      setShowRollbackDialog(true)
+                                    }}
+                                    className="h-7 px-2 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/50"
+                                    title="Batalkan penyetoran dan hapus transaksi akunting terkait"
+                                  >
+                                    <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                                    Batalkan
+                                  </Button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </TabsContent>
+                </Tabs>
+              </div>
+            </div>
+          )}
         </TabsContent>
       </Tabs>
 
@@ -1990,6 +2459,217 @@ export default function AccountingPage() {
         </DialogContent>
       </Dialog>
 
+
+      {/* Settlement Process Dialog */}
+      <Dialog open={showSettlementDialog} onOpenChange={setShowSettlementDialog}>
+        <DialogContent className="sm:max-w-[550px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Building2 className="h-5 w-5 text-blue-600" />
+              Proses Penyetoran Bagi Hasil Mitra
+            </DialogTitle>
+            <DialogDescription>
+              Catat penyetoran dana bagi hasil dari Rekening Pusat ke Rekening Mitra {selectedMitraForSettlement?.mitra_name}.
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedMitraForSettlement && (
+            <form onSubmit={handleSubmitSettlement} className="space-y-4 py-2">
+              <div className="bg-blue-50 dark:bg-blue-950/40 p-3 rounded-lg border border-blue-200 dark:border-blue-900 text-xs space-y-1.5">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Mitra Penerima:</span>
+                  <span className="font-bold text-foreground">{selectedMitraForSettlement.mitra_name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Periode Transaksi:</span>
+                  <span className="font-medium text-foreground">
+                    {formatDate(mitraSettlementData?.period?.start_date)} s/d {formatDate(mitraSettlementData?.period?.end_date)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Total Hutang Pusat:</span>
+                  <span className="font-semibold text-blue-700 dark:text-blue-300">
+                    {formatCurrency(selectedMitraForSettlement.received_in_company_account)}
+                  </span>
+                </div>
+                {selectedMitraForSettlement.settled_amount > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Sudah Pernah Disetor:</span>
+                    <span className="font-medium text-emerald-600">
+                      {formatCurrency(selectedMitraForSettlement.settled_amount)}
+                    </span>
+                  </div>
+                )}
+                <div className="flex justify-between pt-1 border-t border-blue-200 dark:border-blue-800">
+                  <span className="font-semibold text-foreground">Sisa Kewajiban Setor:</span>
+                  <span className="font-bold text-amber-700 dark:text-amber-400">
+                    {formatCurrency(selectedMitraForSettlement.remaining_debt)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <Label htmlFor="settlement-amount">Nominal Penyetoran (Rp) *</Label>
+                  <Input
+                    id="settlement-amount"
+                    type="number"
+                    step="1"
+                    min="1"
+                    required
+                    value={settlementForm.amount}
+                    onChange={(e) => setSettlementForm(prev => ({ ...prev, amount: e.target.value }))}
+                    placeholder="Contoh: 1500000"
+                    className="font-mono text-sm"
+                  />
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Bisa disetor penuh sesuai sisa hutang atau sebagian (partial).
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label htmlFor="settlement-date">Tanggal Setor *</Label>
+                    <Input
+                      id="settlement-date"
+                      type="date"
+                      required
+                      value={settlementForm.settlement_date}
+                      onChange={(e) => setSettlementForm(prev => ({ ...prev, settlement_date: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="settlement-method">Metode Pembayaran</Label>
+                    <select
+                      id="settlement-method"
+                      value={settlementForm.payment_method}
+                      onChange={(e) => setSettlementForm(prev => ({ ...prev, payment_method: e.target.value }))}
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm h-10"
+                    >
+                      <option value="transfer">Transfer Bank</option>
+                      <option value="cash">Tunai / Cash</option>
+                      <option value="ewallet">E-Wallet</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <Label htmlFor="settlement-bank">Rekening Sumber (Pusat)</Label>
+                  <Input
+                    id="settlement-bank"
+                    type="text"
+                    value={settlementForm.bank_account_source}
+                    onChange={(e) => setSettlementForm(prev => ({ ...prev, bank_account_source: e.target.value }))}
+                    placeholder="BCA - 1234567890 (Pusat)"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="settlement-notes">Catatan / Keterangan</Label>
+                  <Input
+                    id="settlement-notes"
+                    type="text"
+                    value={settlementForm.notes}
+                    onChange={(e) => setSettlementForm(prev => ({ ...prev, notes: e.target.value }))}
+                    placeholder="Catatan tambahan..."
+                  />
+                </div>
+              </div>
+
+              <div className="bg-amber-50 dark:bg-amber-950/40 p-2.5 rounded border border-amber-200 dark:border-amber-900 text-[11px] text-amber-800 dark:text-amber-300">
+                ⚡ Sistem otomatis mencatat 2 pembukuan akunting (Double Entry):
+                <ul className="list-disc ml-4 mt-1 space-y-0.5">
+                  <li><strong>Pengeluaran Pusat</strong> (Kategori: Penyetoran Mitra)</li>
+                  <li><strong>Pemasukan Mitra</strong> (Kategori: Penyetoran dari Pusat)</li>
+                </ul>
+              </div>
+
+              <DialogFooter className="pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowSettlementDialog(false)}
+                  disabled={settlementSubmitting}
+                >
+                  Batal
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={settlementSubmitting}
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  {settlementSubmitting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Memproses...
+                    </>
+                  ) : (
+                    <>
+                      <Send className="h-4 w-4 mr-2" />
+                      Konfirmasi Setor
+                    </>
+                  )}
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Settlement Rollback Dialog */}
+      <Dialog open={showRollbackDialog} onOpenChange={setShowRollbackDialog}>
+        <DialogContent className="sm:max-w-[450px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <RotateCcw className="h-5 w-5" />
+              Batalkan Penyetoran Mitra?
+            </DialogTitle>
+            <DialogDescription>
+              Tindakan ini akan membatalkan penyetoran dan menghapus transaksi akunting terkait (Pusat & Mitra).
+            </DialogDescription>
+          </DialogHeader>
+
+          {settlementToRollback && (
+            <div className="space-y-3 py-2 text-xs">
+              <div className="bg-muted p-3 rounded space-y-1">
+                <div><strong>No. Setoran:</strong> {settlementToRollback.settlement_number}</div>
+                <div><strong>Mitra:</strong> {settlementToRollback.mitra_name}</div>
+                <div><strong>Nominal:</strong> {formatCurrency(settlementToRollback.amount)}</div>
+                <div><strong>Tanggal Setor:</strong> {formatDate(settlementToRollback.settlement_date)}</div>
+              </div>
+              <p className="text-muted-foreground">
+                Item pembayaran invoice yang ditautkan ke penyetoran ini akan dikembalikan statusnya menjadi belum disetor.
+              </p>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowRollbackDialog(false)}
+              disabled={rollbackSubmitting}
+            >
+              Kembali
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={handleRollbackSettlement}
+              disabled={rollbackSubmitting}
+            >
+              {rollbackSubmitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Membatalkan...
+                </>
+              ) : (
+                'Ya, Batalkan Penyetoran'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
