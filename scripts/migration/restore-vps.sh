@@ -9,12 +9,12 @@
 # 3. Restore MongoDB (genieacs)
 # 4. Restore & deploy konfigurasi FreeRADIUS 3.0 & scripts /usr/local/bin
 # 5. Restore & deploy konfigurasi GenieACS & systemd services
-# 6. Restore kode aplikasi Kilusi-Bill & Autopay
-# 7. Re-konfigurasi .env & database settings ke localhost & WireGuard
+# 6. Restore kode aplikasi Kilusi-Bill & Autopay (/opt/kilusi-bill)
+# 7. Re-konfigurasi .env & database settings ke localhost
 # 8. Install dependencies, build Frontend Next.js & Autopay
-# 9. Setup & jalankan systemd services
-# 10. Konfigurasi Nginx Reverse Proxy untuk seluruh domain
-# 11. Pasang cron backup harian otomatis
+# 9. Setup & jalankan systemd services (backend, frontend, autopay, genieacs)
+# 10. Konfigurasi Nginx Unified Reverse Proxy (Cloudflare-ready & Isolir NAT)
+# 11. Pasang cron backup harian otomatis & verifikasi kesehatan sistem
 # ==============================================================================
 
 set -euo pipefail
@@ -35,7 +35,7 @@ fi
 
 if [ -f "$BUNDLE_FILE" ]; then
     echo "=========================================================================="
-    echo " [1/11] Mengekstrak bundle arsip migrasi"
+    echo " [1/11] Mengekstrak bundle arsip migrasi..."
     echo "=========================================================================="
     tar -xzvf "$BUNDLE_FILE" -C /tmp
 fi
@@ -43,26 +43,43 @@ fi
 echo "=========================================================================="
 echo " [2/11] Restore Database PostgreSQL (kilusi_bill & autopay)"
 echo "=========================================================================="
-# Pastikan user postgres dan database tujuan sudah siap
-sudo -u postgres psql -c "SELECT 1 FROM pg_database WHERE datname = 'kilusi_bill'" | grep -q 1 || \
+sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname = 'kilusi_bill'" | grep -q 1 || \
     sudo -u postgres psql -c "CREATE DATABASE kilusi_bill OWNER kilusi_user;"
-sudo -u postgres psql -c "SELECT 1 FROM pg_database WHERE datname = 'autopay'" | grep -q 1 || \
+sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname = 'autopay'" | grep -q 1 || \
     sudo -u postgres psql -c "CREATE DATABASE autopay OWNER kilusi_user;"
 
-PG_KILUSI_DUMP=$(find "${WORK_DIR}/server1_db_radius" -name "*kilusi_bill*.dump" -o -name "*kilusi_bill*.sql" | head -n 1 || true)
+PG_KILUSI_DUMP=$(find "${WORK_DIR}/server1_db_radius" -name "*kilusi_bill*.dump" | head -n 1 || true)
+PG_KILUSI_SQL=$(find "${WORK_DIR}/server1_db_radius" -name "*kilusi_bill*.sql.gz" -o -name "*kilusi_bill*.sql" | head -n 1 || true)
+
 if [ -n "$PG_KILUSI_DUMP" ]; then
-    echo "Restoring PostgreSQL kilusi_bill dari ${PG_KILUSI_DUMP}..."
-    PGPASSWORD='kilusi17!' pg_restore -U kilusi_user -h localhost -d kilusi_bill -v --clean --if-exists "$PG_KILUSI_DUMP" 2>/dev/null || \
-    PGPASSWORD='kilusi17!' psql -U kilusi_user -h localhost -d kilusi_bill -f "$PG_KILUSI_DUMP" 2>/dev/null || true
-    echo "[OK] Database kilusi_bill berhasil di-restore."
+    echo "Restoring PostgreSQL kilusi_bill via pg_restore (${PG_KILUSI_DUMP})..."
+    PGPASSWORD='kilusi17!' pg_restore -U kilusi_user -h localhost -d kilusi_bill -v --clean --if-exists "$PG_KILUSI_DUMP" 2>/dev/null || true
+    echo "[OK] pg_restore kilusi_bill selesai."
+elif [ -n "$PG_KILUSI_SQL" ]; then
+    echo "Restoring PostgreSQL kilusi_bill via psql (${PG_KILUSI_SQL})..."
+    if [[ "$PG_KILUSI_SQL" == *.gz ]]; then
+        gunzip -c "$PG_KILUSI_SQL" | PGPASSWORD='kilusi17!' psql -U kilusi_user -h localhost -d kilusi_bill
+    else
+        PGPASSWORD='kilusi17!' psql -U kilusi_user -h localhost -d kilusi_bill -f "$PG_KILUSI_SQL"
+    fi
+    echo "[OK] psql kilusi_bill selesai."
 fi
 
-PG_AUTOPAY_DUMP=$(find "${WORK_DIR}/server1_db_radius" -name "*autopay*.dump" -o -name "*autopay*.sql" | head -n 1 || true)
+PG_AUTOPAY_DUMP=$(find "${WORK_DIR}/server1_db_radius" -name "*autopay*.dump" | head -n 1 || true)
+PG_AUTOPAY_SQL=$(find "${WORK_DIR}/server1_db_radius" -name "*autopay*.sql.gz" -o -name "*autopay*.sql" | head -n 1 || true)
+
 if [ -n "$PG_AUTOPAY_DUMP" ]; then
-    echo "Restoring PostgreSQL autopay dari ${PG_AUTOPAY_DUMP}..."
-    PGPASSWORD='kilusi17!' pg_restore -U kilusi_user -h localhost -d autopay -v --clean --if-exists "$PG_AUTOPAY_DUMP" 2>/dev/null || \
-    PGPASSWORD='kilusi17!' psql -U kilusi_user -h localhost -d autopay -f "$PG_AUTOPAY_DUMP" 2>/dev/null || true
-    echo "[OK] Database autopay berhasil di-restore."
+    echo "Restoring PostgreSQL autopay via pg_restore (${PG_AUTOPAY_DUMP})..."
+    PGPASSWORD='kilusi17!' pg_restore -U kilusi_user -h localhost -d autopay -v --clean --if-exists "$PG_AUTOPAY_DUMP" 2>/dev/null || true
+    echo "[OK] pg_restore autopay selesai."
+elif [ -n "$PG_AUTOPAY_SQL" ]; then
+    echo "Restoring PostgreSQL autopay via psql (${PG_AUTOPAY_SQL})..."
+    if [[ "$PG_AUTOPAY_SQL" == *.gz ]]; then
+        gunzip -c "$PG_AUTOPAY_SQL" | PGPASSWORD='kilusi17!' psql -U kilusi_user -h localhost -d autopay
+    else
+        PGPASSWORD='kilusi17!' psql -U kilusi_user -h localhost -d autopay -f "$PG_AUTOPAY_SQL"
+    fi
+    echo "[OK] psql autopay selesai."
 fi
 
 echo "=========================================================================="
@@ -133,22 +150,26 @@ if [ -n "$GENIEACS_ARCHIVE" ]; then
     tar -xzf "$GENIEACS_ARCHIVE" -C /opt/genieacs/
 fi
 
-# Update /opt/genieacs/genieacs.env
 cat << 'EOF' > /opt/genieacs/genieacs.env
-GENIEACS_MONGODB_CONNECTION_URL=mongodb://127.0.0.1:27017/genieacs
+GENIEACS_CWMP_ACCESS_LOG_FILE=/var/log/genieacs/genieacs-cwmp-access.log
+GENIEACS_NBI_ACCESS_LOG_FILE=/var/log/genieacs/genieacs-nbi-access.log
+GENIEACS_FS_ACCESS_LOG_FILE=/var/log/genieacs/genieacs-fs-access.log
+GENIEACS_UI_ACCESS_LOG_FILE=/var/log/genieacs/genieacs-ui-access.log
+GENIEACS_DEBUG_FILE=/var/log/genieacs/genieacs-debug.yaml
+GENIEACS_EXT_DIR=/opt/genieacs/ext
+GENIEACS_UI_JWT_SECRET=secret
 GENIEACS_CWMP_PORT=7547
 GENIEACS_NBI_PORT=7557
 GENIEACS_FS_PORT=7567
 GENIEACS_UI_PORT=3002
-GENIEACS_EXT_DIR=/opt/genieacs/ext
+GENIEACS_MONGODB_CONNECTION_URL=mongodb://127.0.0.1:27017/genieacs
 EOF
 chown -R genieacs:genieacs /opt/genieacs
 
-# Setup GenieACS Systemd Services
 for SERVICE in cwmp nbi fs ui; do
 cat << EOF > /etc/systemd/system/genieacs-${SERVICE}.service
 [Unit]
-Description=GenieACS ${SERVICE^}
+Description=GenieACS ${SERVICE^^}
 After=network.target mongod.service
 Wants=mongod.service
 
@@ -172,47 +193,53 @@ echo "[OK] GenieACS services aktif."
 echo "=========================================================================="
 echo " [6/11] Restore Source Code Kilusi-Bill & Autopay"
 echo "=========================================================================="
+mkdir -p /opt/kilusi-bill/server3
+mkdir -p /opt/kilusi-bill/autopay
+
 APP_ARCHIVE=$(find "${WORK_DIR}/server3_app" -name "*kilusi_bill_code*.tar.gz" | head -n 1 || true)
-mkdir -p /root/kilusi-bill
 if [ -n "$APP_ARCHIVE" ]; then
-    echo "Extracting Kilusi-Bill code ke /root/kilusi-bill..."
-    tar -xzf "$APP_ARCHIVE" -C /root/kilusi-bill/
+    echo "Extracting Kilusi-Bill code ke /opt/kilusi-bill/server3..."
+    tar -xzf "$APP_ARCHIVE" -C /opt/kilusi-bill/server3/
 fi
 
 AUTOPAY_ARCHIVE=$(find "${WORK_DIR}/server3_app" -name "*autopay*.tar.gz" | head -n 1 || true)
-mkdir -p /opt/kilusi-bill
 if [ -n "$AUTOPAY_ARCHIVE" ]; then
     echo "Extracting Autopay code ke /opt/kilusi-bill/autopay..."
     tar -xzf "$AUTOPAY_ARCHIVE" -C /opt/kilusi-bill/
 fi
 
+# Symlink compatibility: /root/kilusi-bill -> /opt/kilusi-bill/server3
+if [ ! -d /root/kilusi-bill ]; then
+    ln -sf /opt/kilusi-bill/server3 /root/kilusi-bill
+fi
+
 echo "=========================================================================="
 echo " [7/11] Konfigurasi Environment & Database Mappings"
 echo "=========================================================================="
-cd /root/kilusi-bill
+APP_BASE="/opt/kilusi-bill/server3"
 
 # Backend .env
-if [ -f backend/.env ]; then
-    sed -i "s|POSTGRES_HOST=.*|POSTGRES_HOST=localhost|" backend/.env
-    sed -i "s|POSTGRES_PORT=.*|POSTGRES_PORT=5432|" backend/.env
-    sed -i "s|POSTGRES_DATABASE=.*|POSTGRES_DATABASE=kilusi_bill|" backend/.env
-    sed -i "s|POSTGRES_USER=.*|POSTGRES_USER=kilusi_user|" backend/.env
-    sed -i "s|POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=kilusi17!|" backend/.env
-    sed -i "s|RADIUS_HOST=.*|RADIUS_HOST=localhost|" backend/.env
-    sed -i "s|RADIUS_DATABASE=.*|RADIUS_DATABASE=kilusi_bill|" backend/.env
-    sed -i "s|RADIUS_USER=.*|RADIUS_USER=kilusi_user|" backend/.env
-    sed -i "s|RADIUS_PASSWORD=.*|RADIUS_PASSWORD=kilusi17!|" backend/.env
-    sed -i "s|GENIEACS_URL=.*|GENIEACS_URL=http://localhost:7557|" backend/.env
-    sed -i "s|PORT=.*|PORT=3001|" backend/.env
+if [ -f "${APP_BASE}/backend/.env" ]; then
+    sed -i "s|POSTGRES_HOST=.*|POSTGRES_HOST=localhost|" "${APP_BASE}/backend/.env"
+    sed -i "s|POSTGRES_PORT=.*|POSTGRES_PORT=5432|" "${APP_BASE}/backend/.env"
+    sed -i "s|POSTGRES_DATABASE=.*|POSTGRES_DATABASE=kilusi_bill|" "${APP_BASE}/backend/.env"
+    sed -i "s|POSTGRES_USER=.*|POSTGRES_USER=kilusi_user|" "${APP_BASE}/backend/.env"
+    sed -i "s|POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=kilusi17!|" "${APP_BASE}/backend/.env"
+    sed -i "s|RADIUS_HOST=.*|RADIUS_HOST=localhost|" "${APP_BASE}/backend/.env"
+    sed -i "s|RADIUS_DATABASE=.*|RADIUS_DATABASE=kilusi_bill|" "${APP_BASE}/backend/.env"
+    sed -i "s|RADIUS_USER=.*|RADIUS_USER=kilusi_user|" "${APP_BASE}/backend/.env"
+    sed -i "s|RADIUS_PASSWORD=.*|RADIUS_PASSWORD=kilusi17!|" "${APP_BASE}/backend/.env"
+    sed -i "s|GENIEACS_URL=.*|GENIEACS_URL=http://localhost:7557|" "${APP_BASE}/backend/.env"
+    sed -i "s|PORT=.*|PORT=3001|" "${APP_BASE}/backend/.env"
 fi
 
 # Frontend .env.local
-if [ -f frontend/.env.local ]; then
-    sed -i "s|NEXT_PUBLIC_API_URL=.*|NEXT_PUBLIC_API_URL=https://api.kilusi.id|" frontend/.env.local
+if [ -f "${APP_BASE}/frontend/.env.local" ]; then
+    sed -i "s|NEXT_PUBLIC_API_URL=.*|NEXT_PUBLIC_API_URL=https://api.kilusi.id|" "${APP_BASE}/frontend/.env.local"
 fi
 
 # Autopay .env
-if [ -f /opt/kilusi-bill/autopay/.env ]; then
+if [ -f "/opt/kilusi-bill/autopay/.env" ]; then
     sed -i "s|DATABASE_URL=.*|DATABASE_URL=postgresql://kilusi_user:kilusi17!@localhost:5432/autopay|" /opt/kilusi-bill/autopay/.env
 fi
 
@@ -222,28 +249,20 @@ UPDATE app_config SET config_value = 'http://localhost:7557' WHERE config_key = 
 UPDATE app_config SET config_value = 'localhost' WHERE config_key = 'postgres_host';
 " 2>/dev/null || true
 
-# Update tabel nas ke IP WireGuard (MikroTik: 10.100.0.2, accel-ppp: 10.100.0.3)
-PGPASSWORD='kilusi17!' psql -U kilusi_user -h localhost -d kilusi_bill -c "
-UPDATE nas SET nasname = '10.100.0.2', ip_address = '10.100.0.2', secret = 'kilusiradiussecret!' WHERE is_active = true AND shortname ILIKE '%mikrotik%';
-INSERT INTO nas (nasname, shortname, ip_address, secret, ports, type, is_active, snmp_enabled, snmp_port)
-VALUES ('10.100.0.3', 'accel-ppp-bras', '10.100.0.3', 'kilusiradiussecret!', 1812, 'other', true, true, 161)
-ON CONFLICT (nasname) DO UPDATE SET ip_address = '10.100.0.3', secret = 'kilusiradiussecret!';
-" 2>/dev/null || true
-
 echo "=========================================================================="
 echo " [8/11] Install Dependencies & Build Frontend"
 echo "=========================================================================="
-echo "--> Building Backend..."
-cd /root/kilusi-bill/backend
+echo "--> Installing Backend dependencies..."
+cd "${APP_BASE}/backend"
 npm install --omit=dev
 
-echo "--> Building Frontend..."
-cd /root/kilusi-bill/frontend
+echo "--> Installing & Building Frontend..."
+cd "${APP_BASE}/frontend"
 npm install
 npm run build
 
-if [ -d /opt/kilusi-bill/autopay ]; then
-    echo "--> Building Autopay..."
+if [ -d "/opt/kilusi-bill/autopay" ]; then
+    echo "--> Installing & Building Autopay..."
     cd /opt/kilusi-bill/autopay
     npm install
     npm run build 2>/dev/null || true
@@ -252,7 +271,9 @@ fi
 echo "=========================================================================="
 echo " [9/11] Setup Systemd Services"
 echo "=========================================================================="
-cat << 'EOF' > /etc/systemd/system/kilusi-bill-backend.service
+NODE_BIN=$(command -v node)
+
+cat << EOF > /etc/systemd/system/kilusi-bill-backend.service
 [Unit]
 Description=Kilusi Bill Backend Service
 After=network.target postgresql.service mongod.service
@@ -262,9 +283,9 @@ Wants=network-online.target
 Type=simple
 User=root
 Group=root
-WorkingDirectory=/root/kilusi-bill/backend
+WorkingDirectory=${APP_BASE}/backend
 Environment=NODE_ENV=production
-ExecStart=/usr/bin/node app.js
+ExecStart=${NODE_BIN} app.js
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -276,7 +297,7 @@ LimitNOFILE=65536
 WantedBy=multi-user.target
 EOF
 
-cat << 'EOF' > /etc/systemd/system/kilusi-bill-frontend.service
+cat << EOF > /etc/systemd/system/kilusi-bill-frontend.service
 [Unit]
 Description=Kilusi Bill Frontend Service
 After=network.target kilusi-bill-backend.service
@@ -286,7 +307,7 @@ Wants=network-online.target
 Type=simple
 User=root
 Group=root
-WorkingDirectory=/root/kilusi-bill/frontend
+WorkingDirectory=${APP_BASE}/frontend
 Environment=NODE_ENV=production
 ExecStart=/usr/bin/npx next start -p 8080
 Restart=always
@@ -300,7 +321,7 @@ LimitNOFILE=65536
 WantedBy=multi-user.target
 EOF
 
-cat << 'EOF' > /etc/systemd/system/kilusi-autopay.service
+cat << EOF > /etc/systemd/system/kilusi-autopay.service
 [Unit]
 Description=Kilusi Autopay - Middleware Verifikasi Pembayaran Otomatis
 After=network.target postgresql.service
@@ -313,7 +334,7 @@ Group=root
 WorkingDirectory=/opt/kilusi-bill/autopay
 Environment=NODE_ENV=production
 Environment=PORT=3087
-ExecStart=/usr/bin/npx next start --port 3087
+ExecStart=/usr/bin/node node_modules/next/dist/bin/next start --port 3087
 Restart=always
 RestartSec=5
 StandardOutput=journal
@@ -333,24 +354,63 @@ echo "[OK] Systemd services aktif."
 echo "=========================================================================="
 echo " [10/11] Konfigurasi Nginx Unified Reverse Proxy"
 echo "=========================================================================="
-cat << 'EOF' > /etc/nginx/sites-available/kilusi-single-server.conf
-# HTTP Redirect ke HTTPS
+cat << 'EOF' > /etc/nginx/sites-available/kilusi-unified.conf
+# ==============================================================================
+# KILUSI-BILL UNIFIED NGINX CONFIGURATION (SINGLE SERVER VPS)
+# Mendukung Cloudflare Proxy (Port 80/443) & MikroTik Isolir NAT Redirect
+# ==============================================================================
+
+# --- Isolir Catch-All (default_server) — NAT redirect dari MikroTik ---
 server {
     listen 80 default_server;
     server_name _;
-    return 301 https://$host$request_uri;
+    location / {
+        proxy_pass http://127.0.0.1:3001/isolir;
+        proxy_http_version 1.1;
+        proxy_set_header Host "isolir.kilusi.id";
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+    location /uploads/ {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_set_header Host "isolir.kilusi.id";
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+    location /api/ {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_set_header Host "isolir.kilusi.id";
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
 }
 
-# Frontend Next.js: billing.kilusi.id & portal.kilusi.id
+# --- Backend API: api.kilusi.id ---
 server {
-    listen 443 ssl http2;
-    server_name billing.kilusi.id portal.kilusi.id;
+    listen 80;
+    server_name api.kilusi.id;
 
-    ssl_certificate /etc/ssl/certs/ssl-cert-snakeoil.pem;
-    ssl_certificate_key /etc/ssl/private/ssl-cert-snakeoil.key;
+    location /api/v1/payments/webhook/ {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        add_header Cache-Control "no-store, no-cache, must-revalidate, private" always;
+    }
 
-    location / {
-        proxy_pass http://127.0.0.1:8080;
+    location /api/v1/payments/callback/ {
+        proxy_pass http://127.0.0.1:3001;
+        add_header Cache-Control "no-store, no-cache, must-revalidate, private" always;
+    }
+
+    location /api/v1/hotspot/webhook/ {
+        proxy_pass http://127.0.0.1:3001;
+        add_header Cache-Control "no-store, no-cache, must-revalidate, private" always;
+    }
+
+    location ~ ^/api/ {
+        proxy_pass http://127.0.0.1:3001;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -358,6 +418,61 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        proxy_connect_timeout 300;
+        proxy_send_timeout 300;
+        proxy_read_timeout 300;
+    }
+
+    location /ws {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 86400;
+    }
+
+    location /socket.io/ {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    client_max_body_size 100M;
+}
+
+# --- Billing Frontend: billing.kilusi.id ---
+server {
+    listen 80;
+    server_name billing.kilusi.id;
+
+    location /api/v1/payments/webhook/ {
+        proxy_pass http://127.0.0.1:3001;
+        add_header Cache-Control "no-store, no-cache, must-revalidate, private" always;
+    }
+
+    location /api/v1/payments/callback/ {
+        proxy_pass http://127.0.0.1:3001;
+        add_header Cache-Control "no-store, no-cache, must-revalidate, private" always;
+    }
+
+    location /api/v1/hotspot/webhook/ {
+        proxy_pass http://127.0.0.1:3001;
+        add_header Cache-Control "no-store, no-cache, must-revalidate, private" always;
     }
 
     location /api/ {
@@ -369,52 +484,11 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        proxy_connect_timeout 300;
+        proxy_send_timeout 300;
+        proxy_read_timeout 300;
     }
-
-    location /ws {
-        proxy_pass http://127.0.0.1:3001;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-    }
-
-    location /socket.io/ {
-        proxy_pass http://127.0.0.1:3001;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-    }
-}
-
-# Backend API: api.kilusi.id
-server {
-    listen 443 ssl http2;
-    server_name api.kilusi.id;
-
-    ssl_certificate /etc/ssl/certs/ssl-cert-snakeoil.pem;
-    ssl_certificate_key /etc/ssl/private/ssl-cert-snakeoil.key;
-
-    location / {
-        proxy_pass http://127.0.0.1:3001;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-
-# Landing & Public: kilusi.id
-server {
-    listen 443 ssl http2;
-    server_name kilusi.id www.kilusi.id;
-
-    ssl_certificate /etc/ssl/certs/ssl-cert-snakeoil.pem;
-    ssl_certificate_key /etc/ssl/private/ssl-cert-snakeoil.key;
 
     location / {
         proxy_pass http://127.0.0.1:8080;
@@ -425,19 +499,33 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
     }
+    client_max_body_size 100M;
 }
 
-# Autopay Service: autopay.kilusi.id
+# --- Customer Portal: portal.kilusi.id ---
 server {
-    listen 443 ssl http2;
-    server_name autopay.kilusi.id;
+    listen 80;
+    server_name portal.kilusi.id;
 
-    ssl_certificate /etc/ssl/certs/ssl-cert-snakeoil.pem;
-    ssl_certificate_key /etc/ssl/private/ssl-cert-snakeoil.key;
+    location /api/v1/payments/webhook/ {
+        proxy_pass http://127.0.0.1:3001;
+        add_header Cache-Control "no-store, no-cache, must-revalidate, private" always;
+    }
 
-    location / {
-        proxy_pass http://127.0.0.1:3087;
+    location /api/v1/payments/callback/ {
+        proxy_pass http://127.0.0.1:3001;
+        add_header Cache-Control "no-store, no-cache, must-revalidate, private" always;
+    }
+
+    location /api/v1/hotspot/webhook/ {
+        proxy_pass http://127.0.0.1:3001;
+        add_header Cache-Control "no-store, no-cache, must-revalidate, private" always;
+    }
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:3001;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -445,48 +533,113 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        proxy_connect_timeout 300;
+        proxy_send_timeout 300;
+        proxy_read_timeout 300;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+    client_max_body_size 100M;
+}
+
+# --- Landing Page: kilusi.id & www.kilusi.id ---
+server {
+    listen 80;
+    server_name kilusi.id www.kilusi.id;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
     }
 }
 
-# Isolir Portal: isolir.kilusi.id
+# --- Autopay: autopay.kilusi.id ---
 server {
-    listen 443 ssl http2;
-    server_name isolir.kilusi.id;
+    listen 80;
+    server_name autopay.kilusi.id;
 
-    ssl_certificate /etc/ssl/certs/ssl-cert-snakeoil.pem;
-    ssl_certificate_key /etc/ssl/private/ssl-cert-snakeoil.key;
+    location / {
+        proxy_pass http://127.0.0.1:3087;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+    }
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:3087;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+}
+
+# --- Isolir Domain: isolir.kilusi.id ---
+server {
+    listen 80;
+    server_name isolir.kilusi.id;
 
     location / {
         proxy_pass http://127.0.0.1:3001/isolir;
         proxy_http_version 1.1;
-        proxy_set_header Host isolir.kilusi.id;
+        proxy_set_header Host "isolir.kilusi.id";
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
     }
-}
-
-# GenieACS CWMP (Port 7547)
-server {
-    listen 7547;
-    server_name acs.kilusi.id;
-
-    location / {
-        proxy_pass http://127.0.0.1:7547;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
+    location /uploads/ {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_set_header Host "isolir.kilusi.id";
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+    location /api/ {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_set_header Host "isolir.kilusi.id";
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 }
 
-# GenieACS Web UI (Port 443)
+# --- GenieACS Web UI: acs.kilusi.id (Port 80) ---
 server {
-    listen 443 ssl http2;
+    listen 80;
     server_name acs.kilusi.id;
-
-    ssl_certificate /etc/ssl/certs/ssl-cert-snakeoil.pem;
-    ssl_certificate_key /etc/ssl/private/ssl-cert-snakeoil.key;
 
     location / {
         proxy_pass http://127.0.0.1:3002;
@@ -499,18 +652,19 @@ server {
 }
 EOF
 
-apt-get install -y ssl-cert || true
 rm -f /etc/nginx/sites-enabled/default
-ln -sf /etc/nginx/sites-available/kilusi-single-server.conf /etc/nginx/sites-enabled/
+ln -sf /etc/nginx/sites-available/kilusi-unified.conf /etc/nginx/sites-enabled/
 nginx -t && systemctl restart nginx
-echo "[OK] Nginx reverse proxy aktif."
+echo "[OK] Nginx unified reverse proxy aktif."
 
 echo "=========================================================================="
-echo " [11/11] Pasang Cron Backup Harian Otomatis"
+echo " [11/11] Pasang Cron Backup Harian & Verifikasi Kesehatan Sistem"
 echo "=========================================================================="
-cat << 'EOF' > /root/kilusi-bill/backup.sh
+mkdir -p /opt/kilusi-bill/backups
+
+cat << 'EOF' > /opt/kilusi-bill/backup.sh
 #!/bin/bash
-BACKUP_DIR=/root/kilusi-bill/backups
+BACKUP_DIR=/opt/kilusi-bill/backups
 DATE=$(date +%Y%m%d_%H%M%S)
 mkdir -p "$BACKUP_DIR"
 PGPASSWORD='kilusi17!' pg_dump -h localhost -U kilusi_user -d kilusi_bill | gzip > "$BACKUP_DIR/db_kilusi_${DATE}.sql.gz"
@@ -518,14 +672,32 @@ PGPASSWORD='kilusi17!' pg_dump -h localhost -U kilusi_user -d autopay | gzip > "
 mongodump --db genieacs --archive="$BACKUP_DIR/mongo_genieacs_${DATE}.gz" --gzip
 find "$BACKUP_DIR" -name "*.gz" -mtime +7 -delete
 EOF
-chmod +x /root/kilusi-bill/backup.sh
+chmod +x /opt/kilusi-bill/backup.sh
 
-# Daftarkan di root crontab jika belum ada
-(crontab -l 2>/dev/null | grep -v "/root/kilusi-bill/backup.sh" ; echo "0 2 * * * /root/kilusi-bill/backup.sh") | crontab -
+(crontab -l 2>/dev/null | grep -v "/opt/kilusi-bill/backup.sh" ; echo "0 2 * * * /opt/kilusi-bill/backup.sh") | crontab -
 echo "[OK] Cron backup harian terpasang (02:00 WIB)."
+
+echo "--------------------------------------------------------------------------"
+echo " VERIFIKASI KESEHATAN SISTEM:"
+echo "--------------------------------------------------------------------------"
+echo -n "1. PostgreSQL kilusi_bill: "
+PGPASSWORD='kilusi17!' psql -U kilusi_user -h localhost -d kilusi_bill -tc "SELECT count(*) FROM customers;" 2>/dev/null && echo " OK" || echo " FAILED"
+
+echo -n "2. Backend API Health: "
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3001/api/v1/health || echo "FAILED"
+
+echo -n "3. Frontend App (Admin Accounting): "
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8080/admin/accounting || echo "FAILED"
+
+echo -n "4. Autopay Service: "
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3087 || echo "FAILED"
+
+echo -n "5. GenieACS NBI: "
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:7557/devices || echo "FAILED"
+
+echo -n "6. FreeRADIUS Status: "
+radclient -s 127.0.0.1:18121 status adminsecret 2>&1 | grep -q "Accept" && echo "OK (Accept)" || echo "CHECK MANUALLY"
 
 echo "=========================================================================="
 echo " RESTORE & DEPLOYMENT DI SINGLE SERVER VPS SELESAI!"
-echo " Silakan pasang sertifikat SSL publik dengan Certbot:"
-echo " certbot --nginx -d billing.kilusi.id -d api.kilusi.id -d portal.kilusi.id -d kilusi.id -d acs.kilusi.id -d autopay.kilusi.id -d isolir.kilusi.id"
 echo "=========================================================================="
