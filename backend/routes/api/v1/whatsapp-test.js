@@ -244,4 +244,26 @@ router.get('/setup-info', (req, res) => {
   });
 });
 
+// TEMP: Test new sendNotification routing
+router.post('/routing-test', async (req, res) => {
+  try {
+    const { to, provider } = req.body;
+    if (!to) return res.status(400).json({ success: false, message: 'Phone required' });
+
+    const manager = require('../../../config/whatsapp-notifications');
+    const msg = 'Test routing ' + (provider || 'default') + ' | Waktu: ' + new Date().toLocaleString('id-ID');
+
+    logger.info('[ROUTING-TEST] Sending to ' + to + ' provider: ' + (provider || 'default'));
+    const result = await manager.sendNotification(to, msg, {
+      notification_type: 'test',
+      provider: provider || undefined
+    });
+    logger.info('[ROUTING-TEST] Result: ' + JSON.stringify(result));
+
+    res.json({ success: true, data: result });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
