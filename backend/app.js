@@ -1030,6 +1030,20 @@ try {
             // Set sock instance untuk billing commands
             const billingCommands = require('./config/billing-commands');
             billingCommands.setSock(sock);
+            // Set sock instance untuk WhatsApp Notifications & SendMessage
+            try {
+                const whatsappNotifications = require('./config/whatsapp-notifications');
+                whatsappNotifications.setSock(sock);
+            } catch (err) {
+                logger.error('Error setting sock for whatsapp-notifications:', err);
+            }
+
+            try {
+                const sendMessageModule = require('./config/sendMessage');
+                sendMessageModule.setSock(sock);
+            } catch (err) {
+                logger.error('Error setting sock for sendMessage:', err);
+            }
 
             logger.info('WhatsApp connected successfully');
 

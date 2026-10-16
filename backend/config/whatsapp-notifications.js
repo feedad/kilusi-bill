@@ -411,10 +411,12 @@ Terima kasih telah menggunakan layanan kami.
                 const { qr, connection } = update;
                 if (qr) {
                     this.lastQR = qr;
+                    this.qrCodeData = qr;
                     logger.info("[Baileys] New QR Code generated");
                 }
                 if (connection === "open") {
                     this.lastQR = null;
+                    this.qrCodeData = null;
                     logger.info("[Baileys] Connected successfully");
                 }
             });
@@ -1368,6 +1370,18 @@ Terima kasih telah menggunakan layanan kami.
     async sendNotificationBaileys(phoneNumber, message, options = {}) {
         try {
             if (!this.sock) {
+                try {
+                    const whatsappModule = require('./whatsapp');
+                    const s = whatsappModule.getSock && whatsappModule.getSock();
+                    if (s) {
+                        this.setSock(s);
+                    }
+                } catch (attachErr) {
+                    logger.warn('[Baileys] Auto-attach sock failed:', attachErr.message);
+                }
+            }
+
+            if (!this.sock) {
                 logger.error("[Baileys] WhatsApp sock not initialized");
                 return {
                     success: false,
@@ -1379,17 +1393,23 @@ Terima kasih telah menggunakan layanan kami.
             const formattedNumber = this.formatPhoneNumber(phoneNumber);
             const jid = `${formattedNumber}@s.whatsapp.net`;
 
-            // Random Delay Implementation to prevent ban
-            const minDelay = getSetting("baileys_delay_min", 100);
-            const maxDelay = getSetting("baileys_delay_max", 600);
-            const randomDelay = Math.floor(
-                Math.random() * (maxDelay - minDelay + 1) + minDelay,
-            );
+            // Random Delay Implementation to prevent ban (unless skipDelay is true)
+            if (!options.skipDelay) {
+                const minDelay = getSetting("baileys_delay_min", 100);
+                const maxDelay = getSetting("baileys_delay_max", 600);
+                const randomDelay = Math.floor(
+                    Math.random() * (maxDelay - minDelay + 1) + minDelay,
+                );
 
-            logger.info(
-                `[Baileys] Anti-ban: Sleeping for ${randomDelay} seconds before sending to ${phoneNumber}...`,
-            );
-            await this.delay(randomDelay * 1000);
+                logger.info(
+                    `[Baileys] Anti-ban: Sleeping for ${randomDelay} seconds before sending to ${phoneNumber}...`,
+                );
+                await this.delay(randomDelay * 1000);
+            } else {
+                logger.info(
+                    `[Baileys] skipDelay=true, sending immediately to ${phoneNumber}`,
+                );
+            }
 
             // Use template body as-is (no hardcoded header/footer)
             const fullMessage = message;
@@ -1484,10 +1504,23 @@ Terima kasih telah menggunakan layanan kami.
     //   dual + options.provider='baileys':  Baileys primary, Omnichat failover
     //   dual + lainnya:                     Omnichat primary, Baileys failover
     async sendNotification(phoneNumber, message, options = {}) {
+        if (!this.sock) {
+            try {
+                const whatsappModule = require('./whatsapp');
+                const s = whatsappModule.getSock && whatsappModule.getSock();
+                if (s) this.setSock(s);
+            } catch (e) {}
+        }
+
         const globalProvider = this.getProvider();
 
-        // OFF: always log and skip
-        if (globalProvider === "off") {
+        // Build provider priority list
+        let providers = [];
+        if (options.forceProvider === 'baileys') {
+            providers = ['baileys'];
+        } else if (options.forceProvider === 'omnichat') {
+            providers = ['omnichat'];
+        } else if (globalProvider === "off") {
             logger.info(
                 `[WhatsApp] Notifications DISABLED (off). Skipping ${phoneNumber}`,
             );
@@ -1515,11 +1548,7 @@ Terima kasih telah menggunakan layanan kami.
                 skipped: true,
                 reason: "WhatsApp provider is disabled",
             };
-        }
-
-        // Build provider priority list
-        let providers = [];
-        if (globalProvider === "omnichat") {
+        } else if (globalProvider === "omnichat") {
             providers = ["omnichat"];
         } else if (globalProvider === "baileys") {
             providers = ["baileys"];
@@ -3827,23 +3856,190 @@ Hubungi ${getSetting("support_phone", "0812-3456-7890")} jika ada kendala.
         }
     }
 
-    lastQR = null;
-    qrCodeData = null;
-
-    setSock(sock) {
-        this.sock = sock;
-        this.sock.ev.on("connection.update", (update) => {
-            const { qr } = update;
-            if (qr) {
-                this.lastQR = qr;
-                this.qrCodeData = qr;
+    /**
+     * Send WhatsApp notification to Mitra when settlement payout is processed
+     * @param {number|string} settlementId - ID from mitra_settlements
+     * @returns {Promise<object>} Result
+     */
+    async sendMitraSettlementNotification(settlementId) {
+        try {
+            if (!settlementId) {
+                return { success: false, error: "settlement_id is required" };
             }
-        });
-    }
 
-    async requestPairingCode(phoneNumber) {
-        if (!this.sock) throw new Error("Socket not initialized");
-        return await this.sock.requestPairingCode(phoneNumber);
+            // 1. Fetch settlement header & mitra details
+            const settlementRes = await query(
+                `SELECT
+                   ms.id,
+                   ms.settlement_number,
+                   ms.mitra_id,
+                   m.name as mitra_name,
+                   m.phone as mitra_phone,
+                   TO_CHAR(ms.period_start, 'YYYY-MM-DD') as period_start,
+                   TO_CHAR(ms.period_end, 'YYYY-MM-DD') as period_end,
+                   TO_CHAR(ms.settlement_date, 'YYYY-MM-DD') as settlement_date,
+                   ms.amount,
+                   ms.notes
+                 FROM mitra_settlements ms
+                 JOIN mitra m ON m.id = ms.mitra_id
+                 WHERE ms.id = $1`,
+                [settlementId]
+            );
+
+            if (settlementRes.rows.length === 0) {
+                logger.warn(`[MitraSettlement] Settlement ID ${settlementId} not found`);
+                return { success: false, error: "Settlement record not found" };
+            }
+
+            const settlement = settlementRes.rows[0];
+            if (!settlement.mitra_phone) {
+                logger.warn(`[MitraSettlement] Mitra ${settlement.mitra_name} does not have phone number`);
+                return { success: false, error: "Mitra phone number not configured" };
+            }
+
+            // 2. Fetch linked payment items
+            const itemsRes = await query(
+                `SELECT
+                   msi.id,
+                   msi.payment_id,
+                   msi.amount as item_amount,
+                   p.payment_date,
+                   p.payment_method,
+                   i.invoice_number,
+                   c.name as customer_name
+                 FROM mitra_settlement_items msi
+                 JOIN payments p ON p.id = msi.payment_id
+                 JOIN invoices i ON i.id = p.invoice_id
+                 JOIN customers c ON c.id = i.customer_id
+                 WHERE msi.settlement_id = $1
+                 ORDER BY p.payment_date ASC, msi.id ASC`,
+                [settlementId]
+            );
+
+            const items = itemsRes.rows;
+
+            // 3. Resolve Bank Labels
+            const rawPS = getSetting("payment_settings");
+            let paymentSettings = {};
+            try {
+                paymentSettings = typeof rawPS === "string" ? JSON.parse(rawPS) : (rawPS || {});
+            } catch (e) {}
+            const bankAccounts = paymentSettings.bank_accounts || [];
+            const ewallets = paymentSettings.ewallets || [];
+
+            const resolveBankLabel = (method) => {
+                if (!method) return "pusat";
+                const m = String(method).toLowerCase().trim();
+                if (m === "cash" || m === "tunai") return "Tunai";
+                if (m.startsWith("autopay")) return "Autopay";
+                if (m.startsWith("tripay") || m === "qris") return "QRIS / Tripay";
+                if (m.includes("ocbc")) return "bank ocbc";
+
+                if (method.startsWith("bank_")) {
+                    const id = method.replace("bank_", "");
+                    const acc = bankAccounts.find((b) => String(b.id) === String(id));
+                    if (acc && acc.bankName) {
+                        return `bank ${acc.bankName.replace(/^bank\s+/i, "").toLowerCase()}`;
+                    }
+                }
+                if (method.startsWith("ewallet_")) {
+                    const id = method.replace("ewallet_", "");
+                    const w = ewallets.find((e) => String(e.id) === String(id));
+                    if (w && w.provider) {
+                        return w.provider;
+                    }
+                }
+
+                const matchedBank = bankAccounts.find(
+                    (b) => b.bankName && m.includes(b.bankName.toLowerCase())
+                );
+                if (matchedBank && matchedBank.bankName) {
+                    return `bank ${matchedBank.bankName.replace(/^bank\s+/i, "").toLowerCase()}`;
+                }
+
+                const matchedWallet = ewallets.find(
+                    (w) => w.provider && m.includes(w.provider.toLowerCase())
+                );
+                if (matchedWallet && matchedWallet.provider) {
+                    return matchedWallet.provider;
+                }
+
+                return method;
+            };
+
+            const monthsIndo = [
+                "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+                "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+            ];
+
+            const formatIndoDayMonth = (d) => {
+                if (!d) return "-";
+                const dateObj = new Date(d);
+                const day = dateObj.getDate();
+                const month = monthsIndo[dateObj.getMonth()] || "";
+                return `${day} ${month}`;
+            };
+
+            const formatIndoFullDate = (dStr) => {
+                if (!dStr) return "-";
+                const [year, monthStr, dayStr] = String(dStr).slice(0, 10).split("-");
+                if (!year || !monthStr || !dayStr) return dStr;
+                const mIdx = parseInt(monthStr, 10) - 1;
+                return `${parseInt(dayStr, 10)} ${monthsIndo[mIdx] || monthStr} ${year}`;
+            };
+
+            const formatRp = (num) => {
+                return "Rp " + Number(num || 0).toLocaleString("id-ID");
+            };
+
+            const itemLines = items.map((it, idx) => {
+                const cust = (it.customer_name || "Pelanggan").trim();
+                const dt = formatIndoDayMonth(it.payment_date);
+                const bnk = resolveBankLabel(it.payment_method);
+                const amt = formatRp(it.item_amount);
+                return `${idx + 1}. ${cust} ${dt} ${bnk} ${amt}`;
+            }).join("\n");
+
+            const totalBayarPusat = items.reduce((sum, it) => sum + Number(it.item_amount || 0), 0);
+            const transferPusat = Number(settlement.amount || 0);
+            const sisa = Math.max(0, totalBayarPusat - transferPusat);
+
+            const message = `*PROSES TRANSFER DANA REKONSILIASI*
+No: ${settlement.settlement_number}
+Mitra: ${settlement.mitra_name}
+Periode: ${formatIndoFullDate(settlement.period_start)} s/d ${formatIndoFullDate(settlement.period_end)}
+
+Rincian transfer dana rekonsiliasi:
+${itemLines || "- (Tidak ada rincian transaksi)"}
+
+Total bayar ke pusat: ${formatRp(totalBayarPusat)}
+Transfer pusat ke mitra: ${formatRp(transferPusat)}
+Sisa: ${formatRp(sisa)}
+
+Tanggal: ${formatIndoFullDate(settlement.settlement_date)}${settlement.notes ? `\nCatatan: ${settlement.notes}` : ""}
+
+_Pesan ini dikirim otomatis via WhatsApp Kilusi Bill._`;
+
+            logger.info(`[MitraSettlement] Sending settlement notification to Mitra ${settlement.mitra_name} (${settlement.mitra_phone})`);
+
+            const result = await this.sendNotification(settlement.mitra_phone, message, {
+                forceProvider: "baileys",
+                skipDelay: true,
+                notification_type: "mitra_settlement",
+                customer_name: settlement.mitra_name
+            });
+
+            return {
+                success: result.success,
+                message_sent: message,
+                phone: settlement.mitra_phone,
+                provider: result.provider || "baileys",
+                result
+            };
+        } catch (error) {
+            logger.error(`[MitraSettlement] Error in sendMitraSettlementNotification:`, error);
+            return { success: false, error: error.message };
+        }
     }
 }
 

@@ -36,7 +36,10 @@ import {
   RotateCcw,
   Building2,
   Check,
-  Clock
+  Clock,
+  Eye,
+  MessageSquare,
+  Search
 } from 'lucide-react'
 import { adminApi, endpoints, handleApiError } from '@/lib/api-clients'
 
@@ -97,10 +100,16 @@ interface MitraSettlementTransaction {
   payment_id: number
   invoice_number: string
   customer_name: string
+  customer_phone?: string | null
+  region_name?: string | null
   amount: number
   payment_date: string
   payment_method: string
   destination_name: string
+  destination_bank?: string
+  destination_account?: string
+  destination_owner?: string
+  is_transfer_to_pusat?: boolean
   classification: 'company_account' | 'own_mitra_account' | 'cash'
   is_settled: boolean
   settlement_number: string | null
@@ -200,6 +209,9 @@ export default function AccountingPage() {
   const [showRollbackDialog, setShowRollbackDialog] = useState(false)
   const [settlementToRollback, setSettlementToRollback] = useState<MitraSettlementItem | null>(null)
   const [rollbackSubmitting, setRollbackSubmitting] = useState(false)
+  const [selectedPusatModalMitra, setSelectedPusatModalMitra] = useState<MitraSummary | null>(null)
+  const [pusatModalSearch, setPusatModalSearch] = useState('')
+  const [notifyingWaId, setNotifyingWaId] = useState<number | null>(null)
   const startDateRef = useRef<HTMLInputElement>(null)
   const endDateRef = useRef<HTMLInputElement>(null)
   const [filterStartDate, setFilterStartDate] = useState(() => {
@@ -264,6 +276,18 @@ export default function AccountingPage() {
       day: 'numeric',
       month: '2-digit',
       year: 'numeric'
+    })
+  }
+
+  const formatDateTime = (dateString?: string | null) => {
+    if (!dateString) return '-'
+    const date = new Date(dateString)
+    return date.toLocaleDateString('id-ID', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
     })
   }
 
@@ -575,6 +599,24 @@ export default function AccountingPage() {
       alert(apiErr.response?.data?.message || (error instanceof Error ? error.message : 'Gagal membatalkan penyetoran'))
     } finally {
       setRollbackSubmitting(false)
+    }
+  }
+
+  const handleNotifyWhatsApp = async (item: MitraSettlementItem) => {
+    try {
+      setNotifyingWaId(item.id)
+      const res = await adminApi.post(`/api/v1/accounting/mitra-settlements/${item.id}/notify-whatsapp`)
+      if (res.data?.success) {
+        alert(res.data.message || 'Notifikasi WhatsApp berhasil dikirim ke Mitra')
+      } else {
+        alert(res.data?.message || 'Gagal mengirim notifikasi WhatsApp')
+      }
+    } catch (error: unknown) {
+      console.error('Error notifying mitra via WA:', error)
+      const apiErr = error as { response?: { data?: { message?: string } } }
+      alert(apiErr.response?.data?.message || (error instanceof Error ? error.message : 'Gagal mengirim notifikasi WhatsApp ke mitra'))
+    } finally {
+      setNotifyingWaId(null)
     }
   }
 
@@ -1736,9 +1778,26 @@ export default function AccountingPage() {
                             <span className="text-muted-foreground">Masuk Rekening Mitra:</span>
                             <span className="font-semibold text-emerald-600">{formatCurrency(m.received_in_mitra_account)}</span>
                           </div>
-                          <div className="flex justify-between p-2 rounded bg-blue-50/60 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900">
-                            <span className="font-medium text-blue-900 dark:text-blue-300">Masuk Rekening Pusat (Awal):</span>
-                            <span className="font-bold text-blue-700 dark:text-blue-400">{formatCurrency(m.received_in_company_account)}</span>
+                          <div className="p-2 rounded bg-blue-50/60 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900 space-y-1.5">
+                            <div className="flex justify-between items-center">
+                              <span className="font-medium text-blue-900 dark:text-blue-300">Masuk Rekening Pusat:</span>
+                              <span className="font-bold text-blue-700 dark:text-blue-400">{formatCurrency(m.received_in_company_account)}</span>
+                            </div>
+                            <div className="flex justify-between items-center text-[11px] pt-1 border-t border-blue-200/60 dark:border-blue-900/60">
+                              <span className="text-blue-800 dark:text-blue-300 font-mono">
+                                {(m.transactions || []).filter(tx => tx.classification === 'company_account').length} transfer
+                              </span>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setSelectedPusatModalMitra(m)}
+                                className="h-6 px-2 text-[11px] text-blue-700 hover:text-blue-800 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/50 flex items-center gap-1 font-medium"
+                              >
+                                <Eye className="h-3 w-3" />
+                                Lihat Rincian
+                              </Button>
+                            </div>
                           </div>
                           {m.settled_amount > 0 && (
                             <div className="flex justify-between p-2 rounded bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900">
@@ -1896,19 +1955,36 @@ export default function AccountingPage() {
                                 </td>
                                 <td className="p-2.5 text-muted-foreground">{item.created_by_name || '-'}</td>
                                 <td className="p-2.5 text-center">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => {
-                                      setSettlementToRollback(item)
-                                      setShowRollbackDialog(true)
-                                    }}
-                                    className="h-7 px-2 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/50"
-                                    title="Batalkan penyetoran dan hapus transaksi akunting terkait"
-                                  >
-                                    <RotateCcw className="h-3.5 w-3.5 mr-1" />
-                                    Batalkan
-                                  </Button>
+                                  <div className="flex items-center justify-center gap-1">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => handleNotifyWhatsApp(item)}
+                                      disabled={notifyingWaId === item.id}
+                                      className="h-7 px-2 text-emerald-600 border-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 text-[11px]"
+                                      title="Kirim rincian transfer penyetoran ini ke WhatsApp Mitra via Baileys"
+                                    >
+                                      {notifyingWaId === item.id ? (
+                                        <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                      ) : (
+                                        <MessageSquare className="h-3 w-3 mr-1" />
+                                      )}
+                                      Kirim WA
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => {
+                                        setSettlementToRollback(item)
+                                        setShowRollbackDialog(true)
+                                      }}
+                                      className="h-7 px-2 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/50"
+                                      title="Batalkan penyetoran dan hapus transaksi akunting terkait"
+                                    >
+                                      <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                                      Batalkan
+                                    </Button>
+                                  </div>
                                 </td>
                               </tr>
                             ))}
@@ -2666,6 +2742,214 @@ export default function AccountingPage() {
               ) : (
                 'Ya, Batalkan Penyetoran'
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal Rincian Pelanggan Transfer ke Pusat */}
+      <Dialog
+        open={Boolean(selectedPusatModalMitra)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedPusatModalMitra(null)
+            setPusatModalSearch('')
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[850px] max-h-[85vh] flex flex-col p-0">
+          <DialogHeader className="p-6 pb-3 border-b">
+            <div className="flex items-center justify-between">
+              <div>
+                <DialogTitle className="flex items-center gap-2 text-lg">
+                  <Building2 className="h-5 w-5 text-blue-600" />
+                  Rincian Pelanggan Transfer ke Pusat &mdash; Mitra {selectedPusatModalMitra?.mitra_name}
+                </DialogTitle>
+                <DialogDescription className="mt-1 text-xs">
+                  Daftar transaksi pembayaran pelanggan mitra yang masuk ke rekening Pusat periode{' '}
+                  <span className="font-semibold text-foreground">
+                    {formatDate(mitraSettlementData?.period?.start_date)} s/d {formatDate(mitraSettlementData?.period?.end_date)}
+                  </span>
+                </DialogDescription>
+              </div>
+            </div>
+
+            {/* Quick Summary Cards */}
+            {selectedPusatModalMitra && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-3">
+                <div className="bg-muted/40 p-2.5 rounded-lg border text-xs">
+                  <span className="text-muted-foreground block text-[11px]">Total Transfer</span>
+                  <span className="font-bold text-blue-700 dark:text-blue-300 text-sm">
+                    {formatCurrency(selectedPusatModalMitra.received_in_company_account)}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground block mt-0.5">
+                    {(selectedPusatModalMitra.transactions || []).filter(tx => tx.classification === 'company_account').length} Transaksi
+                  </span>
+                </div>
+                <div className="bg-amber-50/60 dark:bg-amber-950/30 p-2.5 rounded-lg border border-amber-200 dark:border-amber-900 text-xs">
+                  <span className="text-amber-800 dark:text-amber-400 block text-[11px]">Belum Disetor</span>
+                  <span className="font-bold text-amber-700 dark:text-amber-300 text-sm">
+                    {formatCurrency(selectedPusatModalMitra.remaining_debt)}
+                  </span>
+                  <span className="text-[10px] text-amber-700/80 dark:text-amber-400/80 block mt-0.5">
+                    {(selectedPusatModalMitra.transactions || []).filter(tx => tx.classification === 'company_account' && !tx.is_settled).length} Transaksi
+                  </span>
+                </div>
+                <div className="bg-emerald-50/60 dark:bg-emerald-950/30 p-2.5 rounded-lg border border-emerald-200 dark:border-emerald-900 text-xs">
+                  <span className="text-emerald-800 dark:text-emerald-400 block text-[11px]">Sudah Disetor</span>
+                  <span className="font-bold text-emerald-700 dark:text-emerald-300 text-sm">
+                    {formatCurrency(selectedPusatModalMitra.settled_amount)}
+                  </span>
+                  <span className="text-[10px] text-emerald-700/80 dark:text-emerald-400/80 block mt-0.5">
+                    {(selectedPusatModalMitra.transactions || []).filter(tx => tx.classification === 'company_account' && tx.is_settled).length} Transaksi
+                  </span>
+                </div>
+                <div className="bg-muted/40 p-2.5 rounded-lg border text-xs flex flex-col justify-between">
+                  <span className="text-muted-foreground block text-[11px]">Status Rekonsiliasi</span>
+                  <div>
+                    {selectedPusatModalMitra.remaining_debt <= 0 && selectedPusatModalMitra.settled_amount > 0 ? (
+                      <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 text-[10px]">
+                        Lunas
+                      </Badge>
+                    ) : selectedPusatModalMitra.settled_amount > 0 ? (
+                      <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 text-[10px]">
+                        Sebagian Disetor
+                      </Badge>
+                    ) : selectedPusatModalMitra.remaining_debt > 0 ? (
+                      <Badge className="bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300 text-[10px]">
+                        Belum Disetor
+                      </Badge>
+                    ) : (
+                      <Badge variant="secondary" className="text-[10px]">Tidak Ada Hutang</Badge>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Search Input */}
+            <div className="pt-2">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  type="text"
+                  placeholder="Cari nama pelanggan, invoice, atau bank..."
+                  value={pusatModalSearch}
+                  onChange={(e) => setPusatModalSearch(e.target.value)}
+                  className="pl-8 h-8 text-xs"
+                />
+              </div>
+            </div>
+          </DialogHeader>
+
+          {/* Table Container */}
+          <div className="overflow-y-auto flex-1 p-6 pt-3">
+            {(() => {
+              const allPusatTxs = (selectedPusatModalMitra?.transactions || []).filter(
+                (tx) => tx.classification === 'company_account'
+              )
+              const q = pusatModalSearch.toLowerCase().trim()
+              const filteredTxs = !q
+                ? allPusatTxs
+                : allPusatTxs.filter(
+                    (tx) =>
+                      (tx.customer_name && tx.customer_name.toLowerCase().includes(q)) ||
+                      (tx.invoice_number && tx.invoice_number.toLowerCase().includes(q)) ||
+                      (tx.destination_bank && tx.destination_bank.toLowerCase().includes(q)) ||
+                      (tx.destination_name && tx.destination_name.toLowerCase().includes(q)) ||
+                      (tx.destination_account && tx.destination_account.toLowerCase().includes(q))
+                  )
+
+              if (filteredTxs.length === 0) {
+                return (
+                  <div className="text-center py-10 text-muted-foreground text-xs">
+                    {allPusatTxs.length === 0
+                      ? 'Tidak ada transaksi pelanggan yang mentransfer ke rekening Pusat pada periode ini.'
+                      : 'Tidak ada transaksi yang cocok dengan kata kunci pencarian.'}
+                  </div>
+                )
+              }
+
+              return (
+                <div className="border rounded-lg overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/50 border-b">
+                      <tr>
+                        <th className="p-2.5 text-center font-medium w-10">No</th>
+                        <th className="p-2.5 text-left font-medium">Pelanggan</th>
+                        <th className="p-2.5 text-left font-medium">Tanggal Bayar</th>
+                        <th className="p-2.5 text-left font-medium">Bank Tujuan Transfer</th>
+                        <th className="p-2.5 text-left font-medium">No. Invoice</th>
+                        <th className="p-2.5 text-right font-medium">Jumlah</th>
+                        <th className="p-2.5 text-center font-medium">Status Setor</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredTxs.map((tx, idx) => (
+                        <tr key={tx.payment_id || idx} className="border-b last:border-b-0 hover:bg-muted/30">
+                          <td className="p-2.5 text-center text-muted-foreground font-mono">{idx + 1}</td>
+                          <td className="p-2.5">
+                            <div className="font-semibold text-foreground">{tx.customer_name}</div>
+                            {tx.region_name && tx.region_name !== '-' && (
+                              <div className="text-[10px] text-muted-foreground">{tx.region_name}</div>
+                            )}
+                          </td>
+                          <td className="p-2.5 text-muted-foreground whitespace-nowrap">
+                            {formatDateTime(tx.payment_date)}
+                          </td>
+                          <td className="p-2.5">
+                            <div className="font-medium text-foreground">
+                              {tx.destination_bank || tx.destination_name || tx.payment_method}
+                            </div>
+                            {tx.destination_account && tx.destination_account !== '-' && (
+                              <div className="text-[10px] font-mono text-muted-foreground">
+                                {tx.destination_account} {tx.destination_owner && tx.destination_owner !== '-' ? `(${tx.destination_owner})` : ''}
+                              </div>
+                            )}
+                          </td>
+                          <td className="p-2.5 font-mono text-muted-foreground">{tx.invoice_number}</td>
+                          <td className="p-2.5 text-right font-bold text-foreground">
+                            {formatCurrency(tx.amount)}
+                          </td>
+                          <td className="p-2.5 text-center whitespace-nowrap">
+                            {tx.is_settled ? (
+                              <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 text-[10px] border-emerald-300" title={tx.settlement_number || undefined}>
+                                Disetor {tx.settlement_number ? `(${tx.settlement_number})` : ''}
+                              </Badge>
+                            ) : (
+                              <Badge className="bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300 text-[10px] border-red-300">
+                                Belum Disetor
+                              </Badge>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            })()}
+          </div>
+
+          <DialogFooter className="p-4 border-t bg-muted/20 flex sm:justify-between items-center gap-2">
+            <div className="text-xs text-muted-foreground">
+              {(() => {
+                const count = (selectedPusatModalMitra?.transactions || []).filter(
+                  (tx) => tx.classification === 'company_account'
+                ).length
+                return `Total ${count} transaksi transfer ke Pusat`
+              })()}
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setSelectedPusatModalMitra(null)
+                setPusatModalSearch('')
+              }}
+            >
+              Tutup
             </Button>
           </DialogFooter>
         </DialogContent>

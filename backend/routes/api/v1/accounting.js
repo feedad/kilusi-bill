@@ -1134,22 +1134,74 @@ router.get('/report/mitra-settlement', async (req, res) => {
     const ewallets = paymentSettings.ewallets || [];
 
     const getDestinationCategory = (method) => {
-      if (!method) return { type: 'company', name: 'Unknown (Pusat)' };
+      if (!method) {
+        return {
+          type: 'company',
+          name: 'Unknown (Pusat)',
+          bank_name: 'Pusat',
+          account_number: '-',
+          account_name: 'Pusat',
+          is_transfer_to_pusat: true
+        };
+      }
       const m = String(method).toLowerCase().trim();
-      if (m === 'cash' || m === 'tunai') return { type: 'cash', name: 'Kas Tunai' };
-      if (m.startsWith('autopay')) return { type: 'company', name: 'Autopay (Pusat)' };
-      if (m.startsWith('tripay') || m === 'qris') return { type: 'company', name: 'QRIS / Tripay (Pusat)' };
-      if (m.includes('ocbc')) return { type: 'company', name: 'OCBC (Perusahaan)' };
+      if (m === 'cash' || m === 'tunai') {
+        return {
+          type: 'cash',
+          name: 'Kas Tunai',
+          bank_name: 'Kas Tunai',
+          account_number: '-',
+          account_name: 'Kasir / Petugas',
+          is_transfer_to_pusat: false
+        };
+      }
+      if (m.startsWith('autopay')) {
+        return {
+          type: 'company',
+          name: 'Autopay (Pusat)',
+          bank_name: 'Autopay',
+          account_number: '-',
+          account_name: 'Autopay Kilusi',
+          is_transfer_to_pusat: true
+        };
+      }
+      if (m.startsWith('tripay') || m === 'qris') {
+        return {
+          type: 'company',
+          name: 'QRIS / Tripay (Pusat)',
+          bank_name: 'Tripay / QRIS',
+          account_number: '-',
+          account_name: 'Tripay Kilusi',
+          is_transfer_to_pusat: true
+        };
+      }
+      if (m.includes('ocbc')) {
+        return {
+          type: 'company',
+          name: 'OCBC (Perusahaan)',
+          bank_name: 'Bank OCBC',
+          account_number: '-',
+          account_name: 'PT Kilusi',
+          is_transfer_to_pusat: true
+        };
+      }
 
       if (method.startsWith('bank_')) {
         const id = method.replace('bank_', '');
         const acc = bankAccounts.find(b => String(b.id) === String(id));
         if (acc) {
           const mIds = Array.isArray(acc.mitra_ids) ? acc.mitra_ids.map(String) : (acc.mitra_id ? [String(acc.mitra_id)] : []);
-          if (acc.is_company === true || mIds.includes(String(pusatMitraId))) {
-            return { type: 'company', name: `${acc.bankName} (Perusahaan / Pusat)` };
-          }
-          return { type: 'mitra', mitra_ids: mIds, name: `${acc.bankName} (${acc.accountNumber})` };
+          const isCompany = acc.is_company === true || mIds.includes(String(pusatMitraId));
+          const cleanBankName = acc.bankName ? `Bank ${acc.bankName.replace(/^bank\s+/i, '').toUpperCase()}` : 'Bank';
+          return {
+            type: isCompany ? 'company' : 'mitra',
+            mitra_ids: mIds,
+            name: isCompany ? `${acc.bankName} (Perusahaan / Pusat)` : `${acc.bankName} (${acc.accountNumber})`,
+            bank_name: cleanBankName,
+            account_number: acc.accountNumber || '-',
+            account_name: acc.accountName || '-',
+            is_transfer_to_pusat: isCompany
+          };
         }
       }
 
@@ -1158,23 +1210,59 @@ router.get('/report/mitra-settlement', async (req, res) => {
         const w = ewallets.find(e => String(e.id) === String(id));
         if (w) {
           const mIds = Array.isArray(w.mitra_ids) ? w.mitra_ids.map(String) : (w.mitra_id ? [String(w.mitra_id)] : []);
-          if (w.is_company === true || mIds.includes(String(pusatMitraId))) {
-            return { type: 'company', name: `${w.provider} (Perusahaan / Pusat)` };
-          }
-          return { type: 'mitra', mitra_ids: mIds, name: `${w.provider} (${w.phoneNumber})` };
+          const isCompany = w.is_company === true || mIds.includes(String(pusatMitraId));
+          const cleanProvider = w.provider || 'E-Wallet';
+          return {
+            type: isCompany ? 'company' : 'mitra',
+            mitra_ids: mIds,
+            name: isCompany ? `${w.provider} (Perusahaan / Pusat)` : `${w.provider} (${w.phoneNumber})`,
+            bank_name: cleanProvider,
+            account_number: w.phoneNumber || '-',
+            account_name: w.accountName || '-',
+            is_transfer_to_pusat: isCompany
+          };
         }
       }
 
       const matchedBank = bankAccounts.find(b => b.bankName && m.includes(b.bankName.toLowerCase()));
       if (matchedBank) {
         const mIds = Array.isArray(matchedBank.mitra_ids) ? matchedBank.mitra_ids.map(String) : (matchedBank.mitra_id ? [String(matchedBank.mitra_id)] : []);
-        if (matchedBank.is_company === true || mIds.includes(String(pusatMitraId))) {
-          return { type: 'company', name: `${matchedBank.bankName} (Perusahaan / Pusat)` };
-        }
-        return { type: 'mitra', mitra_ids: mIds, name: `${matchedBank.bankName} (${matchedBank.accountNumber})` };
+        const isCompany = matchedBank.is_company === true || mIds.includes(String(pusatMitraId));
+        const cleanBankName = matchedBank.bankName ? `Bank ${matchedBank.bankName.replace(/^bank\s+/i, '').toUpperCase()}` : 'Bank';
+        return {
+          type: isCompany ? 'company' : 'mitra',
+          mitra_ids: mIds,
+          name: isCompany ? `${matchedBank.bankName} (Perusahaan / Pusat)` : `${matchedBank.bankName} (${matchedBank.accountNumber})`,
+          bank_name: cleanBankName,
+          account_number: matchedBank.accountNumber || '-',
+          account_name: matchedBank.accountName || '-',
+          is_transfer_to_pusat: isCompany
+        };
       }
 
-      return { type: 'company', name: `${method} (Pusat)` };
+      const matchedWallet = ewallets.find(w => w.provider && m.includes(w.provider.toLowerCase()));
+      if (matchedWallet) {
+        const mIds = Array.isArray(matchedWallet.mitra_ids) ? matchedWallet.mitra_ids.map(String) : (matchedWallet.mitra_id ? [String(matchedWallet.mitra_id)] : []);
+        const isCompany = matchedWallet.is_company === true || mIds.includes(String(pusatMitraId));
+        return {
+          type: isCompany ? 'company' : 'mitra',
+          mitra_ids: mIds,
+          name: isCompany ? `${matchedWallet.provider} (Perusahaan / Pusat)` : `${matchedWallet.provider} (${matchedWallet.phoneNumber})`,
+          bank_name: matchedWallet.provider || 'E-Wallet',
+          account_number: matchedWallet.phoneNumber || '-',
+          account_name: matchedWallet.accountName || '-',
+          is_transfer_to_pusat: isCompany
+        };
+      }
+
+      return {
+        type: 'company',
+        name: `${method} (Pusat)`,
+        bank_name: method,
+        account_number: '-',
+        account_name: 'Pusat',
+        is_transfer_to_pusat: true
+      };
     };
 
     // 4. Initialize summaries for active non-Pusat mitras
@@ -1310,6 +1398,10 @@ router.get('/report/mitra-settlement', async (req, res) => {
         payment_date: p.payment_date,
         payment_method: p.payment_method,
         destination_name: dest.name,
+        destination_bank: dest.bank_name || dest.name,
+        destination_account: dest.account_number || '-',
+        destination_owner: dest.account_name || '-',
+        is_transfer_to_pusat: classification === 'company_account',
         classification,
         is_settled: isSettled,
         settlement_id: p.settlement_id || null,
@@ -1597,6 +1689,19 @@ router.post('/mitra-settlement/process', async (req, res) => {
         linked_items_count: linkedCount
       };
     });
+    // Send WhatsApp Notification to Mitra via Baileys asynchronously
+    try {
+      const whatsappNotifications = require('../../../config/whatsapp-notifications');
+      whatsappNotifications.sendMitraSettlementNotification(settlementResult.id)
+        .then(waRes => {
+          logger.info(`[MitraSettlement] WA notification result for ${settlementResult.settlement_number}:`, waRes?.success ? 'success' : waRes?.error);
+        })
+        .catch(err => {
+          logger.warn('[MitraSettlement] WA notification error:', err.message);
+        });
+    } catch (waErr) {
+      logger.warn('[MitraSettlement] Failed to dispatch WA notification:', waErr.message);
+    }
 
     res.json({
       success: true,
@@ -1711,6 +1816,32 @@ router.delete('/mitra-settlement/:id', async (req, res) => {
     }
     logger.error('Error rolling back mitra settlement:', error);
     res.status(500).json({ success: false, message: 'Gagal membatalkan penyetoran mitra: ' + error.message });
+  }
+});
+
+// POST /api/v1/accounting/mitra-settlements/:id/notify-whatsapp - Manually resend WA notification to Mitra
+router.post('/mitra-settlements/:id/notify-whatsapp', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const whatsappNotifications = require('../../../config/whatsapp-notifications');
+    const result = await whatsappNotifications.sendMitraSettlementNotification(id);
+
+    if (result && result.success) {
+      return res.json({
+        success: true,
+        message: 'Notifikasi rekonsiliasi berhasil dikirim ke WhatsApp Mitra',
+        data: result
+      });
+    }
+
+    return res.status(400).json({
+      success: false,
+      message: 'Gagal mengirim notifikasi WhatsApp: ' + (result?.error || 'Unknown error'),
+      data: result
+    });
+  } catch (error) {
+    logger.error('Error notifying mitra settlement via WA:', error);
+    res.status(500).json({ success: false, message: 'Gagal memproses pengiriman notifikasi WA: ' + error.message });
   }
 });
 
