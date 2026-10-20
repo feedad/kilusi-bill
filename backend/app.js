@@ -546,6 +546,11 @@ app.use('/api/v1', apiV1Router);
 // Register OLT routes (New Separation)
 const oltRouter = require('./routes/api/v1/olts');
 app.use('/api/v1/olts', oltRouter);
+// Native Autopay mobile inbound aliases (supports /api/mobile/inbound and /mobile/inbound)
+const autopayRouter = require('./routes/api/v1/autopay');
+app.use('/api/mobile', autopayRouter);
+app.use('/mobile', autopayRouter);
+
 
 // QRIS branded payment page (public, for WhatsApp buttons + portal)
 app.get('/pay/:invoice_number', async (req, res) => {

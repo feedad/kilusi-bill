@@ -39,6 +39,7 @@ import {
   PlusCircle,
   CheckCircle,
   AlertTriangle,
+  Zap,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -214,6 +215,12 @@ const navigationGroups: NavGroup[] = [
         name: 'Tagihan',
         href: '/admin/billing',
         icon: CreditCard,
+        roles: ['admin'],
+      },
+      {
+        name: 'Autopay',
+        href: '/admin/autopay',
+        icon: Zap,
         roles: ['admin'],
       },
       {

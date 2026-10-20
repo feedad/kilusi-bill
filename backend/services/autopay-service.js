@@ -44,50 +44,27 @@ class AutopayService {
   }
 
   /**
-   * Push invoice to Autopay for monitoring
+   * Push invoice to Autopay for monitoring (Native: updates local DB metadata)
    * @param {object} invoice - { id, invoice_number, amount, customer_name, due_date }
    */
   async pushInvoice(invoice) {
     if (!this.isEnabled()) {
-      logger.info('[Autopay] Skipped - autopay is disabled');
       return null;
     }
 
     try {
-      const client = this.getClient();
-      
-      // Use amount_with_code if available, otherwise base amount
       const amount = invoice.amount_with_code || invoice.final_amount || invoice.amount || 0;
       const uniqueCode = invoice.unique_code || 0;
-      
-      const payload = {
-        invoice_id: invoice.invoice_number,
-        amount: Math.round(amount),
-        customer_name: invoice.customer_name || 'Unknown',
-        expiry_date: invoice.due_date ? new Date(invoice.due_date).toISOString() : new Date(Date.now() + 30*86400000).toISOString(),
-        metadata: {
-          invoice_db_id: invoice.id,
-          unique_code: uniqueCode,
-          base_amount: invoice.final_amount || invoice.amount
-        }
-      };
 
-      logger.info(`[Autopay] Pushing invoice ${invoice.invoice_number} (amount: ${Math.round(amount)}, code: ${uniqueCode})`);
-      
-      const response = await client.post('/api/v1/invoices', payload);
-      
-      // Store autopay reference in invoices table
       await query(
         `UPDATE invoices SET autopay_amount = $1, autopay_unique_code = $2, updated_at = NOW() WHERE id = $3`,
         [Math.round(amount), uniqueCode, invoice.id]
       );
-      
-      logger.info(`[Autopay] Invoice ${invoice.invoice_number} pushed successfully`);
-      
-      return response.data;
+
+      return { success: true, native: true };
     } catch (error) {
-      logger.error(`[Autopay] Failed to push invoice ${invoice.invoice_number}:`, error.message);
-      throw error;
+      logger.error(`[Autopay] Failed to record autopay metadata for invoice ${invoice.invoice_number}:`, error.message);
+      return null;
     }
   }
 
@@ -113,80 +90,18 @@ class AutopayService {
 
   /**
    * Notify autopay gateway that an invoice has been paid outside autopay.
-   * Called after manual payment, Tripay webhook, or other non-autopay methods.
-   * @param {object} invoice - { invoice_number, amount, customer_name }
+   * (Native: invoices are checked live in DB, zero HTTP sync needed)
    */
   async notifyAutopayInvoicePaid(invoice) {
-    if (!this.isEnabled()) return null;
-    try {
-      const client = this.getClient();
-      await client.post('/api/v1/invoices/paid', {
-        invoice_id: invoice.invoice_number,
-        amount: String(invoice.amount || 0),
-        customer_name: invoice.customer_name || '',
-        paid_at: new Date().toISOString(),
-      });
-      logger.info(`[Autopay] Invoice ${invoice.invoice_number} marked as paid in autopay`);
-      return true;
-    } catch (error) {
-      logger.error(`[Autopay] Failed to notify autopay for ${invoice.invoice_number}:`, error.message);
-      return null;
-    }
+    return { success: true, native: true };
   }
 
   /**
-   * Notify autopay gateway that an invoice has been rolled back (unpaid).
    * Called after payment rollback to restore invoice to autopay monitoring.
-   * @param {object} invoice - { invoice_number, customer_name, amount }
+   * (Native: invoices are checked live in DB, zero HTTP sync needed)
    */
   async notifyAutopayInvoiceUnpaid(invoiceData) {
-    if (!this.isEnabled()) return null;
-    try {
-      const result = await query(`
-        SELECT i.*, c.name as customer_name
-        FROM invoices i
-        JOIN customers c ON c.id = i.customer_id
-        WHERE (i.id = $1 OR i.invoice_number = $1)
-        LIMIT 1
-      `, [invoiceData.invoice_id || invoiceData.invoice_number]);
-
-      if (result.rows.length === 0) {
-        logger.warn(`[Autopay] Invoice not found for rollback notification`);
-        return null;
-      }
-
-      const inv = result.rows[0];
-
-      // Try dedicated unpaid endpoint first
-      try {
-        const client = this.getClient();
-        await client.post('/api/v1/invoices/unpaid', {
-          invoice_id: inv.invoice_number,
-          customer_name: inv.customer_name,
-          rolled_back_at: new Date().toISOString(),
-        });
-        logger.info(`[Autopay] Invoice ${inv.invoice_number} marked as unpaid via dedicated endpoint`);
-        return true;
-      } catch (dedicatedError) {
-        // Fallback: re-push invoice for monitoring
-        logger.warn(`[Autopay] Dedicated unpaid endpoint failed for ${inv.invoice_number}, falling back to re-push: ${dedicatedError.message}`);
-      }
-
-      logger.info(`[Autopay] Re-pushing invoice ${inv.invoice_number} to autopay after rollback (fallback)`);
-
-      return await this.pushInvoice({
-        id: inv.id,
-        invoice_number: inv.invoice_number,
-        amount: inv.amount,
-        amount_with_code: inv.amount_with_code,
-        unique_code: inv.unique_code,
-        customer_name: inv.customer_name,
-        due_date: inv.due_date,
-      });
-    } catch (error) {
-      logger.error(`[Autopay] Failed to notify autopay unpaid:`, error.message);
-      return null;
-    }
+    return { success: true, native: true };
   }
 
   /**
@@ -408,13 +323,18 @@ class AutopayService {
   }
 
   /**
-   * Test connection to Autopay
+   * Test connection to Autopay (Native database check)
    */
   async testConnection() {
     try {
-      const client = this.getClient();
-      const response = await client.get('/api/v1/invoices?invoice_id=TEST-CONNECTION');
-      return { connected: true, status: response.status };
+      const res = await query(`SELECT COUNT(*) as count FROM bank_mutations`);
+      const devRes = await query(`SELECT COUNT(*) as count FROM autopay_devices`);
+      return {
+        connected: true,
+        native: true,
+        mutations: parseInt(res.rows[0].count) || 0,
+        devices: parseInt(devRes.rows[0].count) || 0,
+      };
     } catch (error) {
       return { connected: false, error: error.message };
     }

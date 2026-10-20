@@ -171,8 +171,9 @@ router.use('/billing', jwtAuth, require('./billing'));
 router.use('/customer-billing', require('./customer-billing'));
 router.use('/regions', jwtAuth, require('./regions'));
 router.use('/mitra', jwtAuth, require('./mitra'));
-// Autopay callback is public (validated by API key), config endpoints use JWT internally
+// Autopay callback & inbound are public (validated by API key), config endpoints use JWT internally
 router.use('/autopay', require('./autopay'));
+router.use('/mobile', require('./autopay')); // Alias for /api/v1/mobile/inbound
 router.use('/chatbot', require('./chatbot'));
 router.use('/dashboard', require('./dashboard'));
 router.use('/settings', jwtAuth, require('./settings'));
