@@ -338,35 +338,35 @@ export default function AutopayPage() {
       {/* Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card
-          className={`cursor-pointer transition-colors hover:bg-muted/50 ${statusFilter === 'ALL' ? 'ring-2 ring-primary' : ''}`}
+          className="cursor-pointer transition-colors hover:bg-muted/50"
           onClick={() => {
             setStatusFilter('ALL')
             setPage(1)
           }}
         >
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Mutasi Hari Ini</CardTitle>
+            <CardTitle className="text-sm font-medium text-foreground">Mutasi Hari Ini</CardTitle>
             <Clock className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(stats.todayAmount)}</div>
+          <CardContent className="pt-0">
+            <div className="text-2xl font-bold text-foreground">{formatCurrency(stats.todayAmount)}</div>
             <p className="text-xs text-muted-foreground mt-1">{stats.todayCount} transaksi masuk</p>
           </CardContent>
         </Card>
 
         <Card
-          className={`cursor-pointer transition-colors hover:bg-muted/50 ${statusFilter === 'MATCHED' ? 'ring-2 ring-primary' : ''}`}
+          className="cursor-pointer transition-colors hover:bg-muted/50"
           onClick={() => {
             setStatusFilter('MATCHED')
             setPage(1)
           }}
         >
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Otomatis Lunas</CardTitle>
-            <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
+            <CardTitle className="text-sm font-medium text-foreground">Otomatis Lunas</CardTitle>
+            <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-600 dark:text-green-400">
+          <CardContent className="pt-0">
+            <div className="text-2xl font-bold text-foreground">
               {formatCurrency(stats.todayMatchedAmount)}
             </div>
             <p className="text-xs text-muted-foreground mt-1">{stats.todayMatchedCount} invoice terlunasi</p>
@@ -374,18 +374,18 @@ export default function AutopayPage() {
         </Card>
 
         <Card
-          className={`cursor-pointer transition-colors hover:bg-muted/50 ${statusFilter === 'PENDING' ? 'ring-2 ring-primary' : ''}`}
+          className="cursor-pointer transition-colors hover:bg-muted/50"
           onClick={() => {
             setStatusFilter('PENDING')
             setPage(1)
           }}
         >
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Menunggu Tindakan</CardTitle>
-            <AlertCircle className="h-4 w-4 text-amber-500" />
+            <CardTitle className="text-sm font-medium text-foreground">Menunggu Tindakan</CardTitle>
+            <AlertCircle className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-amber-500">
+          <CardContent className="pt-0">
+            <div className="text-2xl font-bold text-foreground">
               {formatCurrency(stats.pendingAmount)}
             </div>
             <p className="text-xs text-muted-foreground mt-1">{stats.pendingCount} mutasi belum cocok</p>
@@ -400,11 +400,11 @@ export default function AutopayPage() {
           }}
         >
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Perangkat Aktif</CardTitle>
+            <CardTitle className="text-sm font-medium text-foreground">Perangkat Aktif</CardTitle>
             <Smartphone className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.activeDevicesCount}</div>
+          <CardContent className="pt-0">
+            <div className="text-2xl font-bold text-foreground">{stats.activeDevicesCount}</div>
             <p className="text-xs text-muted-foreground mt-1">Perangkat penerima terhubung</p>
           </CardContent>
         </Card>
@@ -516,22 +516,22 @@ export default function AutopayPage() {
                       </td>
 
                       {/* Nominal */}
-                      <td className="py-3 px-4 whitespace-nowrap text-right font-semibold font-mono text-emerald-600 dark:text-emerald-400">
+                      <td className="py-3 px-4 whitespace-nowrap text-right font-mono text-xs font-semibold text-foreground">
                         {formatCurrency(m.amount)}
                       </td>
 
                       {/* Status */}
                       <td className="py-3 px-4 whitespace-nowrap text-center">
                         {m.status === 'MATCHED' ? (
-                          <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-300">
+                          <Badge variant="success">
                             MATCHED
                           </Badge>
                         ) : m.status === 'PENDING' ? (
-                          <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border-amber-300">
+                          <Badge variant="warning">
                             PENDING
                           </Badge>
                         ) : (
-                          <Badge variant="secondary" className="text-gray-500">
+                          <Badge variant="secondary">
                             {m.status}
                           </Badge>
                         )}
@@ -559,7 +559,7 @@ export default function AutopayPage() {
                               <Button
                                 size="sm"
                                 variant="default"
-                                className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-2.5"
+                                className="h-7 text-xs px-2.5"
                                 onClick={() => openManualMatch(m)}
                               >
                                 Cocokkan
@@ -641,7 +641,7 @@ export default function AutopayPage() {
         <DialogContent className="sm:max-w-2xl max-h-[90vh] flex flex-col p-0 overflow-hidden">
           <DialogHeader className="p-4 border-b">
             <DialogTitle className="text-lg font-semibold flex items-center gap-2">
-              <ShieldCheck className="h-5 w-5 text-emerald-500" />
+              <ShieldCheck className="h-5 w-5 text-muted-foreground" />
               Pencocokan Manual Tagihan
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground mt-0.5">
@@ -659,7 +659,7 @@ export default function AutopayPage() {
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-muted-foreground">Nominal Transfer:</span>
-                  <span className="text-base font-bold text-emerald-600 dark:text-emerald-400 font-mono">
+                  <span className="text-base font-bold text-foreground font-mono">
                     {formatCurrency(selectedMutation.amount)}
                   </span>
                 </div>
@@ -768,7 +768,6 @@ export default function AutopayPage() {
             <Button
               variant="default"
               size="sm"
-              className="bg-emerald-600 hover:bg-emerald-700 text-white"
               onClick={handleExecuteManualMatch}
               disabled={!selectedInvoiceId || matchingAction}
             >
