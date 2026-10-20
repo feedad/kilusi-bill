@@ -108,12 +108,12 @@ router.get('/mutations', jwtAuth, async (req, res) => {
 
     if (date_from) {
       params.push(date_from);
-      whereClauses.push(`m.created_at >= $${params.length}::timestamp`);
+      whereClauses.push(`m.created_at >= $${params.length}::timestamptz`);
     }
 
     if (date_to) {
       params.push(date_to + ' 23:59:59');
-      whereClauses.push(`m.created_at <= $${params.length}::timestamp`);
+      whereClauses.push(`m.created_at <= $${params.length}::timestamptz`);
     }
 
     const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
@@ -270,7 +270,7 @@ router.get('/unpaid-invoices', jwtAuth, async (req, res) => {
         c.name as customer_name,
         c.phone as customer_phone
       FROM invoices i
-      JOIN customers c ON c.id::text = i.customer_id::text
+      LEFT JOIN customers c ON c.id::text = i.customer_id::text
       ${whereClause}
       ORDER BY i.created_at DESC
       LIMIT $${params.length}

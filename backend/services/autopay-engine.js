@@ -247,14 +247,12 @@ async function autoMatchMutation(mutationId) {
   const candidatesRes = await query(
     `SELECT i.*, c.name as customer_name, c.phone as customer_phone
      FROM invoices i
-     JOIN customers c ON c.id::text = i.customer_id::text
+     LEFT JOIN customers c ON c.id::text = i.customer_id::text
      WHERE i.status IN ('unpaid', 'overdue', 'sent', 'draft', 'suspended')
        AND (
          (i.amount_with_code IS NOT NULL AND i.amount_with_code = $1)
          OR
          (i.unique_code IS NULL AND (ROUND(i.amount) = $1 OR ROUND(i.total_amount) = $1))
-         OR
-         (ROUND(i.amount) = $1 OR ROUND(i.total_amount) = $1)
        )
      ORDER BY
        CASE WHEN i.amount_with_code = $1 THEN 1 ELSE 2 END,
@@ -350,13 +348,14 @@ async function executePaymentMatch(mutation, invoice, options = {}) {
     // 4. Insert into payments table
     const payRes = await client.query(
       `INSERT INTO payments (
-         invoice_id, amount, payment_method, payment_date, notes, created_at
-       ) VALUES ($1, $2, $3, NOW(), $4, NOW())
+         invoice_id, amount, payment_method, payment_gateway, processed_by, payment_date, notes, created_at
+       ) VALUES ($1, $2, $3, 'autopay', $4, NOW(), $5, NOW())
        RETURNING id`,
       [
         currentInv.id,
         amount,
         paymentMethodDisplay,
+        options.isAuto ? 'System' : (verifiedBy ? 'Admin' : 'System'),
         `Autopay ${bankName} — Rp ${amount.toLocaleString('id-ID')}${options.isAuto ? ' (Auto-match)' : ' (Manual match)'}`,
       ]
     );
