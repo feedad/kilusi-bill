@@ -471,9 +471,9 @@ router.get('/operational-settings', asyncHandler(async (req, res) => {
 
     // Fetch admins
     const adminsRes = await query(`
-        SELECT id, username, name, email, phone, role
+        SELECT id, username, username as name, email, phone, role
         FROM users
-        WHERE is_active = true AND role IN ('admin', 'superadmin', 'administrator')
+        WHERE role IN ('admin', 'superadmin', 'administrator')
         ORDER BY role DESC, username ASC
     `);
 
