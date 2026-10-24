@@ -284,6 +284,21 @@ class KilusiOmnichatClient {
                 }
             }, `Send message to ${formattedPhone}`);
 
+            if (result?.success === false || result?.data?.success === false) {
+                const errMsg = result?.data?.error || result?.error || 'Omnichat message send failed';
+                try {
+                    await messageLogger.logFailedMessage(to, errMsg, {
+                        customer_id: options.customer_id,
+                        customer_name: options.customer_name,
+                        message_type: 'text',
+                        message_content: message,
+                        notification_type: options.notification_type,
+                        sent_via: options.sent_via || 'api'
+                    });
+                } catch (e) {}
+                throw new Error(errMsg);
+            }
+
             // Log message to database
             try {
                 // Extract message ID from various response formats
@@ -776,6 +791,24 @@ class KilusiOmnichatClient {
                     components: options.components || []
                 }
             }, `Send template message to ${formattedPhone}`);
+
+            if (result?.success === false || result?.data?.success === false) {
+                const errMsg = result?.data?.error || result?.error || 'Omnichat template send failed';
+                try {
+                    await messageLogger.logMessage({
+                        phone_number: to,
+                        message_type: 'template',
+                        message_content: options.preview_text || JSON.stringify(options),
+                        notification_type: options.notification_type || 'template',
+                        template_name: options.template_name,
+                        sent_via: 'api',
+                        omnichat_response: result,
+                        error_message: errMsg,
+                        status: 'failed'
+                    });
+                } catch (e) {}
+                throw new Error(errMsg);
+            }
 
             // Log message
             try {

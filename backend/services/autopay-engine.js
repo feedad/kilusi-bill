@@ -263,6 +263,51 @@ async function autoMatchMutation(mutationId) {
   const candidates = candidatesRes.rows;
 
   if (candidates.length === 0) {
+    // Check if an invoice with this amount_with_code was already paid recently (e.g. within 24h)
+    // and has not been linked to any bank_mutation yet
+    try {
+      const recentlyPaidRes = await query(
+        `SELECT i.*, c.name as customer_name
+         FROM invoices i
+         LEFT JOIN customers c ON c.id::text = i.customer_id::text
+         WHERE i.status = 'paid'
+           AND i.paid_at >= NOW() - INTERVAL '24 hours'
+           AND (
+             i.amount_with_code = $1
+             OR (i.unique_code IS NULL AND (ROUND(i.amount) = $1 OR ROUND(i.total_amount) = $1))
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM bank_mutations bm WHERE bm.matched_invoice_id = i.id
+           )
+         ORDER BY i.paid_at DESC
+         LIMIT 1`,
+        [amount]
+      );
+
+      if (recentlyPaidRes.rows.length === 1) {
+        const alreadyPaidInvoice = recentlyPaidRes.rows[0];
+        await query(
+          `UPDATE bank_mutations
+           SET status = 'MATCHED',
+               matched_invoice_id = $1,
+               matched_at = NOW()
+           WHERE id = $2`,
+          [alreadyPaidInvoice.id, mutation.id]
+        );
+        logger.info(
+          `[AutopayEngine] Mutation ${mutationId} (Rp ${amount}) automatically linked to recently paid invoice #${alreadyPaidInvoice.id} (${alreadyPaidInvoice.invoice_number})`
+        );
+        return {
+          matched: true,
+          already_paid: true,
+          invoice_id: alreadyPaidInvoice.id,
+          invoice_number: alreadyPaidInvoice.invoice_number,
+        };
+      }
+    } catch (recentErr) {
+      logger.warn('[AutopayEngine] Failed checking recently paid invoices:', recentErr.message);
+    }
+
     logger.info(`[AutopayEngine] No matching invoice found for mutation ${mutationId} (Rp ${amount}) - stays PENDING`);
     return { matched: false, reason: 'NO_MATCHING_INVOICE' };
   }

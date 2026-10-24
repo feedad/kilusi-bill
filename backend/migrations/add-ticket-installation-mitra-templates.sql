@@ -208,7 +208,7 @@ VALUES (
     'Konfirmasi Pembayaran',
     'billing',
     true,
-    '["invoiceNumber", "customerName", "serviceNumber", "packageName", "amount", "paymentMethod", "paymentDate", "dueDate", "isolirDate", "companyName"]'::jsonb,
+    '["invoiceNumber", "customerName", "serviceNumber", "packageName", "amount", "paymentMethod", "paymentDate", "isolirDate", "companyName"]'::jsonb,
     E'Pelanggan yang terhormat,\n\nPembayaran Anda telah kami terima dengan rincian:\n\nInvoice         : {{invoiceNumber}}\nPelanggan       : {{customerName}}\nNo. Layanan     : {{serviceNumber}}\nPaket Langganan : {{packageName}}\nJumlah          : Rp {{amount}}\nMetode          : {{paymentMethod}}\nTanggal         : {{paymentDate}}\n\nLayanan sudah aktif dan dapat digunakan sampai dengan {{isolirDate}}.\nJika internet belum terhubung, silakan matikan dan hidupkan kembali perangkat Modem/ONT.\n\nTerima kasih telah melakukan pembayaran tepat waktu.\n\nSalam,\n{{companyName}}.\n\n_Pesan ini dikirim otomatis oleh sistem._'
 )
 ON CONFLICT (template_id) DO UPDATE SET
