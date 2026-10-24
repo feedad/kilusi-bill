@@ -1,96 +1,166 @@
--- Migration: Add operational notification settings and WhatsApp templates
--- for Tickets, Installations, Yesterday's Daily Recap, and NAS/OLT Uptime Monitoring
+-- ============================================================================
+-- Migration: Operational WhatsApp Templates without Icons
+-- Clean, concise, polite, and dynamic templates for Admin, Mitra, and Technician
+-- ============================================================================
 
--- 1. Configuration in app_config
-INSERT INTO app_config (key, value, type, category, description) VALUES
-  ('notif_ticket_new_enabled', 'true', 'boolean', 'notifications', 'Notifikasi tiket baru ke Admin & Mitra'),
-  ('notif_ticket_resolved_enabled', 'true', 'boolean', 'notifications', 'Notifikasi tiket selesai ke Admin & Mitra'),
-  ('notif_installation_new_enabled', 'true', 'boolean', 'notifications', 'Notifikasi jadwal instalasi baru ke Admin, Mitra & Teknisi'),
-  ('notif_installation_completed_enabled', 'true', 'boolean', 'notifications', 'Notifikasi instalasi selesai ke Admin & Mitra'),
-  ('notif_daily_recap_enabled', 'true', 'boolean', 'notifications', 'Notifikasi rekap transaksi harian kemarin'),
-  ('daily_recap_time', '07:00', 'string', 'notifications', 'Jam pengiriman rekap transaksi harian'),
-  ('nas_monitoring_enabled', 'true', 'boolean', 'monitoring', 'Monitoring uptime NAS MikroTik'),
-  ('olt_monitoring_enabled', 'false', 'boolean', 'monitoring', 'Monitoring uptime OLT')
-ON CONFLICT (key) DO UPDATE SET
-  value = EXCLUDED.value,
-  type = EXCLUDED.type,
-  category = EXCLUDED.category,
-  description = EXCLUDED.description;
-
--- 2. Ensure uptime_monitors columns for device categorization
-ALTER TABLE uptime_monitors ADD COLUMN IF NOT EXISTS device_type VARCHAR(20) DEFAULT 'other';
-ALTER TABLE uptime_monitors ADD COLUMN IF NOT EXISTS device_id VARCHAR(50);
-
--- 3. Templates in whatsapp_templates
-INSERT INTO whatsapp_templates (template_id, name, content, category, variables, meta_status, enabled)
-VALUES
-(
-  'admin_new_ticket',
-  'Tiket Baru (Admin & Mitra)',
-  E'🎫 *TIKET BANTUAN BARU*\n\nNomor    : {{ticketNumber}}\nPelanggan: {{customerName}}\nTelepon  : {{customerPhone}}\nAlamat   : {{customerAddress}}\nArea     : {{mitraName}}\nSubjek   : {{subject}}\nKategori : {{category}}\nPrioritas: {{priority}}\nWaktu    : {{createdAt}}\n\nKeluhan:\n{{description}}\n\n_Pesan ini dikirim otomatis oleh sistem {{companyName}}._',
-  'UTILITY',
-  '["ticketNumber", "customerName", "customerPhone", "customerAddress", "mitraName", "subject", "category", "priority", "description", "createdAt", "companyName"]'::jsonb,
-  'local',
-  true
-),
-(
-  'admin_ticket_resolved',
-  'Tiket Selesai (Admin & Mitra)',
-  E'✅ *TIKET BANTUAN SELESAI*\n\nNomor    : {{ticketNumber}}\nPelanggan: {{customerName}}\nTelepon  : {{customerPhone}}\nAlamat   : {{customerAddress}}\nArea     : {{mitraName}}\nSubjek   : {{subject}}\nKategori : {{category}}\nTeknisi  : {{technicianName}}\nWaktu    : {{resolvedAt}}\n\nCatatan Penyelesaian:\n{{resolutionNotes}}\n\n_Pesan ini dikirim otomatis oleh sistem {{companyName}}._',
-  'UTILITY',
-  '["ticketNumber", "customerName", "customerPhone", "customerAddress", "mitraName", "subject", "category", "technicianName", "resolutionNotes", "resolvedAt", "companyName"]'::jsonb,
-  'local',
-  true
-),
-(
-  'admin_new_installation',
-  'Jadwal Instalasi Baru (Admin & Mitra)',
-  E'🔧 *JADWAL INSTALASI BARU*\n\nID Job   : {{jobNumber}}\nPelanggan: {{customerName}}\nTelepon  : {{customerPhone}}\nAlamat   : {{customerAddress}}\nArea     : {{mitraName}}\nPaket    : {{packageName}} ({{packageSpeed}})\nJadwal   : {{scheduleDate}} {{scheduleTime}}\nTeknisi  : {{technicianName}}\nCatatan  : {{notes}}\nWaktu    : {{createdAt}}\n\n_Pesan ini dikirim otomatis oleh sistem {{companyName}}._',
-  'UTILITY',
-  '["jobNumber", "customerName", "customerPhone", "customerAddress", "mitraName", "packageName", "packageSpeed", "scheduleDate", "scheduleTime", "technicianName", "notes", "createdAt", "companyName"]'::jsonb,
-  'local',
-  true
-),
-(
-  'admin_installation_completed',
-  'Instalasi Selesai (Admin & Mitra)',
-  E'🎉 *INSTALASI SELESAI*\n\nID Job    : {{jobNumber}}\nNo Layanan: {{serviceNumber}}\nPelanggan : {{customerName}}\nTelepon   : {{customerPhone}}\nAlamat    : {{customerAddress}}\nArea      : {{mitraName}}\nPaket     : {{packageName}}\nTeknisi   : {{technicianName}}\nWaktu     : {{completedAt}}\n\nLayanan telah aktif dan siap digunakan pelanggan.\n\n_Pesan ini dikirim otomatis oleh sistem {{companyName}}._',
-  'UTILITY',
-  '["jobNumber", "serviceNumber", "customerName", "customerPhone", "customerAddress", "mitraName", "packageName", "technicianName", "completedAt", "companyName"]'::jsonb,
-  'local',
-  true
-),
-(
-  'admin_daily_recap',
-  'Rekap Transaksi Kemarin (Superadmin)',
-  E'📊 *REKAP TRANSAKSI HARIAN KEMARIN*\nTanggal: {{recapDate}} (00:00 - 23:59 WIB)\n\n💰 *Total Pendapatan:* {{totalRevenue}}\n🔢 *Total Transaksi:* {{totalTransactions}} transaksi\n\n💳 *Rincian Metode Pembayaran:*\n• Tunai    : {{cashTotal}}\n• Transfer : {{transferTotal}}\n• Autopay  : {{autopayTotal}}\n• Tripay   : {{tripayTotal}}\n\n📍 *Kontribusi Per Area / Mitra:*\n{{mitraBreakdown}}\n\n_Laporan otomatis sistem {{companyName}}._',
-  'billing',
-  '["recapDate", "totalRevenue", "totalTransactions", "cashTotal", "transferTotal", "autopayTotal", "tripayTotal", "mitraBreakdown", "companyName"]'::jsonb,
-  'local',
-  true
-),
-(
-  'mitra_daily_recap',
-  'Rekap Transaksi Kemarin (Mitra Area)',
-  E'📊 *REKAP TRANSAKSI AREA: {{mitraName}}*\nTanggal: {{recapDate}} (00:00 - 23:59 WIB)\n\n💰 *Total Pendapatan:* {{totalRevenue}}\n🔢 *Total Transaksi:* {{totalTransactions}} transaksi\n\n💳 *Metode Pembayaran:*\n{{paymentBreakdown}}\n\n📝 *Rincian Transaksi:*\n{{transactionList}}\n\n_Laporan otomatis sistem {{companyName}}._',
-  'billing',
-  '["mitraName", "recapDate", "totalRevenue", "totalTransactions", "paymentBreakdown", "transactionList", "companyName"]'::jsonb,
-  'local',
-  true
-),
-(
-  'network_device_alert',
-  'Alert Status Perangkat Jaringan',
-  E'{{statusIcon}} *ALERT MONITORING JARINGAN*\n\nStatus   : *{{statusTitle}}*\nTipe     : {{deviceType}}\nNama     : {{deviceName}}\nIP Host  : {{deviceIp}}\nWaktu    : {{eventTime}}\nInfo     : {{detailInfo}}\n\n_Pesan otomatis sistem monitoring {{companyName}}._',
-  'UTILITY',
-  '["statusIcon", "statusTitle", "deviceType", "deviceName", "deviceIp", "eventTime", "detailInfo", "companyName"]'::jsonb,
-  'local',
-  true
+-- 1. admin_new_ticket
+INSERT INTO whatsapp_templates (template_id, name, category, enabled, variables, content)
+VALUES (
+    'admin_new_ticket',
+    'Tiket Bantuan Baru (Admin & Mitra)',
+    'UTILITY',
+    true,
+    '["ticketNumber", "customerName", "customerPhone", "customerAddress", "mitraName", "subject", "category", "priority", "description", "createdAt", "companyName"]'::jsonb,
+    E'Pemberitahuan Tiket Baru\n\nTiket bantuan telah dibuat dengan rincian berikut:\n\nNomor       : {{ticketNumber}}\nPelanggan   : {{customerName}}\nTelepon     : {{customerPhone}}\nAlamat      : {{customerAddress}}\nArea        : {{mitraName}}\nSubjek      : {{subject}}\nKategori    : {{category}}\nPrioritas   : {{priority}}\nWaktu       : {{createdAt}}\n\nKeluhan:\n{{description}}\n\nSalam,\n{{companyName}}.\n\n_Pesan ini dikirim otomatis oleh sistem._'
 )
 ON CONFLICT (template_id) DO UPDATE SET
-  name = EXCLUDED.name,
-  content = EXCLUDED.content,
-  category = EXCLUDED.category,
-  variables = EXCLUDED.variables,
-  enabled = true,
-  updated_at = NOW();
+    name = EXCLUDED.name,
+    category = EXCLUDED.category,
+    enabled = EXCLUDED.enabled,
+    variables = EXCLUDED.variables,
+    content = EXCLUDED.content,
+    updated_at = NOW();
+
+-- 2. admin_ticket_resolved
+INSERT INTO whatsapp_templates (template_id, name, category, enabled, variables, content)
+VALUES (
+    'admin_ticket_resolved',
+    'Tiket Selesai (Admin & Mitra)',
+    'UTILITY',
+    true,
+    '["ticketNumber", "customerName", "customerPhone", "customerAddress", "mitraName", "subject", "category", "technicianName", "resolutionNotes", "resolvedAt", "companyName"]'::jsonb,
+    E'Pemberitahuan Tiket Selesai\n\nTiket bantuan telah diselesaikan dengan rincian berikut:\n\nNomor       : {{ticketNumber}}\nPelanggan   : {{customerName}}\nTelepon     : {{customerPhone}}\nAlamat      : {{customerAddress}}\nArea        : {{mitraName}}\nSubjek      : {{subject}}\nKategori    : {{category}}\nTeknisi     : {{technicianName}}\nWaktu       : {{resolvedAt}}\n\nCatatan Penyelesaian:\n{{resolutionNotes}}\n\nSalam,\n{{companyName}}.\n\n_Pesan ini dikirim otomatis oleh sistem._'
+)
+ON CONFLICT (template_id) DO UPDATE SET
+    name = EXCLUDED.name,
+    category = EXCLUDED.category,
+    enabled = EXCLUDED.enabled,
+    variables = EXCLUDED.variables,
+    content = EXCLUDED.content,
+    updated_at = NOW();
+
+-- Also update alias ticket_resolved_mitra if present
+INSERT INTO whatsapp_templates (template_id, name, category, enabled, variables, content)
+VALUES (
+    'ticket_resolved_mitra',
+    'Tiket Selesai (Mitra)',
+    'UTILITY',
+    true,
+    '["ticketNumber", "customerName", "customerPhone", "customerAddress", "mitraName", "subject", "category", "technicianName", "resolutionNotes", "resolvedAt", "companyName"]'::jsonb,
+    E'Pemberitahuan Tiket Selesai\n\nTiket bantuan telah diselesaikan dengan rincian berikut:\n\nNomor       : {{ticketNumber}}\nPelanggan   : {{customerName}}\nTelepon     : {{customerPhone}}\nAlamat      : {{customerAddress}}\nArea        : {{mitraName}}\nSubjek      : {{subject}}\nKategori    : {{category}}\nTeknisi     : {{technicianName}}\nWaktu       : {{resolvedAt}}\n\nCatatan Penyelesaian:\n{{resolutionNotes}}\n\nSalam,\n{{companyName}}.\n\n_Pesan ini dikirim otomatis oleh sistem._'
+)
+ON CONFLICT (template_id) DO UPDATE SET
+    name = EXCLUDED.name,
+    category = EXCLUDED.category,
+    enabled = EXCLUDED.enabled,
+    variables = EXCLUDED.variables,
+    content = EXCLUDED.content,
+    updated_at = NOW();
+
+-- 3. admin_new_installation
+INSERT INTO whatsapp_templates (template_id, name, category, enabled, variables, content)
+VALUES (
+    'admin_new_installation',
+    'Jadwal Instalasi Baru (Admin & Mitra)',
+    'UTILITY',
+    true,
+    '["jobNumber", "customerName", "customerPhone", "customerAddress", "mitraName", "packageName", "packageSpeed", "scheduleDate", "scheduleTime", "technicianName", "notes", "createdAt", "companyName"]'::jsonb,
+    E'Pemberitahuan Jadwal Instalasi Baru\n\nJadwal pemasangan baru telah ditambahkan dengan rincian berikut:\n\nID Job      : {{jobNumber}}\nPelanggan   : {{customerName}}\nTelepon     : {{customerPhone}}\nAlamat      : {{customerAddress}}\nArea        : {{mitraName}}\nPaket       : {{packageName}} ({{packageSpeed}})\nJadwal      : {{scheduleDate}} {{scheduleTime}}\nTeknisi     : {{technicianName}}\nCatatan     : {{notes}}\nWaktu       : {{createdAt}}\n\nSalam,\n{{companyName}}.\n\n_Pesan ini dikirim otomatis oleh sistem._'
+)
+ON CONFLICT (template_id) DO UPDATE SET
+    name = EXCLUDED.name,
+    category = EXCLUDED.category,
+    enabled = EXCLUDED.enabled,
+    variables = EXCLUDED.variables,
+    content = EXCLUDED.content,
+    updated_at = NOW();
+
+-- 4. admin_installation_completed
+INSERT INTO whatsapp_templates (template_id, name, category, enabled, variables, content)
+VALUES (
+    'admin_installation_completed',
+    'Instalasi Selesai (Admin & Mitra)',
+    'UTILITY',
+    true,
+    '["jobNumber", "serviceNumber", "customerName", "customerPhone", "customerAddress", "mitraName", "packageName", "technicianName", "completedAt", "companyName"]'::jsonb,
+    E'Pemberitahuan Instalasi Selesai\n\nInstalasi pelanggan telah selesai dan layanan telah aktif:\n\nID Job      : {{jobNumber}}\nNo. Layanan : {{serviceNumber}}\nPelanggan   : {{customerName}}\nTelepon     : {{customerPhone}}\nAlamat      : {{customerAddress}}\nArea        : {{mitraName}}\nPaket       : {{packageName}}\nTeknisi     : {{technicianName}}\nWaktu       : {{completedAt}}\n\nLayanan telah aktif dan siap digunakan pelanggan.\n\nSalam,\n{{companyName}}.\n\n_Pesan ini dikirim otomatis oleh sistem._'
+)
+ON CONFLICT (template_id) DO UPDATE SET
+    name = EXCLUDED.name,
+    category = EXCLUDED.category,
+    enabled = EXCLUDED.enabled,
+    variables = EXCLUDED.variables,
+    content = EXCLUDED.content,
+    updated_at = NOW();
+
+-- Also update alias installation_completed_mitra if present
+INSERT INTO whatsapp_templates (template_id, name, category, enabled, variables, content)
+VALUES (
+    'installation_completed_mitra',
+    'Instalasi Selesai (Mitra)',
+    'UTILITY',
+    true,
+    '["jobNumber", "serviceNumber", "customerName", "customerPhone", "customerAddress", "mitraName", "packageName", "technicianName", "completedAt", "companyName"]'::jsonb,
+    E'Pemberitahuan Instalasi Selesai\n\nInstalasi pelanggan telah selesai dan layanan telah aktif:\n\nID Job      : {{jobNumber}}\nNo. Layanan : {{serviceNumber}}\nPelanggan   : {{customerName}}\nTelepon     : {{customerPhone}}\nAlamat      : {{customerAddress}}\nArea        : {{mitraName}}\nPaket       : {{packageName}}\nTeknisi     : {{technicianName}}\nWaktu       : {{completedAt}}\n\nLayanan telah aktif dan siap digunakan pelanggan.\n\nSalam,\n{{companyName}}.\n\n_Pesan ini dikirim otomatis oleh sistem._'
+)
+ON CONFLICT (template_id) DO UPDATE SET
+    name = EXCLUDED.name,
+    category = EXCLUDED.category,
+    enabled = EXCLUDED.enabled,
+    variables = EXCLUDED.variables,
+    content = EXCLUDED.content,
+    updated_at = NOW();
+
+-- 5. admin_daily_recap
+INSERT INTO whatsapp_templates (template_id, name, category, enabled, variables, content)
+VALUES (
+    'admin_daily_recap',
+    'Rekap Harian Transaksi Kemarin (Superadmin)',
+    'UTILITY',
+    true,
+    '["recapDate", "totalRevenue", "totalTransactions", "cashTotal", "transferTotal", "autopayTotal", "tripayTotal", "mitraBreakdown", "companyName"]'::jsonb,
+    E'Pemberitahuan Rekap Transaksi Harian\n\nBerikut rangkuman transaksi penerimaan pembayaran kemarin:\nPeriode     : {{recapDate}} (00:00 - 23:59 WIB)\n\nTotal Masuk : {{totalRevenue}}\nTransaksi   : {{totalTransactions}} transaksi\n\nRincian Metode Pembayaran:\n- Tunai     : {{cashTotal}}\n- Transfer  : {{transferTotal}}\n- Autopay   : {{autopayTotal}}\n- Tripay    : {{tripayTotal}}\n\nKontribusi Per Area / Mitra:\n{{mitraBreakdown}}\n\nSalam,\n{{companyName}}.\n\n_Pesan ini dikirim otomatis oleh sistem._'
+)
+ON CONFLICT (template_id) DO UPDATE SET
+    name = EXCLUDED.name,
+    category = EXCLUDED.category,
+    enabled = EXCLUDED.enabled,
+    variables = EXCLUDED.variables,
+    content = EXCLUDED.content,
+    updated_at = NOW();
+
+-- 6. mitra_daily_recap
+INSERT INTO whatsapp_templates (template_id, name, category, enabled, variables, content)
+VALUES (
+    'mitra_daily_recap',
+    'Rekap Harian Transaksi Kemarin (Mitra)',
+    'UTILITY',
+    true,
+    '["mitraName", "recapDate", "totalRevenue", "totalTransactions", "paymentBreakdown", "transactionList", "companyName"]'::jsonb,
+    E'Pemberitahuan Rekap Transaksi Area\n\nHalo {{mitraName}},\n\nBerikut rangkuman transaksi penerimaan pembayaran area Anda kemarin:\nPeriode     : {{recapDate}} (00:00 - 23:59 WIB)\n\nTotal Masuk : {{totalRevenue}}\nTransaksi   : {{totalTransactions}} transaksi\n\nMetode Pembayaran:\n{{paymentBreakdown}}\n\nRincian Transaksi:\n{{transactionList}}\n\nSalam,\n{{companyName}}.\n\n_Pesan ini dikirim otomatis oleh sistem._'
+)
+ON CONFLICT (template_id) DO UPDATE SET
+    name = EXCLUDED.name,
+    category = EXCLUDED.category,
+    enabled = EXCLUDED.enabled,
+    variables = EXCLUDED.variables,
+    content = EXCLUDED.content,
+    updated_at = NOW();
+
+-- 7. network_device_alert
+INSERT INTO whatsapp_templates (template_id, name, category, enabled, variables, content)
+VALUES (
+    'network_device_alert',
+    'Alert Status Perangkat Jaringan (NAS / OLT)',
+    'UTILITY',
+    true,
+    '["statusTitle", "deviceType", "deviceName", "deviceIp", "eventTime", "detailInfo", "companyName"]'::jsonb,
+    E'Pemberitahuan Status Perangkat Jaringan\n\nStatus perangkat infrastruktur jaringan:\n\nStatus      : {{statusTitle}}\nTipe        : {{deviceType}}\nNama        : {{deviceName}}\nIP Host     : {{deviceIp}}\nWaktu       : {{eventTime}}\nKeterangan  : {{detailInfo}}\n\nMohon dilakukan pengecekan pada perangkat terkait.\n\nSalam,\n{{companyName}}.\n\n_Pesan ini dikirim otomatis oleh sistem._'
+)
+ON CONFLICT (template_id) DO UPDATE SET
+    name = EXCLUDED.name,
+    category = EXCLUDED.category,
+    enabled = EXCLUDED.enabled,
+    variables = EXCLUDED.variables,
+    content = EXCLUDED.content,
+    updated_at = NOW();

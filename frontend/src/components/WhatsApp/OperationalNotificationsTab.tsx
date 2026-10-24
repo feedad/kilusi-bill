@@ -24,7 +24,8 @@ import {
   Shield,
   FileSpreadsheet,
   Save,
-  HelpCircle
+  HelpCircle,
+  MessageSquare
 } from 'lucide-react'
 
 interface OperationalSettings {
@@ -72,7 +73,11 @@ function getErrorMessage(err: unknown): string {
   return String(err)
 }
 
-export default function OperationalNotificationsTab() {
+interface OperationalNotificationsTabProps {
+  onSwitchToTemplates?: () => void
+}
+
+export default function OperationalNotificationsTab({ onSwitchToTemplates }: OperationalNotificationsTabProps = {}) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [testingRecap, setTestingRecap] = useState(false)
@@ -431,6 +436,80 @@ export default function OperationalNotificationsTab() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Dynamic Templates Reference */}
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2">
+                <MessageSquare className="w-5 h-5 text-sky-500" />
+                Template Notifikasi Dinamis (Tersedia di Database)
+              </CardTitle>
+              <CardDescription>
+                Format pesan tanpa icon, tersusun rapi, ringkas, dan sopan seperti notifikasi pelanggan. Teks dan variabel dapat disesuaikan di tab Templates.
+              </CardDescription>
+            </div>
+            {onSwitchToTemplates && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onSwitchToTemplates}
+                className="flex items-center gap-1.5"
+              >
+                <MessageSquare className="w-4 h-4 text-sky-600" />
+                Buka Tab Templates
+              </Button>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {[
+              {
+                id: 'admin_new_ticket',
+                title: 'Pemberitahuan Tiket Baru',
+                vars: ['ticketNumber', 'customerName', 'mitraName', 'category', 'description']
+              },
+              {
+                id: 'admin_ticket_resolved',
+                title: 'Pemberitahuan Tiket Selesai',
+                vars: ['ticketNumber', 'customerName', 'technicianName', 'resolutionNotes']
+              },
+              {
+                id: 'admin_new_installation',
+                title: 'Jadwal Instalasi Baru',
+                vars: ['jobNumber', 'customerName', 'packageName', 'scheduleDate', 'technicianName']
+              },
+              {
+                id: 'admin_installation_completed',
+                title: 'Instalasi Selesai & Aktif',
+                vars: ['jobNumber', 'serviceNumber', 'customerName', 'packageName', 'technicianName']
+              },
+              {
+                id: 'admin_daily_recap',
+                title: 'Rekap Transaksi Harian (Kemarin)',
+                vars: ['recapDate', 'totalRevenue', 'totalTransactions', 'mitraBreakdown']
+              },
+              {
+                id: 'network_device_alert',
+                title: 'Status Perangkat (Down / Pulih)',
+                vars: ['statusTitle', 'deviceType', 'deviceName', 'deviceIp', 'eventTime']
+              }
+            ].map((tmpl) => (
+              <div key={tmpl.id} className="border rounded-md p-3 space-y-1.5 bg-muted/20">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-xs text-foreground">{tmpl.title}</span>
+                  <Badge variant="outline" className="font-mono text-[9px]">{tmpl.id}</Badge>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Variabel: {tmpl.vars.map(v => `{{${v}}}`).join(', ')}
+                </p>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Target Recipients Information */}
       <Card>

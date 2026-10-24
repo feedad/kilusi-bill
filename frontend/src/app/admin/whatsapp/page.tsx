@@ -2241,7 +2241,7 @@ export default function WhatsAppDashboard() {
 
         {/* Operational Notifications Tab */}
         <TabsContent value="operational" className="space-y-4">
-          <OperationalNotificationsTab />
+          <OperationalNotificationsTab onSwitchToTemplates={() => setActiveTab('templates')} />
         </TabsContent>
 
       </Tabs>

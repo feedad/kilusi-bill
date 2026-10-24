@@ -4258,7 +4258,7 @@ _Pesan ini dikirim otomatis via WhatsApp Kilusi Bill._`;
                     companyName: companyInfo.name
                 });
             } else {
-                message = `🎫 *TIKET BANTUAN BARU*\n\nNomor    : ${ticketNumber}\nPelanggan: ${customerName}\nTelepon  : ${customerPhone}\nAlamat   : ${customerAddress}\nArea     : ${mitraName}\nSubjek   : ${subject}\nKategori : ${category}\nPrioritas: ${priority}\nWaktu    : ${createdAt}\n\nKeluhan:\n${description}\n\n_Pesan ini dikirim otomatis oleh sistem ${companyInfo.name}._`;
+                message = `Pemberitahuan Tiket Baru\n\nTiket bantuan telah dibuat dengan rincian berikut:\n\nNomor       : ${ticketNumber}\nPelanggan   : ${customerName}\nTelepon     : ${customerPhone}\nAlamat      : ${customerAddress}\nArea        : ${mitraName}\nSubjek      : ${subject}\nKategori    : ${category}\nPrioritas   : ${priority}\nWaktu       : ${createdAt}\n\nKeluhan:\n${description}\n\nSalam,\n${companyInfo.name}.\n\n_Pesan ini dikirim otomatis oleh sistem._`;
             }
 
             const results = [];
@@ -4328,7 +4328,7 @@ _Pesan ini dikirim otomatis via WhatsApp Kilusi Bill._`;
                     companyName: companyInfo.name
                 });
             } else {
-                message = `✅ *TIKET BANTUAN SELESAI*\n\nNomor    : ${ticketNumber}\nPelanggan: ${customerName}\nTelepon  : ${customerPhone}\nAlamat   : ${customerAddress}\nArea     : ${mitraName}\nSubjek   : ${subject}\nKategori : ${category}\nTeknisi  : ${technicianName}\nWaktu    : ${resolvedAt}\n\nCatatan Penyelesaian:\n${resolutionNotes}\n\n_Pesan ini dikirim otomatis oleh sistem ${companyInfo.name}._`;
+                message = `Pemberitahuan Tiket Selesai\n\nTiket bantuan telah diselesaikan dengan rincian berikut:\n\nNomor       : ${ticketNumber}\nPelanggan   : ${customerName}\nTelepon     : ${customerPhone}\nAlamat      : ${customerAddress}\nArea        : ${mitraName}\nSubjek      : ${subject}\nKategori    : ${category}\nTeknisi     : ${technicianName}\nWaktu       : ${resolvedAt}\n\nCatatan Penyelesaian:\n${resolutionNotes}\n\nSalam,\n${companyInfo.name}.\n\n_Pesan ini dikirim otomatis oleh sistem._`;
             }
 
             const results = [];
@@ -4403,7 +4403,7 @@ _Pesan ini dikirim otomatis via WhatsApp Kilusi Bill._`;
                     companyName: companyInfo.name
                 });
             } else {
-                message = `🔧 *JADWAL INSTALASI BARU*\n\nID Job   : ${jobNumber}\nPelanggan: ${customerName}\nTelepon  : ${customerPhone}\nAlamat   : ${customerAddress}\nArea     : ${mitraName}\nPaket    : ${packageName} (${packageSpeed})\nJadwal   : ${scheduleDate} ${scheduleTime}\nTeknisi  : ${technicianName}\nCatatan  : ${notes}\nWaktu    : ${createdAt}\n\n_Pesan ini dikirim otomatis oleh sistem ${companyInfo.name}._`;
+                message = `Pemberitahuan Jadwal Instalasi Baru\n\nJadwal pemasangan baru telah ditambahkan dengan rincian berikut:\n\nID Job      : ${jobNumber}\nPelanggan   : ${customerName}\nTelepon     : ${customerPhone}\nAlamat      : ${customerAddress}\nArea        : ${mitraName}\nPaket       : ${packageName} (${packageSpeed})\nJadwal      : ${scheduleDate} ${scheduleTime}\nTeknisi     : ${technicianName}\nCatatan     : ${notes}\nWaktu       : ${createdAt}\n\nSalam,\n${companyInfo.name}.\n\n_Pesan ini dikirim otomatis oleh sistem._`;
             }
 
             const results = [];
@@ -4471,7 +4471,7 @@ _Pesan ini dikirim otomatis via WhatsApp Kilusi Bill._`;
                     companyName: companyInfo.name
                 });
             } else {
-                message = `🎉 *INSTALASI SELESAI*\n\nID Job    : ${jobNumber}\nNo Layanan: ${serviceNumber}\nPelanggan : ${customerName}\nTelepon   : ${customerPhone}\nAlamat    : ${customerAddress}\nArea      : ${mitraName}\nPaket     : ${packageName}\nTeknisi   : ${technicianName}\nWaktu     : ${completedAt}\n\nLayanan telah aktif dan siap digunakan pelanggan.\n\n_Pesan ini dikirim otomatis oleh sistem ${companyInfo.name}._`;
+                message = `Pemberitahuan Instalasi Selesai\n\nInstalasi pelanggan telah selesai dan layanan telah aktif:\n\nID Job      : ${jobNumber}\nNo. Layanan : ${serviceNumber}\nPelanggan   : ${customerName}\nTelepon     : ${customerPhone}\nAlamat      : ${customerAddress}\nArea        : ${mitraName}\nPaket       : ${packageName}\nTeknisi     : ${technicianName}\nWaktu       : ${completedAt}\n\nLayanan telah aktif dan siap digunakan pelanggan.\n\nSalam,\n${companyInfo.name}.\n\n_Pesan ini dikirim otomatis oleh sistem._`;
             }
 
             const results = [];
@@ -4609,7 +4609,7 @@ _Pesan ini dikirim otomatis via WhatsApp Kilusi Bill._`;
 
             let mitraBreakdownLines = [];
             for (const mData of mitraMap.values()) {
-                mitraBreakdownLines.push(`• ${mData.name}: ${formatRp(mData.total)} (${mData.count} trx)`);
+                mitraBreakdownLines.push(`- ${mData.name}: ${formatRp(mData.total)} (${mData.count} trx)`);
             }
             const mitraBreakdown = mitraBreakdownLines.length > 0 
                 ? mitraBreakdownLines.join('\n') 
@@ -4629,7 +4629,7 @@ _Pesan ini dikirim otomatis via WhatsApp Kilusi Bill._`;
                     companyName: companyInfo.name
                 });
             } else {
-                adminMessage = `📊 *REKAP TRANSAKSI HARIAN KEMARIN*\nTanggal: ${formattedDateStr} (00:00 - 23:59 WIB)\n\n💰 *Total Pendapatan:* ${formatRp(totalRevenue)}\n🔢 *Total Transaksi:* ${payments.length} transaksi\n\n💳 *Rincian Metode Pembayaran:*\n• Tunai    : ${formatRp(cashTotal)}\n• Transfer : ${formatRp(transferTotal)}\n• Autopay  : ${formatRp(autopayTotal)}\n• Tripay   : ${formatRp(tripayTotal)}\n\n📍 *Kontribusi Per Area / Mitra:*\n${mitraBreakdown}\n\n_Laporan otomatis sistem ${companyInfo.name}._`;
+                adminMessage = `Pemberitahuan Rekap Transaksi Harian\n\nBerikut rangkuman transaksi penerimaan pembayaran kemarin:\nPeriode     : ${formattedDateStr} (00:00 - 23:59 WIB)\n\nTotal Masuk : ${formatRp(totalRevenue)}\nTransaksi   : ${payments.length} transaksi\n\nRincian Metode Pembayaran:\n- Tunai     : ${formatRp(cashTotal)}\n- Transfer  : ${formatRp(transferTotal)}\n- Autopay   : ${formatRp(autopayTotal)}\n- Tripay    : ${formatRp(tripayTotal)}\n\nKontribusi Per Area / Mitra:\n${mitraBreakdown}\n\nSalam,\n${companyInfo.name}.\n\n_Pesan ini dikirim otomatis oleh sistem._`;
             }
 
             const sendResults = [];
@@ -4651,11 +4651,11 @@ _Pesan ini dikirim otomatis via WhatsApp Kilusi Bill._`;
                 if (!mData.phone || mData.count === 0) continue;
 
                 const pBreakdown = [
-                    mData.tunai ? `• Tunai: ${formatRp(mData.tunai)}` : null,
-                    mData.transfer ? `• Transfer: ${formatRp(mData.transfer)}` : null,
-                    mData.autopay ? `• Autopay: ${formatRp(mData.autopay)}` : null,
-                    mData.tripay ? `• Tripay: ${formatRp(mData.tripay)}` : null
-                ].filter(Boolean).join('\n') || '• -';
+                    mData.tunai ? `- Tunai: ${formatRp(mData.tunai)}` : null,
+                    mData.transfer ? `- Transfer: ${formatRp(mData.transfer)}` : null,
+                    mData.autopay ? `- Autopay: ${formatRp(mData.autopay)}` : null,
+                    mData.tripay ? `- Tripay: ${formatRp(mData.tripay)}` : null
+                ].filter(Boolean).join('\n') || '-';
 
                 const trxList = mData.items.slice(0, 30).map((it, idx) => {
                     return `${idx + 1}. ${it.customerName} - ${formatRp(it.amount)} (${it.method})`;
@@ -4673,7 +4673,7 @@ _Pesan ini dikirim otomatis via WhatsApp Kilusi Bill._`;
                         companyName: companyInfo.name
                     });
                 } else {
-                    mitraMessage = `📊 *REKAP TRANSAKSI AREA: ${mData.name}*\nTanggal: ${formattedDateStr} (00:00 - 23:59 WIB)\n\n💰 *Total Pendapatan:* ${formatRp(mData.total)}\n🔢 *Total Transaksi:* ${mData.count} transaksi\n\n💳 *Metode Pembayaran:*\n${pBreakdown}\n\n📝 *Rincian Transaksi:*\n${trxList || '- (Tidak ada rincian)'}\n\n_Laporan otomatis sistem ${companyInfo.name}._`;
+                    mitraMessage = `Pemberitahuan Rekap Transaksi Area\n\nHalo ${mData.name},\n\nBerikut rangkuman transaksi penerimaan pembayaran area Anda kemarin:\nPeriode     : ${formattedDateStr} (00:00 - 23:59 WIB)\n\nTotal Masuk : ${formatRp(mData.total)}\nTransaksi   : ${mData.count} transaksi\n\nMetode Pembayaran:\n${pBreakdown}\n\nRincian Transaksi:\n${trxList || '- (Tidak ada rincian)'}\n\nSalam,\n${companyInfo.name}.\n\n_Pesan ini dikirim otomatis oleh sistem._`;
                 }
 
                 const mRes = await this.sendNotification(mData.phone, mitraMessage, {
@@ -4716,14 +4716,12 @@ _Pesan ini dikirim otomatis via WhatsApp Kilusi Bill._`;
             const eventTime = (downTime ? new Date(downTime) : new Date()).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'medium' });
 
             const template = await this.getTemplateFromDatabase('network_device_alert');
-            const statusIcon = '🔴';
-            const statusTitle = 'DOWN / UNREACHABLE';
+            const statusTitle = 'DOWN / TIDAK DAPAT DIAKSES';
             const detailInfo = 'Perangkat tidak merespons probe ICMP ping (unreachable).';
 
             let message;
             if (template) {
                 message = this.replaceTemplateVariables(template.content, {
-                    statusIcon,
                     statusTitle,
                     deviceType: devType.toUpperCase(),
                     deviceName: name,
@@ -4733,7 +4731,7 @@ _Pesan ini dikirim otomatis via WhatsApp Kilusi Bill._`;
                     companyName: companyInfo.name
                 });
             } else {
-                message = `🔴 *ALERT MONITORING JARINGAN*\n\nStatus   : *${statusTitle}*\nTipe     : ${devType.toUpperCase()}\nNama     : ${name}\nIP Host  : ${ip}\nWaktu    : ${eventTime}\nInfo     : ${detailInfo}\n\n_Pesan otomatis sistem monitoring ${companyInfo.name}._`;
+                message = `Pemberitahuan Status Perangkat Jaringan\n\nStatus perangkat infrastruktur jaringan:\n\nStatus      : ${statusTitle}\nTipe        : ${devType.toUpperCase()}\nNama        : ${name}\nIP Host     : ${ip}\nWaktu       : ${eventTime}\nKeterangan  : ${detailInfo}\n\nMohon dilakukan pengecekan pada perangkat terkait.\n\nSalam,\n${companyInfo.name}.\n\n_Pesan ini dikirim otomatis oleh sistem._`;
             }
 
             logger.warn(`[NetworkAlert] Alert DOWN triggered for ${devType.toUpperCase()} ${name} (${ip})`);
@@ -4771,14 +4769,12 @@ _Pesan ini dikirim otomatis via WhatsApp Kilusi Bill._`;
             const eventTime = (recoveryTime ? new Date(recoveryTime) : new Date()).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'medium' });
 
             const template = await this.getTemplateFromDatabase('network_device_alert');
-            const statusIcon = '🟢';
-            const statusTitle = 'RECOVERED (UP)';
-            const detailInfo = `Latency: ${latency} ms. Perangkat kembali online normal.`;
+            const statusTitle = 'NORMAL / KEMBALI ONLINE';
+            const detailInfo = `Latency: ${latency} ms. Perangkat kembali merespons dengan normal.`;
 
             let message;
             if (template) {
                 message = this.replaceTemplateVariables(template.content, {
-                    statusIcon,
                     statusTitle,
                     deviceType: devType.toUpperCase(),
                     deviceName: name,
@@ -4788,7 +4784,7 @@ _Pesan ini dikirim otomatis via WhatsApp Kilusi Bill._`;
                     companyName: companyInfo.name
                 });
             } else {
-                message = `🟢 *ALERT MONITORING JARINGAN*\n\nStatus   : *${statusTitle}*\nTipe     : ${devType.toUpperCase()}\nNama     : ${name}\nIP Host  : ${ip}\nWaktu    : ${eventTime}\nInfo     : ${detailInfo}\n\n_Pesan otomatis sistem monitoring ${companyInfo.name}._`;
+                message = `Pemberitahuan Status Perangkat Jaringan\n\nStatus perangkat infrastruktur jaringan:\n\nStatus      : ${statusTitle}\nTipe        : ${devType.toUpperCase()}\nNama        : ${name}\nIP Host     : ${ip}\nWaktu       : ${eventTime}\nKeterangan  : ${detailInfo}\n\nSalam,\n${companyInfo.name}.\n\n_Pesan ini dikirim otomatis oleh sistem._`;
             }
 
             logger.info(`[NetworkAlert] Alert RECOVERED UP triggered for ${devType.toUpperCase()} ${name} (${ip})`);
