@@ -3787,35 +3787,34 @@ Terima kasih.
                 password,
                 duration_hours,
                 speed_limit,
+                ssid = getSetting("hotspot_ssid", "Kilusi-Hotspot"),
+                support_phone = getSetting("support_phone", "0812-3456-7890"),
+                company_name = getSetting("company_name", "Kilusi ISP"),
             } = data;
 
-            const message = `🎫 *VOUCHER HOTSPOT ANDA*
+            const templateVars = {
+                customer_name,
+                voucher_code,
+                username,
+                password,
+                duration_hours: String(duration_hours || "-"),
+                speed_limit: speed_limit || "Sesuai Paket",
+                ssid: ssid || getSetting("hotspot_ssid", "Kilusi-Hotspot"),
+                support_phone: support_phone || getSetting("support_phone", "0812-3456-7890"),
+                company_name: company_name || getSetting("company_name", "Kilusi ISP")
+            };
 
-Halo ${customer_name},
-
-Berikut voucher hotspot Anda:
-
-🔑 *Kode Voucher:* ${voucher_code}
-👤 *Username:* ${username}
-🔒 *Password:* ${password}
-⏱️ *Durasi:* ${duration_hours} jam
-🚀 *Speed:* ${speed_limit || "As paket"}
-
-*Cara pakai:*
-1. Connect ke WiFi/Kabel "Kilusi-Hotspot"
-2. Browser akan otomatis ke login page
-3. Masukkan username & password di atas
-4. Klik Login
-
-Selamat menikmati internet!
-
-Hubungi ${getSetting("support_phone", "0812-3456-7890")} jika ada kendala.
-
-*${getSetting("company_name", "Kilusi ISP")}*`;
+            let message;
+            const template = await this.getTemplateFromDatabase("voucher_delivered");
+            if (template && template.content) {
+                message = this.replaceTemplateVariables(template.content, templateVars);
+            } else {
+                message = `Pemberitahuan Voucher Hotspot\n\nHalo ${customer_name},\n\nBerikut rincian voucher hotspot Anda:\n\nKode Voucher : ${voucher_code}\nUsername     : ${username}\nPassword     : ${password}\nDurasi       : ${duration_hours} jam\nKecepatan    : ${templateVars.speed_limit}\n\nPetunjuk Penggunaan:\n1. Hubungkan perangkat ke WiFi "${templateVars.ssid}"\n2. Buka peramban jika halaman login tidak muncul otomatis\n3. Masukkan username dan password di atas\n4. Klik tombol Login\n\nJika mengalami kendala, silakan hubungi ${templateVars.support_phone}.\n\nSalam,\n${templateVars.company_name}.\n\n_Pesan ini dikirim otomatis oleh sistem._`;
+            }
 
             const result = await this.sendNotification(phone, message);
             if (result.success) {
-                logger.info(`📱 Voucher sent to ${phone}: ${voucher_code}`);
+                logger.info(`[Voucher] Voucher notification sent to ${phone}: ${voucher_code}`);
             }
             return result;
         } catch (error) {

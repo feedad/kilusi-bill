@@ -164,3 +164,57 @@ ON CONFLICT (template_id) DO UPDATE SET
     variables = EXCLUDED.variables,
     content = EXCLUDED.content,
     updated_at = NOW();
+
+-- 8. voucher_delivered (Clean, icon-free)
+INSERT INTO whatsapp_templates (template_id, name, category, enabled, variables, content)
+VALUES (
+    'voucher_delivered',
+    'Voucher Hotspot Dikirim',
+    'transactional',
+    true,
+    '["customer_name", "voucher_code", "username", "password", "duration_hours", "speed_limit", "ssid", "support_phone", "company_name"]'::jsonb,
+    E'Pemberitahuan Voucher Hotspot\n\nHalo {{customer_name}},\n\nBerikut rincian voucher hotspot Anda:\n\nKode Voucher : {{voucher_code}}\nUsername     : {{username}}\nPassword     : {{password}}\nDurasi       : {{duration_hours}} jam\nKecepatan    : {{speed_limit}}\n\nPetunjuk Penggunaan:\n1. Hubungkan perangkat ke WiFi "{{ssid}}"\n2. Buka peramban jika halaman login tidak muncul otomatis\n3. Masukkan username dan password di atas\n4. Klik tombol Login\n\nJika mengalami kendala, silakan hubungi {{support_phone}}.\n\nSalam,\n{{company_name}}.\n\n_Pesan ini dikirim otomatis oleh sistem._'
+)
+ON CONFLICT (template_id) DO UPDATE SET
+    name = EXCLUDED.name,
+    category = EXCLUDED.category,
+    enabled = EXCLUDED.enabled,
+    variables = EXCLUDED.variables,
+    content = EXCLUDED.content,
+    updated_at = NOW();
+
+-- 9. mitra_payment_received (Clean, icon-free)
+INSERT INTO whatsapp_templates (template_id, name, category, enabled, variables, content)
+VALUES (
+    'mitra_payment_received',
+    'Notifikasi Pembayaran ke Mitra',
+    'billing',
+    true,
+    '["mitraName", "customerName", "serviceNumber", "invoiceNumber", "packageName", "amount", "paymentDate", "paymentMethod", "destinationBank", "reconciliationInfo", "isolirDate", "companyName"]'::jsonb,
+    E'Pemberitahuan Pembayaran Pelanggan Area\n\nHalo {{mitraName}},\n\nPembayaran tagihan pelanggan di area Anda telah berhasil diproses dengan rincian berikut:\n\nPelanggan     : {{customerName}}\nNo. Layanan   : {{serviceNumber}}\nInvoice       : {{invoiceNumber}}\nPaket         : {{packageName}}\nJumlah        : Rp {{amount}}\nTanggal Bayar : {{paymentDate}}\nMetode        : {{paymentMethod}}\nTujuan Bank   : {{destinationBank}}\nRekonsiliasi  : {{reconciliationInfo}}\nMasa Aktif    : {{isolirDate}}\n\nSalam,\n{{companyName}}.\n\n_Pesan ini dikirim otomatis oleh sistem._'
+)
+ON CONFLICT (template_id) DO UPDATE SET
+    name = EXCLUDED.name,
+    category = EXCLUDED.category,
+    enabled = EXCLUDED.enabled,
+    variables = EXCLUDED.variables,
+    content = EXCLUDED.content,
+    updated_at = NOW();
+
+-- 10. payment_confirmation (Clean, icon-free)
+INSERT INTO whatsapp_templates (template_id, name, category, enabled, variables, content)
+VALUES (
+    'payment_confirmation',
+    'Konfirmasi Pembayaran',
+    'billing',
+    true,
+    '["invoiceNumber", "customerName", "serviceNumber", "packageName", "amount", "paymentMethod", "paymentDate", "dueDate", "isolirDate", "companyName"]'::jsonb,
+    E'Pelanggan yang terhormat,\n\nPembayaran Anda telah kami terima dengan rincian:\n\nInvoice         : {{invoiceNumber}}\nPelanggan       : {{customerName}}\nNo. Layanan     : {{serviceNumber}}\nPaket Langganan : {{packageName}}\nJumlah          : Rp {{amount}}\nMetode          : {{paymentMethod}}\nTanggal         : {{paymentDate}}\n\nLayanan sudah aktif dan dapat digunakan sampai dengan {{isolirDate}}.\nJika internet belum terhubung, silakan matikan dan hidupkan kembali perangkat Modem/ONT.\n\nTerima kasih telah melakukan pembayaran tepat waktu.\n\nSalam,\n{{companyName}}.\n\n_Pesan ini dikirim otomatis oleh sistem._'
+)
+ON CONFLICT (template_id) DO UPDATE SET
+    name = EXCLUDED.name,
+    category = EXCLUDED.category,
+    enabled = EXCLUDED.enabled,
+    variables = EXCLUDED.variables,
+    content = EXCLUDED.content,
+    updated_at = NOW();

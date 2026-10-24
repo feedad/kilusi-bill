@@ -495,6 +495,16 @@ export default function OperationalNotificationsTab({ onSwitchToTemplates }: Ope
                 id: 'network_device_alert',
                 title: 'Status Perangkat (Down / Pulih)',
                 vars: ['statusTitle', 'deviceType', 'deviceName', 'deviceIp', 'eventTime']
+              },
+              {
+                id: 'mitra_payment_received',
+                title: 'Pembayaran Pelanggan Area (Mitra)',
+                vars: ['mitraName', 'customerName', 'packageName', 'amount', 'destinationBank']
+              },
+              {
+                id: 'voucher_delivered',
+                title: 'Voucher Hotspot Dikirim',
+                vars: ['customer_name', 'voucher_code', 'username', 'password', 'duration_hours']
               }
             ].map((tmpl) => (
               <div key={tmpl.id} className="border rounded-md p-3 space-y-1.5 bg-muted/20">
