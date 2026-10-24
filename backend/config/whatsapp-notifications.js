@@ -3476,11 +3476,7 @@ Terima kasih.
     async getTechnicianPhone(technicianId) {
         try {
             const result = await query(
-                `
-                SELECT phone FROM users
-                WHERE id = $1 AND role = 'technician'
-                AND phone IS NOT NULL AND phone != ''
-            `,
+                `SELECT phone FROM users WHERE id = $1 AND phone IS NOT NULL AND phone != ''`,
                 [technicianId],
             );
             return result.rows.length > 0 ? result.rows[0].phone : null;
@@ -3493,10 +3489,10 @@ Terima kasih.
     async getTechnicianName(technicianId) {
         try {
             const result = await query(
-                `SELECT name FROM users WHERE id = $1 AND role = 'technician'`,
+                `SELECT username FROM users WHERE id = $1`,
                 [technicianId],
             );
-            return result.rows.length > 0 ? result.rows[0].name : null;
+            return result.rows.length > 0 ? result.rows[0].username : null;
         } catch (error) {
             logger.error("Error getting technician name:", error);
             return null;
@@ -3539,37 +3535,9 @@ Terima kasih.
         }
     }
 
-    // Notify admins about new ticket
+    // Notify admins about new ticket (delegates to notifyNewTicket)
     async notifyAdminsNewTicket(ticketData) {
-        try {
-            const companyInfo = await this.getCompanyInfo();
-            const template = await this.getTemplateFromDatabase("ticket_created");
-
-            let message, messageData;
-            if (template) {
-                const context = {
-                    company: companyInfo,
-                    customData: {
-                        ticketNumber: ticketData.ticketNumber,
-                        subject: ticketData.subject,
-                        category: ticketData.category,
-                    },
-                };
-                messageData = this.resolveMessageData(template.content, context);
-                message = this.replaceTemplateVariables(template.content, messageData);
-            } else {
-                message = `🎫 *TIKET BARU*\n\n📝 *Nomor:* ${ticketData.ticketNumber}\n👤 *Customer:* ${ticketData.customerName}\n📋 *Subjek:* ${ticketData.subject}\n📂 *Kategori:* ${ticketData.category}\n\n${companyInfo.name}`;
-            }
-
-            return await this.sendToAdmins(message, {
-                notification_type: "ticket_created",
-                provider: "baileys",
-                ...(messageData ? { meta_data: messageData } : {}),
-            });
-        } catch (error) {
-            logger.error("Error notifying admins about new ticket:", error);
-            return { success: false, error: error.message };
-        }
+        return await this.notifyNewTicket(ticketData);
     }
 
     // Notify admins about new registration
@@ -4038,6 +4006,805 @@ _Pesan ini dikirim otomatis via WhatsApp Kilusi Bill._`;
             };
         } catch (error) {
             logger.error(`[MitraSettlement] Error in sendMitraSettlementNotification:`, error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    // ==========================================
+    // OPERATIONAL NOTIFICATION SYSTEM
+    // ==========================================
+
+    // Check boolean switch in app_config
+    async isSettingEnabled(key, defaultValue = true) {
+        try {
+            const res = await query('SELECT value FROM app_config WHERE key = $1 LIMIT 1', [key]);
+            if (res.rows.length === 0) {
+                const settingVal = getSetting(key, defaultValue);
+                if (typeof settingVal === 'boolean') return settingVal;
+                if (typeof settingVal === 'string') return settingVal.toLowerCase() === 'true';
+                return !!settingVal;
+            }
+            const val = res.rows[0].value;
+            if (typeof val === 'boolean') return val;
+            if (typeof val === 'string') return val.trim().toLowerCase() === 'true';
+            return !!val;
+        } catch (error) {
+            logger.warn(`[NotifSwitch] Failed to check ${key}: ${error.message}`);
+            return defaultValue;
+        }
+    }
+
+    // Get superadmin phone number
+    async getSuperadminPhone() {
+        try {
+            const configPhone = await query("SELECT value FROM app_config WHERE key = 'admin_phone_number' LIMIT 1");
+            if (configPhone.rows.length > 0 && configPhone.rows[0].value) {
+                const p = this.normalizePhoneNumber(configPhone.rows[0].value);
+                if (p) return p;
+            }
+            const res = await query(`
+                SELECT phone FROM users 
+                WHERE role = 'superadmin' AND phone IS NOT NULL AND phone != '' 
+                ORDER BY id ASC LIMIT 1
+            `);
+            if (res.rows.length > 0 && res.rows[0].phone) {
+                return this.normalizePhoneNumber(res.rows[0].phone);
+            }
+            return '628115345333';
+        } catch (error) {
+            logger.warn(`Error getting superadmin phone: ${error.message}`);
+            return '628115345333';
+        }
+    }
+
+    // Normalize phone number helper
+    normalizePhoneNumber(phone) {
+        if (!phone) return '';
+        let p = String(phone).replace(/\D/g, '');
+        if (p.startsWith('0')) p = '62' + p.slice(1);
+        else if (p.startsWith('8')) p = '62' + p;
+        return p;
+    }
+
+    // Resolve Mitra by customerId, regionId, or address
+    async resolveMitra({ customerId, regionId, address } = {}) {
+        try {
+            if (regionId) {
+                const res = await query(`
+                    SELECT m.id, m.name as mitra_name, m.phone, r.name as region_name
+                    FROM regions r
+                    JOIN mitra m ON m.id = r.mitra_id
+                    WHERE r.id = $1 AND m.disabled_at IS NULL
+                    LIMIT 1
+                `, [regionId]);
+                if (res.rows.length > 0 && res.rows[0].id) {
+                    return {
+                        id: res.rows[0].id,
+                        name: res.rows[0].mitra_name,
+                        phone: this.normalizePhoneNumber(res.rows[0].phone),
+                        regionName: res.rows[0].region_name
+                    };
+                }
+            }
+
+            if (customerId) {
+                const res = await query(`
+                    SELECT m.id, m.name as mitra_name, m.phone, r.name as region_name, c.address
+                    FROM customers c
+                    LEFT JOIN services s ON s.customer_id = c.id
+                    LEFT JOIN regions r ON s.region_id = r.id
+                    LEFT JOIN mitra m ON r.mitra_id = m.id
+                    WHERE c.id = $1 AND m.disabled_at IS NULL
+                    ORDER BY s.created_at DESC LIMIT 1
+                `, [customerId]);
+
+                if (res.rows.length > 0) {
+                    const row = res.rows[0];
+                    if (row.id && row.phone) {
+                        return {
+                            id: row.id,
+                            name: row.mitra_name,
+                            phone: this.normalizePhoneNumber(row.phone),
+                            regionName: row.region_name
+                        };
+                    }
+                    if (!address && row.address) {
+                        address = row.address;
+                    }
+                }
+            }
+
+            if (address) {
+                const detected = await this.detectMitraByAddress(address);
+                if (detected && detected.phone) {
+                    return {
+                        id: detected.id,
+                        name: detected.name,
+                        phone: this.normalizePhoneNumber(detected.phone),
+                        regionName: detected.name
+                    };
+                }
+            }
+
+            return null;
+        } catch (error) {
+            logger.warn(`Error resolving mitra: ${error.message}`);
+            return null;
+        }
+    }
+
+    // Get deduplicated recipients for an area (Superadmin, Mitra, Technician)
+    async getRecipientsForArea(params = {}) {
+        const recipientsMap = new Map();
+        const superadminPhone = await this.getSuperadminPhone();
+
+        if (params.includeSuperadmin !== false && superadminPhone) {
+            recipientsMap.set(superadminPhone, {
+                phone: superadminPhone,
+                roles: new Set(['superadmin']),
+                name: 'Superadmin'
+            });
+        }
+
+        const mitra = await this.resolveMitra(params);
+        if (mitra && mitra.phone) {
+            const mPhone = this.normalizePhoneNumber(mitra.phone);
+            if (recipientsMap.has(mPhone)) {
+                const item = recipientsMap.get(mPhone);
+                item.roles.add('mitra');
+                item.mitraName = mitra.name;
+            } else {
+                recipientsMap.set(mPhone, {
+                    phone: mPhone,
+                    roles: new Set(['mitra']),
+                    name: mitra.name,
+                    mitraName: mitra.name
+                });
+            }
+        }
+
+        if (params.technicianId) {
+            const techPhone = await this.getTechnicianPhone(params.technicianId);
+            const techName = await this.getTechnicianName(params.technicianId);
+            if (techPhone) {
+                const tPhone = this.normalizePhoneNumber(techPhone);
+                if (recipientsMap.has(tPhone)) {
+                    const item = recipientsMap.get(tPhone);
+                    item.roles.add('teknisi');
+                } else {
+                    recipientsMap.set(tPhone, {
+                        phone: tPhone,
+                        roles: new Set(['teknisi']),
+                        name: techName || 'Teknisi'
+                    });
+                }
+            }
+        }
+
+        const recipients = [];
+        for (const [phone, item] of recipientsMap.entries()) {
+            const rolesArr = Array.from(item.roles);
+            let roleLabel = 'admin';
+            if (item.roles.has('superadmin') && item.roles.has('mitra')) {
+                roleLabel = 'superadmin & mitra';
+            } else if (item.roles.has('superadmin')) {
+                roleLabel = 'superadmin';
+            } else if (item.roles.has('mitra')) {
+                roleLabel = 'mitra';
+            } else if (item.roles.has('teknisi')) {
+                roleLabel = 'teknisi';
+            }
+            recipients.push({
+                phone,
+                roleLabel,
+                name: item.name,
+                mitraName: item.mitraName || null,
+                roles: rolesArr
+            });
+        }
+        return { recipients, mitra };
+    }
+
+    async getOperationalRecipients(params = {}) {
+        const { recipients } = await this.getRecipientsForArea(params);
+        return recipients;
+    }
+
+    // 1. Notify New Ticket (Admin & Mitra)
+    async notifyNewTicket(ticketData) {
+        try {
+            const enabled = await this.isSettingEnabled('notif_ticket_new_enabled', true);
+            if (!enabled) {
+                logger.info(`[TicketNotif] New ticket notification disabled in settings. Skipping ticket ${ticketData.ticketNumber || ticketData.ticket_number}`);
+                return { success: true, skipped: true };
+            }
+
+            const companyInfo = await this.getCompanyInfo();
+            const { recipients, mitra } = await this.getRecipientsForArea({
+                customerId: ticketData.customerId || ticketData.customer_id,
+                address: ticketData.customerAddress || ticketData.address
+            });
+
+            if (recipients.length === 0) {
+                logger.warn(`[TicketNotif] No recipients found for ticket ${ticketData.ticketNumber || ticketData.ticket_number}`);
+                return { success: false, error: 'No recipients found' };
+            }
+
+            const template = await this.getTemplateFromDatabase('admin_new_ticket');
+            const ticketNumber = ticketData.ticketNumber || ticketData.ticket_number || '-';
+            const customerName = ticketData.customerName || ticketData.customer_name || 'Pelanggan';
+            const customerPhone = ticketData.customerPhone || ticketData.customer_phone || '-';
+            const customerAddress = ticketData.customerAddress || ticketData.address || '-';
+            const mitraName = mitra ? mitra.name : (ticketData.mitraName || 'KILUSI PUSAT');
+            const subject = ticketData.subject || '-';
+            const category = ticketData.category || 'General';
+            const priority = (ticketData.priority || 'Normal').toUpperCase();
+            const description = ticketData.description || ticketData.message || '-';
+            const createdAt = new Date().toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
+
+            let message;
+            if (template) {
+                message = this.replaceTemplateVariables(template.content, {
+                    ticketNumber,
+                    customerName,
+                    customerPhone,
+                    customerAddress,
+                    mitraName,
+                    subject,
+                    category,
+                    priority,
+                    description,
+                    createdAt,
+                    companyName: companyInfo.name
+                });
+            } else {
+                message = `🎫 *TIKET BANTUAN BARU*\n\nNomor    : ${ticketNumber}\nPelanggan: ${customerName}\nTelepon  : ${customerPhone}\nAlamat   : ${customerAddress}\nArea     : ${mitraName}\nSubjek   : ${subject}\nKategori : ${category}\nPrioritas: ${priority}\nWaktu    : ${createdAt}\n\nKeluhan:\n${description}\n\n_Pesan ini dikirim otomatis oleh sistem ${companyInfo.name}._`;
+            }
+
+            const results = [];
+            for (const r of recipients) {
+                const res = await this.sendNotification(r.phone, message, {
+                    forceProvider: 'baileys',
+                    skipDelay: true,
+                    notification_type: 'admin_new_ticket',
+                    customer_name: `${customerName} (${r.roleLabel})`
+                });
+                results.push({ phone: r.phone, role: r.roleLabel, success: res.success });
+                logger.info(`[TicketNotif] Sent new ticket ${ticketNumber} to ${r.phone} (${r.roleLabel}) -> ${res.success ? 'SUCCESS' : 'FAILED'}`);
+            }
+
+            return { success: results.some(r => r.success), results };
+        } catch (error) {
+            logger.error(`[TicketNotif] Error in notifyNewTicket:`, error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    // 2. Notify Ticket Resolved (Admin & Mitra)
+    async notifyTicketResolved(ticketData) {
+        try {
+            const enabled = await this.isSettingEnabled('notif_ticket_resolved_enabled', true);
+            if (!enabled) {
+                logger.info(`[TicketNotif] Ticket resolved notification disabled in settings. Skipping ticket ${ticketData.ticketNumber || ticketData.ticket_number}`);
+                return { success: true, skipped: true };
+            }
+
+            const companyInfo = await this.getCompanyInfo();
+            const { recipients, mitra } = await this.getRecipientsForArea({
+                customerId: ticketData.customerId || ticketData.customer_id,
+                address: ticketData.customerAddress || ticketData.address
+            });
+
+            if (recipients.length === 0) {
+                logger.warn(`[TicketNotif] No recipients found for resolved ticket ${ticketData.ticketNumber || ticketData.ticket_number}`);
+                return { success: false, error: 'No recipients found' };
+            }
+
+            const template = await this.getTemplateFromDatabase('admin_ticket_resolved');
+            const ticketNumber = ticketData.ticketNumber || ticketData.ticket_number || '-';
+            const customerName = ticketData.customerName || ticketData.customer_name || 'Pelanggan';
+            const customerPhone = ticketData.customerPhone || ticketData.customer_phone || '-';
+            const customerAddress = ticketData.customerAddress || ticketData.address || '-';
+            const mitraName = mitra ? mitra.name : (ticketData.mitraName || 'KILUSI PUSAT');
+            const subject = ticketData.subject || '-';
+            const category = ticketData.category || 'General';
+            const technicianName = ticketData.technicianName || ticketData.assigned_agent || 'Tim Support';
+            const resolutionNotes = ticketData.resolutionNotes || ticketData.resolution || 'Kendala telah diselesaikan oleh tim teknisi.';
+            const resolvedAt = new Date().toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
+
+            let message;
+            if (template) {
+                message = this.replaceTemplateVariables(template.content, {
+                    ticketNumber,
+                    customerName,
+                    customerPhone,
+                    customerAddress,
+                    mitraName,
+                    subject,
+                    category,
+                    technicianName,
+                    resolutionNotes,
+                    resolvedAt,
+                    companyName: companyInfo.name
+                });
+            } else {
+                message = `✅ *TIKET BANTUAN SELESAI*\n\nNomor    : ${ticketNumber}\nPelanggan: ${customerName}\nTelepon  : ${customerPhone}\nAlamat   : ${customerAddress}\nArea     : ${mitraName}\nSubjek   : ${subject}\nKategori : ${category}\nTeknisi  : ${technicianName}\nWaktu    : ${resolvedAt}\n\nCatatan Penyelesaian:\n${resolutionNotes}\n\n_Pesan ini dikirim otomatis oleh sistem ${companyInfo.name}._`;
+            }
+
+            const results = [];
+            for (const r of recipients) {
+                const res = await this.sendNotification(r.phone, message, {
+                    forceProvider: 'baileys',
+                    skipDelay: true,
+                    notification_type: 'admin_ticket_resolved',
+                    customer_name: `${customerName} (${r.roleLabel})`
+                });
+                results.push({ phone: r.phone, role: r.roleLabel, success: res.success });
+                logger.info(`[TicketNotif] Sent ticket resolved ${ticketNumber} to ${r.phone} (${r.roleLabel}) -> ${res.success ? 'SUCCESS' : 'FAILED'}`);
+            }
+
+            return { success: results.some(r => r.success), results };
+        } catch (error) {
+            logger.error(`[TicketNotif] Error in notifyTicketResolved:`, error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    // 3. Notify New Installation (Admin, Mitra & Teknisi)
+    async notifyNewInstallation(data) {
+        try {
+            const enabled = await this.isSettingEnabled('notif_installation_new_enabled', true);
+            if (!enabled) {
+                logger.info(`[InstallNotif] New installation notification disabled in settings. Skipping installation job ${data.jobNumber || data.id}`);
+                return { success: true, skipped: true };
+            }
+
+            const companyInfo = await this.getCompanyInfo();
+            const { recipients, mitra } = await this.getRecipientsForArea({
+                customerId: data.customerId || data.customer_id,
+                address: data.customerAddress || data.address,
+                technicianId: data.technicianId || data.technician_id
+            });
+
+            if (recipients.length === 0) {
+                logger.warn(`[InstallNotif] No recipients found for installation job ${data.jobNumber || data.id}`);
+                return { success: false, error: 'No recipients found' };
+            }
+
+            const template = await this.getTemplateFromDatabase('admin_new_installation');
+            const jobNumber = data.jobNumber || `INS-${data.id || data.customerId || data.customer_id || '0'}`;
+            const customerName = data.customerName || data.customer_name || 'Pelanggan';
+            const customerPhone = data.customerPhone || data.customer_phone || '-';
+            const customerAddress = data.customerAddress || data.address || '-';
+            const mitraName = mitra ? mitra.name : (data.mitraName || 'KILUSI PUSAT');
+            const packageName = data.packageName || data.package_name || 'Paket Standar';
+            const packageSpeed = data.packageSpeed || data.package_speed || '-';
+            const scheduleDate = data.scheduleDate || data.scheduled_date || '-';
+            const scheduleTime = data.scheduleTime || '-';
+            const technicianName = data.technicianName || (data.technicianId ? await this.getTechnicianName(data.technicianId) : 'Belum Ditugaskan') || 'Belum Ditugaskan';
+            const notes = data.notes || 'Tidak ada catatan tambahan';
+            const createdAt = new Date().toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
+
+            let message;
+            if (template) {
+                message = this.replaceTemplateVariables(template.content, {
+                    jobNumber,
+                    customerName,
+                    customerPhone,
+                    customerAddress,
+                    mitraName,
+                    packageName,
+                    packageSpeed,
+                    scheduleDate,
+                    scheduleTime,
+                    technicianName,
+                    notes,
+                    createdAt,
+                    companyName: companyInfo.name
+                });
+            } else {
+                message = `🔧 *JADWAL INSTALASI BARU*\n\nID Job   : ${jobNumber}\nPelanggan: ${customerName}\nTelepon  : ${customerPhone}\nAlamat   : ${customerAddress}\nArea     : ${mitraName}\nPaket    : ${packageName} (${packageSpeed})\nJadwal   : ${scheduleDate} ${scheduleTime}\nTeknisi  : ${technicianName}\nCatatan  : ${notes}\nWaktu    : ${createdAt}\n\n_Pesan ini dikirim otomatis oleh sistem ${companyInfo.name}._`;
+            }
+
+            const results = [];
+            for (const r of recipients) {
+                const res = await this.sendNotification(r.phone, message, {
+                    forceProvider: 'baileys',
+                    skipDelay: true,
+                    notification_type: 'admin_new_installation',
+                    customer_name: `${customerName} (${r.roleLabel})`
+                });
+                results.push({ phone: r.phone, role: r.roleLabel, success: res.success });
+                logger.info(`[InstallNotif] Sent new installation ${jobNumber} to ${r.phone} (${r.roleLabel}) -> ${res.success ? 'SUCCESS' : 'FAILED'}`);
+            }
+
+            return { success: results.some(r => r.success), results };
+        } catch (error) {
+            logger.error(`[InstallNotif] Error in notifyNewInstallation:`, error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    // 4. Notify Installation Completed (Admin & Mitra)
+    async notifyInstallationCompleted(data) {
+        try {
+            const enabled = await this.isSettingEnabled('notif_installation_completed_enabled', true);
+            if (!enabled) {
+                logger.info(`[InstallNotif] Installation completed notification disabled in settings. Skipping installation job ${data.jobNumber || data.id}`);
+                return { success: true, skipped: true };
+            }
+
+            const companyInfo = await this.getCompanyInfo();
+            const { recipients, mitra } = await this.getRecipientsForArea({
+                customerId: data.customerId || data.customer_id,
+                address: data.customerAddress || data.address
+            });
+
+            if (recipients.length === 0) {
+                logger.warn(`[InstallNotif] No recipients found for installation completed ${data.jobNumber || data.id}`);
+                return { success: false, error: 'No recipients found' };
+            }
+
+            const template = await this.getTemplateFromDatabase('admin_installation_completed');
+            const jobNumber = data.jobNumber || `INS-${data.id || data.customerId || data.customer_id || '0'}`;
+            const serviceNumber = data.serviceNumber || data.service_number || '-';
+            const customerName = data.customerName || data.customer_name || 'Pelanggan';
+            const customerPhone = data.customerPhone || data.customer_phone || '-';
+            const customerAddress = data.customerAddress || data.address || '-';
+            const mitraName = mitra ? mitra.name : (data.mitraName || 'KILUSI PUSAT');
+            const packageName = data.packageName || data.package_name || '-';
+            const technicianName = data.technicianName || (data.technicianId ? await this.getTechnicianName(data.technicianId) : 'Tim Teknisi') || 'Tim Teknisi';
+            const completedAt = new Date().toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
+
+            let message;
+            if (template) {
+                message = this.replaceTemplateVariables(template.content, {
+                    jobNumber,
+                    serviceNumber,
+                    customerName,
+                    customerPhone,
+                    customerAddress,
+                    mitraName,
+                    packageName,
+                    technicianName,
+                    completedAt,
+                    companyName: companyInfo.name
+                });
+            } else {
+                message = `🎉 *INSTALASI SELESAI*\n\nID Job    : ${jobNumber}\nNo Layanan: ${serviceNumber}\nPelanggan : ${customerName}\nTelepon   : ${customerPhone}\nAlamat    : ${customerAddress}\nArea      : ${mitraName}\nPaket     : ${packageName}\nTeknisi   : ${technicianName}\nWaktu     : ${completedAt}\n\nLayanan telah aktif dan siap digunakan pelanggan.\n\n_Pesan ini dikirim otomatis oleh sistem ${companyInfo.name}._`;
+            }
+
+            const results = [];
+            for (const r of recipients) {
+                const res = await this.sendNotification(r.phone, message, {
+                    forceProvider: 'baileys',
+                    skipDelay: true,
+                    notification_type: 'admin_installation_completed',
+                    customer_name: `${customerName} (${r.roleLabel})`
+                });
+                results.push({ phone: r.phone, role: r.roleLabel, success: res.success });
+                logger.info(`[InstallNotif] Sent installation completed ${jobNumber} to ${r.phone} (${r.roleLabel}) -> ${res.success ? 'SUCCESS' : 'FAILED'}`);
+            }
+
+            return { success: results.some(r => r.success), results };
+        } catch (error) {
+            logger.error(`[InstallNotif] Error in notifyInstallationCompleted:`, error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    // 5. Send Daily Transaction Recap (Yesterday's Transactions)
+    async sendDailyTransactionRecap(targetDate = null) {
+        try {
+            const enabled = await this.isSettingEnabled('notif_daily_recap_enabled', true);
+            if (!enabled) {
+                logger.info(`[DailyRecap] Daily recap notification disabled in settings. Skipping recap.`);
+                return { success: true, skipped: true };
+            }
+
+            // Determine target date and formatted label
+            const dateRes = await query(`
+                SELECT 
+                    to_char(COALESCE($1::date, CURRENT_DATE - INTERVAL '1 day'), 'YYYY-MM-DD') as target_date,
+                    to_char(COALESCE($1::date, CURRENT_DATE - INTERVAL '1 day'), 'DD/MM/YYYY') as formatted_date
+            `, [targetDate]);
+            const targetDateStr = dateRes.rows[0].target_date;
+            const formattedDateStr = dateRes.rows[0].formatted_date;
+
+            logger.info(`[DailyRecap] Compiling recap for date: ${targetDateStr} (${formattedDateStr})`);
+
+            // Query target date's payments
+            const paymentsRes = await query(`
+                SELECT 
+                    p.id,
+                    p.amount,
+                    p.payment_method,
+                    p.payment_gateway,
+                    p.payment_date,
+                    i.invoice_number,
+                    i.service_number,
+                    c.id as customer_id,
+                    c.name as customer_name,
+                    c.phone as customer_phone,
+                    m.id as mitra_id,
+                    COALESCE(m.name, 'KILUSI PUSAT') as mitra_name,
+                    m.phone as mitra_phone
+                FROM payments p
+                JOIN invoices i ON p.invoice_id = i.id
+                JOIN customers c ON i.customer_id = c.id
+                LEFT JOIN services s ON (s.service_number = i.service_number OR (i.service_number IS NULL AND s.customer_id = c.id))
+                LEFT JOIN regions r ON s.region_id = r.id
+                LEFT JOIN mitra m ON r.mitra_id = m.id
+                WHERE p.is_rolled_back = false
+                  AND p.payment_date >= ($1::date)
+                  AND p.payment_date < ($1::date + INTERVAL '1 day')
+                ORDER BY p.payment_date ASC
+            `, [targetDateStr]);
+
+            const payments = paymentsRes.rows;
+            const companyInfo = await this.getCompanyInfo();
+            const formatRp = (num) => 'Rp ' + Number(num || 0).toLocaleString('id-ID');
+
+            // Categorize payments
+            let cashTotal = 0, transferTotal = 0, autopayTotal = 0, tripayTotal = 0;
+            let totalRevenue = 0;
+            const mitraMap = new Map();
+
+            for (const p of payments) {
+                const amt = Number(p.amount || 0);
+                totalRevenue += amt;
+
+                const gw = String(p.payment_gateway || '').toLowerCase();
+                const meth = String(p.payment_method || '').toLowerCase();
+
+                let category = 'transfer';
+                if (gw === 'autopay' || meth.includes('autopay')) {
+                    autopayTotal += amt;
+                    category = 'Autopay';
+                } else if (gw === 'tripay' || meth.includes('tripay')) {
+                    tripayTotal += amt;
+                    category = 'Tripay';
+                } else if (meth === 'cash' || meth === 'tunai') {
+                    cashTotal += amt;
+                    category = 'Tunai';
+                } else {
+                    transferTotal += amt;
+                    category = 'Transfer';
+                }
+
+                const mKey = p.mitra_id || p.mitra_name;
+                if (!mitraMap.has(mKey)) {
+                    mitraMap.set(mKey, {
+                        id: p.mitra_id,
+                        name: p.mitra_name,
+                        phone: p.mitra_phone ? this.normalizePhoneNumber(p.mitra_phone) : null,
+                        count: 0,
+                        total: 0,
+                        tunai: 0,
+                        transfer: 0,
+                        autopay: 0,
+                        tripay: 0,
+                        items: []
+                    });
+                }
+                const mData = mitraMap.get(mKey);
+                mData.count += 1;
+                mData.total += amt;
+                if (category === 'Autopay') mData.autopay += amt;
+                else if (category === 'Tripay') mData.tripay += amt;
+                else if (category === 'Tunai') mData.tunai += amt;
+                else mData.transfer += amt;
+
+                mData.items.push({
+                    customerName: p.customer_name,
+                    amount: amt,
+                    method: category,
+                    invoiceNumber: p.invoice_number
+                });
+            }
+
+            // 1. Build Superadmin Recap Message
+            const superadminPhone = await this.getSuperadminPhone();
+            const adminTemplate = await this.getTemplateFromDatabase('admin_daily_recap');
+
+            let mitraBreakdownLines = [];
+            for (const mData of mitraMap.values()) {
+                mitraBreakdownLines.push(`• ${mData.name}: ${formatRp(mData.total)} (${mData.count} trx)`);
+            }
+            const mitraBreakdown = mitraBreakdownLines.length > 0 
+                ? mitraBreakdownLines.join('\n') 
+                : '- (Tidak ada transaksi)';
+
+            let adminMessage;
+            if (adminTemplate) {
+                adminMessage = this.replaceTemplateVariables(adminTemplate.content, {
+                    recapDate: formattedDateStr,
+                    totalRevenue: formatRp(totalRevenue),
+                    totalTransactions: String(payments.length),
+                    cashTotal: formatRp(cashTotal),
+                    transferTotal: formatRp(transferTotal),
+                    autopayTotal: formatRp(autopayTotal),
+                    tripayTotal: formatRp(tripayTotal),
+                    mitraBreakdown,
+                    companyName: companyInfo.name
+                });
+            } else {
+                adminMessage = `📊 *REKAP TRANSAKSI HARIAN KEMARIN*\nTanggal: ${formattedDateStr} (00:00 - 23:59 WIB)\n\n💰 *Total Pendapatan:* ${formatRp(totalRevenue)}\n🔢 *Total Transaksi:* ${payments.length} transaksi\n\n💳 *Rincian Metode Pembayaran:*\n• Tunai    : ${formatRp(cashTotal)}\n• Transfer : ${formatRp(transferTotal)}\n• Autopay  : ${formatRp(autopayTotal)}\n• Tripay   : ${formatRp(tripayTotal)}\n\n📍 *Kontribusi Per Area / Mitra:*\n${mitraBreakdown}\n\n_Laporan otomatis sistem ${companyInfo.name}._`;
+            }
+
+            const sendResults = [];
+            if (superadminPhone) {
+                const superRes = await this.sendNotification(superadminPhone, adminMessage, {
+                    forceProvider: 'baileys',
+                    skipDelay: true,
+                    notification_type: 'admin_daily_recap',
+                    customer_name: 'Superadmin'
+                });
+                sendResults.push({ target: 'Superadmin', phone: superadminPhone, success: superRes.success });
+                logger.info(`[DailyRecap] Global recap sent to Superadmin (${superadminPhone}) -> ${superRes.success ? 'SUCCESS' : 'FAILED'}`);
+            }
+
+            // 2. Build and Send Mitra Specific Recap Messages
+            const mitraTemplate = await this.getTemplateFromDatabase('mitra_daily_recap');
+
+            for (const mData of mitraMap.values()) {
+                if (!mData.phone || mData.count === 0) continue;
+
+                const pBreakdown = [
+                    mData.tunai ? `• Tunai: ${formatRp(mData.tunai)}` : null,
+                    mData.transfer ? `• Transfer: ${formatRp(mData.transfer)}` : null,
+                    mData.autopay ? `• Autopay: ${formatRp(mData.autopay)}` : null,
+                    mData.tripay ? `• Tripay: ${formatRp(mData.tripay)}` : null
+                ].filter(Boolean).join('\n') || '• -';
+
+                const trxList = mData.items.slice(0, 30).map((it, idx) => {
+                    return `${idx + 1}. ${it.customerName} - ${formatRp(it.amount)} (${it.method})`;
+                }).join('\n') + (mData.items.length > 30 ? `\n...dan ${mData.items.length - 30} transaksi lainnya.` : '');
+
+                let mitraMessage;
+                if (mitraTemplate) {
+                    mitraMessage = this.replaceTemplateVariables(mitraTemplate.content, {
+                        mitraName: mData.name,
+                        recapDate: formattedDateStr,
+                        totalRevenue: formatRp(mData.total),
+                        totalTransactions: String(mData.count),
+                        paymentBreakdown: pBreakdown,
+                        transactionList: trxList || '- (Tidak ada rincian)',
+                        companyName: companyInfo.name
+                    });
+                } else {
+                    mitraMessage = `📊 *REKAP TRANSAKSI AREA: ${mData.name}*\nTanggal: ${formattedDateStr} (00:00 - 23:59 WIB)\n\n💰 *Total Pendapatan:* ${formatRp(mData.total)}\n🔢 *Total Transaksi:* ${mData.count} transaksi\n\n💳 *Metode Pembayaran:*\n${pBreakdown}\n\n📝 *Rincian Transaksi:*\n${trxList || '- (Tidak ada rincian)'}\n\n_Laporan otomatis sistem ${companyInfo.name}._`;
+                }
+
+                const mRes = await this.sendNotification(mData.phone, mitraMessage, {
+                    forceProvider: 'baileys',
+                    skipDelay: true,
+                    notification_type: 'mitra_daily_recap',
+                    customer_name: `Mitra ${mData.name}`
+                });
+                sendResults.push({ target: `Mitra ${mData.name}`, phone: mData.phone, success: mRes.success });
+                logger.info(`[DailyRecap] Recap sent to Mitra ${mData.name} (${mData.phone}) -> ${mRes.success ? 'SUCCESS' : 'FAILED'}`);
+            }
+
+            return {
+                success: true,
+                target_date: targetDateStr,
+                total_revenue: totalRevenue,
+                total_transactions: payments.length,
+                results: sendResults
+            };
+        } catch (error) {
+            logger.error(`[DailyRecap] Error in sendDailyTransactionRecap:`, error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    // 6. Network Device DOWN Alert
+    async sendNetworkDeviceDownAlert({ type = 'nas', name = 'Device', ip = '-', downTime = null } = {}) {
+        try {
+            const devType = String(type).toLowerCase();
+            if (devType === 'nas') {
+                const nasEnabled = await this.isSettingEnabled('nas_monitoring_enabled', true);
+                if (!nasEnabled) return { success: true, skipped: true, reason: 'NAS monitoring disabled' };
+            } else if (devType === 'olt') {
+                const oltEnabled = await this.isSettingEnabled('olt_monitoring_enabled', false);
+                if (!oltEnabled) return { success: true, skipped: true, reason: 'OLT monitoring disabled' };
+            }
+
+            const companyInfo = await this.getCompanyInfo();
+            const superadminPhone = await this.getSuperadminPhone();
+            const eventTime = (downTime ? new Date(downTime) : new Date()).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'medium' });
+
+            const template = await this.getTemplateFromDatabase('network_device_alert');
+            const statusIcon = '🔴';
+            const statusTitle = 'DOWN / UNREACHABLE';
+            const detailInfo = 'Perangkat tidak merespons probe ICMP ping (unreachable).';
+
+            let message;
+            if (template) {
+                message = this.replaceTemplateVariables(template.content, {
+                    statusIcon,
+                    statusTitle,
+                    deviceType: devType.toUpperCase(),
+                    deviceName: name,
+                    deviceIp: ip,
+                    eventTime,
+                    detailInfo,
+                    companyName: companyInfo.name
+                });
+            } else {
+                message = `🔴 *ALERT MONITORING JARINGAN*\n\nStatus   : *${statusTitle}*\nTipe     : ${devType.toUpperCase()}\nNama     : ${name}\nIP Host  : ${ip}\nWaktu    : ${eventTime}\nInfo     : ${detailInfo}\n\n_Pesan otomatis sistem monitoring ${companyInfo.name}._`;
+            }
+
+            logger.warn(`[NetworkAlert] Alert DOWN triggered for ${devType.toUpperCase()} ${name} (${ip})`);
+
+            if (superadminPhone) {
+                await this.sendNotification(superadminPhone, message, {
+                    forceProvider: 'baileys',
+                    skipDelay: true,
+                    notification_type: 'network_device_alert',
+                    customer_name: `Network Monitor (${name})`
+                });
+            }
+
+            return { success: true };
+        } catch (error) {
+            logger.error(`[NetworkAlert] Error in sendNetworkDeviceDownAlert:`, error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    // 7. Network Device UP (Recovered) Alert
+    async sendNetworkDeviceUpAlert({ type = 'nas', name = 'Device', ip = '-', latency = 0, recoveryTime = null } = {}) {
+        try {
+            const devType = String(type).toLowerCase();
+            if (devType === 'nas') {
+                const nasEnabled = await this.isSettingEnabled('nas_monitoring_enabled', true);
+                if (!nasEnabled) return { success: true, skipped: true, reason: 'NAS monitoring disabled' };
+            } else if (devType === 'olt') {
+                const oltEnabled = await this.isSettingEnabled('olt_monitoring_enabled', false);
+                if (!oltEnabled) return { success: true, skipped: true, reason: 'OLT monitoring disabled' };
+            }
+
+            const companyInfo = await this.getCompanyInfo();
+            const superadminPhone = await this.getSuperadminPhone();
+            const eventTime = (recoveryTime ? new Date(recoveryTime) : new Date()).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'medium' });
+
+            const template = await this.getTemplateFromDatabase('network_device_alert');
+            const statusIcon = '🟢';
+            const statusTitle = 'RECOVERED (UP)';
+            const detailInfo = `Latency: ${latency} ms. Perangkat kembali online normal.`;
+
+            let message;
+            if (template) {
+                message = this.replaceTemplateVariables(template.content, {
+                    statusIcon,
+                    statusTitle,
+                    deviceType: devType.toUpperCase(),
+                    deviceName: name,
+                    deviceIp: ip,
+                    eventTime,
+                    detailInfo,
+                    companyName: companyInfo.name
+                });
+            } else {
+                message = `🟢 *ALERT MONITORING JARINGAN*\n\nStatus   : *${statusTitle}*\nTipe     : ${devType.toUpperCase()}\nNama     : ${name}\nIP Host  : ${ip}\nWaktu    : ${eventTime}\nInfo     : ${detailInfo}\n\n_Pesan otomatis sistem monitoring ${companyInfo.name}._`;
+            }
+
+            logger.info(`[NetworkAlert] Alert RECOVERED UP triggered for ${devType.toUpperCase()} ${name} (${ip})`);
+
+            if (superadminPhone) {
+                await this.sendNotification(superadminPhone, message, {
+                    forceProvider: 'baileys',
+                    skipDelay: true,
+                    notification_type: 'network_device_alert',
+                    customer_name: `Network Monitor (${name})`
+                });
+            }
+
+            return { success: true };
+        } catch (error) {
+            logger.error(`[NetworkAlert] Error in sendNetworkDeviceUpAlert:`, error);
             return { success: false, error: error.message };
         }
     }

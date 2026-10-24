@@ -163,6 +163,27 @@ router.post('/', jwtAuth, asyncHandler(async (req, res) => {
         // Don't fail the request if notification fails
     }
 
+    // Send operational notification to Admin & Mitra
+    try {
+        const whatsappNotifications = require('../../../config/whatsapp-notifications');
+        await whatsappNotifications.notifyNewInstallation({
+            jobNumber: `INS-${installation.id}`,
+            customerId: customer_id,
+            customerName: customerResult.rows[0].name,
+            customerPhone: customerResult.rows[0].phone,
+            customerAddress: customerResult.rows[0].address,
+            packageName: packageName,
+            packageSpeed: packageSpeed,
+            scheduleDate: scheduled_date ? new Date(scheduled_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) : '-',
+            scheduleTime: scheduled_date ? new Date(scheduled_date).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '-',
+            technicianId: technician_id,
+            notes: notes
+        });
+        logger.info(`📱 Admin & Mitra notified about new installation INS-${installation.id}`);
+    } catch (adminNotifError) {
+        logger.error(`Failed to send installation notification to admin/mitra:`, adminNotifError.message);
+    }
+
     return res.sendCreated({ installation: installation }, {
         technician_notified: true
     });
@@ -218,6 +239,32 @@ router.put('/:id', jwtAuth, asyncHandler(async (req, res) => {
             logger.warn(`Failed to trigger technician fee for installation ${installationId}: ${e.message}`);
         }
     }
+
+        // Notify Admin & Mitra of completed installation
+        try {
+            const whatsappNotifications = require('../../../config/whatsapp-notifications');
+            const custRes = await query(`
+                SELECT c.name, c.phone, c.address, s.service_number, p.name as package_name
+                FROM customers c
+                LEFT JOIN services s ON s.customer_id = c.id
+                LEFT JOIN packages p ON p.id = s.package_id
+                WHERE c.id = $1 LIMIT 1
+            `, [result.rows[0].customer_id]);
+            const cust = custRes.rows[0] || {};
+            await whatsappNotifications.notifyInstallationCompleted({
+                jobNumber: `INS-${installationId}`,
+                customerId: result.rows[0].customer_id,
+                customerName: cust.name,
+                customerPhone: cust.phone,
+                customerAddress: cust.address,
+                serviceNumber: cust.service_number,
+                packageName: cust.package_name,
+                technicianId: result.rows[0].technician_id
+            });
+            logger.info(`📱 Admin & Mitra notified of completed installation INS-${installationId}`);
+        } catch (notifErr) {
+            logger.error(`Failed to send installation completed notification:`, notifErr.message);
+        }
 
     return res.sendSuccess({ installation: result.rows[0] });
 }));

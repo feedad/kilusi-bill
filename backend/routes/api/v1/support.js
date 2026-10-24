@@ -286,24 +286,25 @@ router.post('/tickets', upload.array('attachments', 5), asyncHandler(async (req,
         // Don't fail the request if notification fails
     }
 
-    // Send ticket created notification to admins
+    // Send ticket created notification to Admin & Mitra
     try {
         const whatsappNotifications = require('../../../config/whatsapp-notifications');
-        await whatsappNotifications.notifyAdminsNewTicket({
+        await whatsappNotifications.notifyNewTicket({
             ticketNumber: ticketNumber,
+            customerId: customer_id,
             customerName: customer_name,
             customerPhone: customer_phone,
+            customerAddress: customer_address,
             subject: subject,
             category: category,
             priority: priority,
-            description: description
+            description: initial_message || description
         });
-        logger.info(`📱 Admin notified about new ticket ${ticketNumber}`);
+        logger.info(`📱 Admin & Mitra notified about new ticket ${ticketNumber}`);
     } catch (notifError) {
-        logger.error(`Failed to send admin notification for ticket ${ticketNumber}:`, notifError.message);
+        logger.error(`Failed to send admin/mitra notification for ticket ${ticketNumber}:`, notifError.message);
         // Don't fail the request if notification fails
     }
-
     return res.sendCreated({ ticket }, meta);
 }));
 
@@ -538,6 +539,27 @@ router.put('/tickets/:id', asyncHandler(async (req, res) => {
         } catch (notifError) {
             logger.error(`Failed to send ticket updated notification:`, notifError.message);
             // Don't fail the request if notification fails
+        }
+    }
+
+    // Send ticket resolved notification to Admin & Mitra if status changed to resolved
+    if (status === 'resolved' && currentTicket.status !== 'resolved') {
+        try {
+            const whatsappNotifications = require('../../../config/whatsapp-notifications');
+            await whatsappNotifications.notifyTicketResolved({
+                ticketNumber: updatedTicket.ticket_number,
+                customerId: updatedTicket.customer_id,
+                customerName: updatedTicket.customer_name,
+                customerPhone: updatedTicket.customer_phone,
+                customerAddress: updatedTicket.customer_address,
+                subject: updatedTicket.subject,
+                category: updatedTicket.category,
+                technicianName: assigned_agent || updatedTicket.assigned_to || 'Tim Support',
+                resolutionNotes: req.body.resolution || req.body.notes || 'Kendala telah diselesaikan oleh tim teknisi.'
+            });
+            logger.info(`📱 Admin & Mitra notified about resolved ticket ${updatedTicket.ticket_number}`);
+        } catch (notifErr) {
+            logger.error(`Failed to send resolved ticket notification to admin/mitra:`, notifErr.message);
         }
     }
 

@@ -15,10 +15,12 @@ class InvoiceScheduler {
         this.tasks = {
             invoice: null,
             reminder: null,
-            suspension: null
+            suspension: null,
+            dailyRecap: null
         };
         this.initScheduler();
     }
+
 
     initScheduler() {
         // All dynamic times loaded from billing_settings via rescheduleDynamicJobs()
@@ -737,10 +739,10 @@ class InvoiceScheduler {
     async rescheduleDynamicJobs() {
         try {
             logger.info('Rescheduling dynamic cron jobs...');
-            
             if (this.tasks.invoice) { this.tasks.invoice.stop(); this.tasks.invoice = null; }
             if (this.tasks.reminder) { this.tasks.reminder.stop(); this.tasks.reminder = null; }
             if (this.tasks.suspension) { this.tasks.suspension.stop(); this.tasks.suspension = null; }
+            if (this.tasks.dailyRecap) { this.tasks.dailyRecap.stop(); this.tasks.dailyRecap = null; }
 
             const BillingCycleService = require('./billing-cycle-service');
             const settings = await BillingCycleService.getBillingSettings();
@@ -780,6 +782,32 @@ class InvoiceScheduler {
                     const serviceSuspension = require('./serviceSuspension');
                     await serviceSuspension.checkAndSuspendOverdueCustomers();
                 } catch (err) { logger.error('Suspension cron error:', err); }
+            }, { scheduled: true, timezone: "Asia/Jakarta" });
+
+            // 4. Daily Transaction Recap Job (Yesterday's summary)
+            let recapTime = '07:00';
+            try {
+                const { query } = require('./database');
+                const rcRes = await query("SELECT value FROM app_config WHERE key = 'daily_recap_time' LIMIT 1");
+                if (rcRes.rows.length > 0 && rcRes.rows[0].value) {
+                    recapTime = rcRes.rows[0].value.trim();
+                }
+            } catch (rcErr) {
+                logger.warn(`[Scheduler] Could not fetch daily_recap_time from app_config: ${rcErr.message}`);
+            }
+
+            const [rcHour, rcMinute] = (recapTime || '07:00').split(':').map(Number);
+            const safeRcHour = (!isNaN(rcHour) && rcHour >= 0 && rcHour <= 23) ? rcHour : 7;
+            const safeRcMinute = (!isNaN(rcMinute) && rcMinute >= 0 && rcMinute <= 59) ? rcMinute : 0;
+            const dailyRecapExpr = `${safeRcMinute} ${safeRcHour} * * *`;
+
+            logger.info(`Scheduling daily transaction recap at ${safeRcHour}:${String(safeRcMinute).padStart(2, '0')} (${dailyRecapExpr})`);
+            this.tasks.dailyRecap = cron.schedule(dailyRecapExpr, async () => {
+                try {
+                    logger.info('[DailyRecap] Running scheduled daily transaction recap...');
+                    const whatsappNotifications = require('./whatsapp-notifications');
+                    await whatsappNotifications.sendDailyTransactionRecap();
+                } catch (err) { logger.error('[DailyRecap] Cron error:', err); }
             }, { scheduled: true, timezone: "Asia/Jakarta" });
         } catch (error) {
             logger.error('Error rescheduling dynamic jobs:', error);

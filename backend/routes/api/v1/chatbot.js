@@ -534,6 +534,25 @@ router.post('/support', chatbotAuth, async (req, res) => {
             logger.error(`Failed to send ticket WA notification:`, notifError.message);
         }
 
+        // Send WhatsApp notification to Admin & Mitra
+        try {
+            const whatsappNotifications = require('../../../config/whatsapp-notifications');
+            await whatsappNotifications.notifyNewTicket({
+                ticketNumber: ticketNumber,
+                customerId: customer.id,
+                customerName: customer.name,
+                customerPhone: phoneVariants[0],
+                customerAddress: customer.address,
+                subject: subject,
+                category: 'general',
+                priority: 'normal',
+                description: description || message
+            });
+            logger.info(`📱 Admin & Mitra notified about chatbot ticket ${ticketNumber}`);
+        } catch (adminNotifError) {
+            logger.error(`Failed to send admin/mitra WA notification for chatbot ticket:`, adminNotifError.message);
+        }
+
         return res.json({
             success: true,
             ticket: {

@@ -363,6 +363,30 @@ router.post('/:id/process', jwtAuth, asyncHandler(async (req, res) => {
             }
         }
 
+        // Notify Admin, Mitra & Technician about new installation
+        try {
+            const packageData = await getOne(
+                'SELECT id, name, speed, price FROM packages WHERE id = $1',
+                [customer.selected_package_id]
+            );
+            await whatsappNotifications.notifyNewInstallation({
+                jobNumber: `INS-${customer.id}`,
+                customerId: customer.id,
+                customerName: customer.name,
+                customerPhone: customer.phone,
+                customerAddress: customer.address || '',
+                packageName: packageData?.name || '',
+                packageSpeed: packageData?.speed || '',
+                scheduleDate: scheduled_date ? new Date(scheduled_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) : '-',
+                scheduleTime: scheduled_date ? new Date(scheduled_date).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '-',
+                technicianId: technician_id,
+                notes: notes || 'Pendaftaran disetujui, siap instalasi.'
+            });
+            logger.info(`📱 Admin & Mitra notified about new installation INS-${customer.id}`);
+        } catch (notifErr) {
+            logger.warn(`Failed to send installation notification for customer ${req.params.id}:`, notifErr.message);
+        }
+
         logger.info(`Customer ${req.params.id} processed: service + installation created`);
 
         return res.sendSuccess({

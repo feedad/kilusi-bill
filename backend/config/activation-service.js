@@ -7,7 +7,7 @@ class ActivationService {
     async activateCustomer(customerId, activatedBy = 'admin') {
         // 1. Get current service & customer data
         const serviceResult = await getOne(`
-            SELECT s.*, s.billing_type, c.name as customer_name, c.phone, s.status as customer_status
+            SELECT s.*, s.billing_type, c.name as customer_name, c.phone, c.address, s.status as customer_status
             FROM services s
             JOIN customers c ON c.id = s.customer_id
             WHERE s.customer_id = $1
@@ -92,6 +92,22 @@ class ActivationService {
                     customerId, invoice.id
                 );
             }
+
+            // Notify Admin & Mitra of completed installation / activation
+            const installRow = await getOne(
+                'SELECT technician_id FROM installations WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1',
+                [customerId]
+            );
+            await whatsappNotifications.notifyInstallationCompleted({
+                jobNumber: `ACT-${serviceResult.service_number || customerId}`,
+                customerId: customerId,
+                customerName: serviceResult.customer_name,
+                customerPhone: serviceResult.phone,
+                customerAddress: serviceResult.address,
+                serviceNumber: serviceResult.service_number,
+                packageName: pkg ? pkg.name : '',
+                technicianId: installRow ? installRow.technician_id : null
+            });
         } catch (e) {
             logger.error(`Failed to send activation notifications for ${customerId}:`, e.message);
         }

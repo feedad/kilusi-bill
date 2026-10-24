@@ -61,6 +61,7 @@ import GatewaySettings from '@/components/WhatsApp/GatewaySettings'
 import { OmnichatDashboard } from '@/components/WhatsApp/Omnichat'
 import CreateTemplateModal from '@/components/WhatsApp/CreateTemplateModal'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
+import OperationalNotificationsTab from '@/components/WhatsApp/OperationalNotificationsTab'
 
 export default function WhatsAppDashboard() {
   const {
@@ -1562,7 +1563,7 @@ export default function WhatsAppDashboard() {
 
       {/* Main Content Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="dashboard">
             <BarChart3 className="w-4 h-4 mr-2" />
             Dashboard
@@ -1574,6 +1575,10 @@ export default function WhatsAppDashboard() {
           <TabsTrigger value="send">
             <Send className="w-4 h-4 mr-2" />
             Send Broadcast
+          </TabsTrigger>
+          <TabsTrigger value="operational">
+            <Activity className="w-4 h-4 mr-2" />
+            Notifikasi Operasional
           </TabsTrigger>
           <TabsTrigger value="settings">
             <Settings className="w-4 h-4 mr-2" />
@@ -2232,6 +2237,11 @@ export default function WhatsAppDashboard() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Operational Notifications Tab */}
+        <TabsContent value="operational" className="space-y-4">
+          <OperationalNotificationsTab />
         </TabsContent>
 
       </Tabs>

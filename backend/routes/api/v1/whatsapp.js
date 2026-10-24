@@ -461,4 +461,119 @@ router.get('/gateways/fonnte/status', asyncHandler(async (req, res) => {
     }
 }));
 
+// ============================================================================
+// Operational Notification Settings & Triggers
+// ============================================================================
+
+// GET /api/v1/whatsapp/operational-settings
+router.get('/operational-settings', asyncHandler(async (req, res) => {
+    const { getSetting } = require('../../../config/settingsManager');
+
+    // Fetch admins
+    const adminsRes = await query(`
+        SELECT id, username, name, email, phone, role
+        FROM users
+        WHERE is_active = true AND role IN ('admin', 'superadmin', 'administrator')
+        ORDER BY role DESC, username ASC
+    `);
+
+    // Fetch mitras
+    const mitrasRes = await query(`
+        SELECT id, name, phone, email, address
+        FROM mitra
+        WHERE disabled_at IS NULL
+        ORDER BY name ASC
+    `);
+
+    const parseBool = (val, def = true) => {
+        if (val === undefined || val === null || val === '') return def;
+        return val === true || val === 'true' || val === 1 || val === '1';
+    };
+
+    const settings = {
+        notif_ticket_new_enabled: parseBool(getSetting('notif_ticket_new_enabled', 'true')),
+        notif_ticket_resolved_enabled: parseBool(getSetting('notif_ticket_resolved_enabled', 'true')),
+        notif_installation_new_enabled: parseBool(getSetting('notif_installation_new_enabled', 'true')),
+        notif_installation_completed_enabled: parseBool(getSetting('notif_installation_completed_enabled', 'true')),
+        notif_daily_recap_enabled: parseBool(getSetting('notif_daily_recap_enabled', 'true')),
+        daily_recap_time: getSetting('daily_recap_time', '07:00'),
+        nas_monitoring_enabled: parseBool(getSetting('nas_monitoring_enabled', 'true')),
+        olt_monitoring_enabled: parseBool(getSetting('olt_monitoring_enabled', 'true')),
+        admin_phone_number: getSetting('admin_phone_number', '')
+    };
+
+    res.json({
+        success: true,
+        data: {
+            settings,
+            admins: adminsRes.rows,
+            mitras: mitrasRes.rows
+        }
+    });
+}));
+
+// PUT /api/v1/whatsapp/operational-settings
+router.put('/operational-settings', asyncHandler(async (req, res) => {
+    const { updateSetting } = require('../../../config/settingsManager');
+    const {
+        notif_ticket_new_enabled,
+        notif_ticket_resolved_enabled,
+        notif_installation_new_enabled,
+        notif_installation_completed_enabled,
+        notif_daily_recap_enabled,
+        daily_recap_time,
+        nas_monitoring_enabled,
+        olt_monitoring_enabled,
+        admin_phone_number
+    } = req.body;
+
+    if (notif_ticket_new_enabled !== undefined) await updateSetting('notif_ticket_new_enabled', String(notif_ticket_new_enabled));
+    if (notif_ticket_resolved_enabled !== undefined) await updateSetting('notif_ticket_resolved_enabled', String(notif_ticket_resolved_enabled));
+    if (notif_installation_new_enabled !== undefined) await updateSetting('notif_installation_new_enabled', String(notif_installation_new_enabled));
+    if (notif_installation_completed_enabled !== undefined) await updateSetting('notif_installation_completed_enabled', String(notif_installation_completed_enabled));
+    if (notif_daily_recap_enabled !== undefined) await updateSetting('notif_daily_recap_enabled', String(notif_daily_recap_enabled));
+    if (daily_recap_time !== undefined) {
+        await updateSetting('daily_recap_time', daily_recap_time);
+        try {
+            const scheduler = require('../../../config/scheduler');
+            if (scheduler && typeof scheduler.rescheduleDynamicJobs === 'function') {
+                scheduler.rescheduleDynamicJobs().catch(() => {});
+            }
+        } catch (e) {}
+    }
+    if (nas_monitoring_enabled !== undefined) {
+        await updateSetting('nas_monitoring_enabled', String(nas_monitoring_enabled));
+    }
+    if (olt_monitoring_enabled !== undefined) {
+        await updateSetting('olt_monitoring_enabled', String(olt_monitoring_enabled));
+    }
+    if (admin_phone_number !== undefined) {
+        await updateSetting('admin_phone_number', admin_phone_number);
+    }
+
+    if (nas_monitoring_enabled !== undefined || olt_monitoring_enabled !== undefined) {
+        try {
+            const monitorService = require('../../../services/monitorService');
+            if (monitorService) monitorService.nmsSyncDevicesToMonitors().catch(() => {});
+        } catch (e) {}
+    }
+
+    res.json({
+        success: true,
+        message: 'Pengaturan notifikasi operasional berhasil disimpan'
+    });
+}));
+
+// POST /api/v1/whatsapp/test-daily-recap
+router.post('/test-daily-recap', asyncHandler(async (req, res) => {
+    const whatsappNotifications = require('../../../config/whatsapp-notifications');
+    const result = await whatsappNotifications.sendDailyTransactionRecap();
+    res.json({
+        success: result.success !== false,
+        message: result.message || 'Rekap harian berhasil diproses',
+        data: result
+    });
+}));
+
+
 module.exports = router;
