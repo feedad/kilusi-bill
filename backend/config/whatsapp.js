@@ -4606,17 +4606,22 @@ async function handleIncomingMessage(sock, message) {
             return;
         }
 
-        // Ekstrak informasi pesan
-        const remoteJid = message.key.remoteJid;
-        if (!remoteJid) {
+        // Ekstrak informasi pesan (dukungan penuh Baileys @lid -> remoteJidAlt / senderPn)
+        const rawRemoteJid = message.key.remoteJid;
+        if (!rawRemoteJid) {
             console.warn('Message without remoteJid received', { messageKey: message.key });
             return;
         }
+        const remoteJid = (rawRemoteJid.endsWith('@lid') && (message.key.remoteJidAlt || message.key.senderPn))
+            ? (message.key.remoteJidAlt || message.key.senderPn)
+            : rawRemoteJid;
 
         // Skip jika pesan dari grup dan bukan dari admin
         if (remoteJid.includes('@g.us')) {
             console.debug('Message from group received', { groupJid: remoteJid });
-            const participant = message.key.participant;
+            const participant = (message.key.participant && message.key.participant.endsWith('@lid') && message.key.participantAlt)
+                ? message.key.participantAlt
+                : (message.key.participantAlt || message.key.participant);
             if (!participant || !isAdminNumber(participant.split('@')[0])) {
                 console.debug('Group message not from admin, ignoring', { participant });
                 return;
@@ -4624,19 +4629,31 @@ async function handleIncomingMessage(sock, message) {
             console.info('Group message from admin, processing', { participant });
         }
 
-        // Cek tipe pesan dan ekstrak teks
+        // Cek tipe pesan dan ekstrak teks (termasuk unwrap ephemeral/viewOnce/caption)
         let messageText = '';
         if (!message.message) {
             console.debug('Message without content received', { messageType: 'unknown' });
             return;
         }
 
-        if (message.message.conversation) {
-            messageText = message.message.conversation;
+        const msgContent = message.message.ephemeralMessage?.message
+            || message.message.viewOnceMessage?.message
+            || message.message.viewOnceMessageV2?.message
+            || message.message.documentWithCaptionMessage?.message
+            || message.message;
+
+        if (msgContent.conversation) {
+            messageText = msgContent.conversation;
             console.debug('Conversation message received');
-        } else if (message.message.extendedTextMessage?.text || message.extendedTextMessage) {
-            messageText = message.message.extendedTextMessage?.text || message.extendedTextMessage?.text || '';
+        } else if (msgContent.extendedTextMessage?.text || message.extendedTextMessage?.text) {
+            messageText = msgContent.extendedTextMessage?.text || message.extendedTextMessage?.text || '';
             console.debug('Extended text message received');
+        } else if (msgContent.imageMessage?.caption) {
+            messageText = msgContent.imageMessage.caption;
+            console.debug('Image caption message received');
+        } else if (msgContent.documentMessage?.caption) {
+            messageText = msgContent.documentMessage.caption;
+            console.debug('Document caption message received');
         } else {
             // Tipe pesan tidak didukung
             console.debug('Unsupported message type received', {
@@ -4648,7 +4665,9 @@ async function handleIncomingMessage(sock, message) {
         // Ekstrak nomor pengirim dengan penanganan error
         let senderNumber;
         try {
-            const senderJid = (remoteJid.includes('@g.us') && message.key.participant) ? message.key.participant : remoteJid;
+            const senderJid = remoteJid.includes('@g.us')
+                ? (message.key.participantAlt || message.key.participant || remoteJid)
+                : (message.key.remoteJidAlt || message.key.senderPn || remoteJid);
             senderNumber = senderJid.split('@')[0].split(':')[0];
         } catch (error) {
             console.error('Error extracting sender number', { remoteJid, error: error.message });

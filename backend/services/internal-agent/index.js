@@ -383,6 +383,7 @@ async function handleWhatsAppIncoming(sock, remoteJid, senderNumber, messageText
             });
             return { handled: true };
         }
+        logger.info(`[InternalAgent] Incoming WA from ${identity.phone} (${identity.role}: ${identity.name}): "${cleanText.slice(0, 120)}"`);
 
         const result = await processMessage({
             identity,
@@ -392,6 +393,7 @@ async function handleWhatsAppIncoming(sock, remoteJid, senderNumber, messageText
 
         if (result.handled && result.reply) {
             await sock.sendMessage(remoteJid, { text: result.reply });
+            logger.info(`[InternalAgent] Replied to ${remoteJid} (${identity.role}: ${identity.name}, tools: ${result.toolCalls?.length || 0}, tokens: ${result.tokensUsed || 0})`);
             return { handled: true };
         }
 
