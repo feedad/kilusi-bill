@@ -1041,6 +1041,22 @@ router.post('/invoices/rapel', asyncHandler(async (req, res) => {
                 result.payment.id
             );
 
+            // 5. Link pending autopay mutations
+            try {
+                const autopayService = require('../../../services/autopay-service');
+                const firstInv = result.invoices?.[0];
+                if (firstInv) {
+                    await autopayService.notifyAutopayInvoicePaid({
+                        id: firstInv.id,
+                        invoice_number: firstInv.invoice_number,
+                        amount: result.payment.amount,
+                        customer_name: customerName?.name || '',
+                    });
+                }
+            } catch (e) {
+                logger.warn(`Rapel mutation link failed: ${e.message}`);
+            }
+
         } catch (e) {
             logger.error(`Rapel post-processing error for ${result.customer_id}:`, e.message);
         }
@@ -1472,6 +1488,7 @@ router.post('/payments', asyncHandler(async (req, res) => {
         const autopayService = require('../../../services/autopay-service');
         const custNameResult = await query('SELECT name FROM customers WHERE id = $1', [invoice.customer_id]);
         autopayService.notifyAutopayInvoicePaid({
+            id: invoice.id,
             invoice_number: invoice.invoice_number,
             amount: invoice.amount,
             customer_name: custNameResult.rows[0]?.name || '',

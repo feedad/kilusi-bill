@@ -58,6 +58,7 @@ async function processPaymentAfterVerification({
         const invData = await getOne('SELECT invoice_number, amount FROM invoices WHERE id = $1', [invoiceId]);
         if (invData) {
             autopayService.notifyAutopayInvoicePaid({
+                id: invoiceId,
                 invoice_number: invData.invoice_number,
                 amount: invData.amount,
                 customer_name: customerName || '',

@@ -90,12 +90,38 @@ class AutopayService {
 
   /**
    * Notify autopay gateway that an invoice has been paid outside autopay.
-   * (Native: invoices are checked live in DB, zero HTTP sync needed)
+   * Automatically attempts to find and link any matching PENDING bank mutation.
    */
   async notifyAutopayInvoicePaid(invoice) {
+    try {
+      const { linkPendingMutationOnInvoicePaid } = require('./autopay-engine');
+      let invId = invoice?.id;
+      let custName = invoice?.customer_name;
+      let amount = invoice?.amount;
+
+      if (!invId && invoice?.invoice_number) {
+        const invRes = await query(
+          `SELECT i.id, i.amount, c.name as customer_name
+           FROM invoices i
+           LEFT JOIN customers c ON c.id::text = i.customer_id::text
+           WHERE i.invoice_number = $1 LIMIT 1`,
+          [invoice.invoice_number]
+        );
+        if (invRes.rows.length > 0) {
+          invId = invRes.rows[0].id;
+          if (!amount) amount = invRes.rows[0].amount;
+          if (!custName) custName = invRes.rows[0].customer_name;
+        }
+      }
+
+      if (invId) {
+        await linkPendingMutationOnInvoicePaid(invId, amount, custName);
+      }
+    } catch (e) {
+      logger.warn('[AutopayService] Error linking mutation on invoice paid:', e.message);
+    }
     return { success: true, native: true };
   }
-
   /**
    * Called after payment rollback to restore invoice to autopay monitoring.
    * (Native: invoices are checked live in DB, zero HTTP sync needed)

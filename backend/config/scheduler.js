@@ -53,6 +53,21 @@ class InvoiceScheduler {
                     }
                 }
                 logger.info(`RADIUS orphan cleanup completed: ${cleaned} removed`);
+
+                // Auto-expire old pending mutations (> 7 days) to IGNORED
+                try {
+                    const expireRes = await query(`
+                        UPDATE bank_mutations
+                        SET status = 'IGNORED'
+                        WHERE status = 'PENDING'
+                          AND created_at < NOW() - INTERVAL '7 days'
+                    `);
+                    if (expireRes.rowCount > 0) {
+                        logger.info(`[AutopayScheduler] Auto-expired ${expireRes.rowCount} pending mutations (>7 days) to IGNORED`);
+                    }
+                } catch (expireErr) {
+                    logger.error('[AutopayScheduler] Error expiring old pending mutations:', expireErr.message);
+                }
             } catch (error) {
                 logger.error('Error in RADIUS orphan cleanup:', error);
             }

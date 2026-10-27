@@ -75,7 +75,162 @@ function extractAmount(text, fallbackAmount = null) {
 }
 
 /**
- * Filter income (CR) vs debit (DB)
+ * Real transaction inbound patterns (CR Valid)
+ * Based on 100% of real production MATCHED mutations:
+ * 1. DANA: "diterima DANA Bisnis", "telah diterima dari", "berhasil diterima DANA Bisnis"
+ * 2. myBCA: "You received IDR" AND "Account Transfer"
+ * 3. BRImo: "Sobat BRI! Dana" AND "masuk ke rekening"
+ * 4. GoPay: "Top up Rp" AND "via"
+ * 5. EMAIL/OCBC: "BI-Fast Transfer Dana Masuk", "TRANSFER DANA MASUK", or "via BANK"/"via PT BANK"
+ */
+function isRealIncomePattern(text) {
+  if (!text || typeof text !== 'string') return false;
+  const lower = text.toLowerCase();
+
+  if (
+    lower.includes('diterima dana bisnis') ||
+    lower.includes('telah diterima dari') ||
+    lower.includes('berhasil diterima dana bisnis')
+  ) {
+    return true;
+  }
+
+  if (lower.includes('you received idr') && lower.includes('account transfer')) {
+    return true;
+  }
+
+  if (lower.includes('sobat bri! dana') && lower.includes('masuk ke rekening')) {
+    return true;
+  }
+
+  if (lower.includes('top up rp') && lower.includes('via')) {
+    return true;
+  }
+
+  if (
+    lower.includes('bi-fast transfer dana masuk') ||
+    lower.includes('transfer dana masuk') ||
+    lower.includes('via bank') ||
+    lower.includes('via pt bank')
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Debit / outgoing money patterns (DB -> Automatically IGNORED)
+ * 1. myBCA spent: "You spent IDR"
+ * 2. DANA sent: "telah dikirim ke"
+ * 3. BRImo topup out to personal DANA: "Top Up DANA"
+ * 4. Subscription/Netflix: "transaksi di Netflix" / "lanjutkan transaksi di"
+ * 5. ShopeePay debit: "dengan ShopeePay telah berhasil"
+ * 6. Marketplace: "bayar ... ke TOKOPEDIA" / "bayar ... ke SHOPEE"
+ */
+function isDebitPattern(text) {
+  if (!text || typeof text !== 'string') return false;
+  const lower = text.toLowerCase();
+
+  if (lower.includes('you spent idr')) return true;
+  if (lower.includes('telah dikirim ke')) return true;
+  if (lower.includes('top up dana')) return true;
+  if (lower.includes('transaksi di netflix') || lower.includes('lanjutkan transaksi di')) return true;
+  if (lower.includes('dengan shopeepay telah berhasil')) return true;
+  if (/bayar\s+.*\s+ke\s+(?:tokopedia|shopee)/i.test(lower)) return true;
+
+  const debitKeywords = [
+    'bayar', 'debit', 'keluar', 'belanja', 'transfer keluar',
+    'pembayaran keluar', 'tarik tunai', 'terdebet', 'terpotong'
+  ];
+  if (debitKeywords.some(k => lower.includes(k)) && !isRealIncomePattern(text)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Promo, marketing, ads, or non-ISP channel patterns (Automatically IGNORED)
+ */
+function isPromoOrNonIspPattern(text, senderInfo, amount) {
+  const combined = `${text || ''} ${senderInfo || ''}`.toLowerCase();
+
+  // ShopeePay is not an ISP receiving account in payment_settings
+  if (combined.includes('shopeepay')) {
+    return true;
+  }
+
+  const promoKeywords = [
+    'klaim', 'diskon', 'voucher', 'promo', 'tarifnya mulai',
+    'cashback', 'check in', 'limit kredit', 'bonus saldo',
+    'nonton anime', 'ikutan transfer unik', 'beli paket', 'cuma',
+    'kuota', 'pulsa'
+  ];
+  if (promoKeywords.some(k => combined.includes(k))) {
+    return true;
+  }
+
+  // Nominal < Rp 20.000 unless explicit real income pattern
+  if (amount !== null && amount !== undefined && amount < 20000 && !isRealIncomePattern(text)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Classify mutation into CR (valid inbound) vs DB/IGNORED (debit/promo)
+ */
+function classifyMutation(arg1, maybeSender, maybeAmount, maybeExplicit = null) {
+  let rawText, senderInfo, amount, explicitType;
+  if (typeof arg1 === 'object' && arg1 !== null) {
+    rawText = arg1.rawText || '';
+    senderInfo = arg1.senderInfo || '';
+    amount = arg1.amount;
+    explicitType = arg1.explicitType;
+  } else {
+    rawText = arg1 || '';
+    senderInfo = maybeSender || '';
+    amount = maybeAmount;
+    explicitType = maybeExplicit;
+  }
+
+  if (explicitType) {
+    const upper = String(explicitType).toUpperCase();
+    if (upper === 'DB' || upper === 'DEBIT' || upper === 'EXPENSE') {
+      return { type: 'DB', status: 'IGNORED', reason: 'EXPLICIT_DEBIT' };
+    }
+  }
+  if (isDebitPattern(rawText)) {
+    return { type: 'DB', status: 'IGNORED', reason: 'DEBIT_PATTERN' };
+  }
+
+  if (isPromoOrNonIspPattern(rawText, senderInfo, amount)) {
+    return { type: 'CR', status: 'IGNORED', reason: 'PROMO_OR_NON_ISP' };
+  }
+
+  if (isRealIncomePattern(rawText)) {
+    return { type: 'CR', status: 'PENDING', reason: 'REAL_INCOME_PATTERN' };
+  }
+
+  // Fallback check
+  const lower = (rawText || '').toLowerCase();
+  const incomeKeywords = [
+    'masuk', 'cr', 'kredit', 'credit', 'terima', 'diterima',
+    'deposit', 'incoming', 'top up', 'topup', 'uang masuk',
+    'ditambahkan', 'received'
+  ];
+  const hasIncome = incomeKeywords.some(k => lower.includes(k));
+  if (!hasIncome && amount < 20000) {
+    return { type: 'CR', status: 'IGNORED', reason: 'LOW_AMOUNT_SUSPICIOUS' };
+  }
+
+  return { type: 'CR', status: 'PENDING', reason: 'CR_FALLBACK' };
+}
+
+/**
+ * Filter income (CR) vs debit (DB) - backward compatibility
  */
 function detectTransactionType(text, explicitType = null) {
   if (explicitType) {
@@ -85,28 +240,8 @@ function detectTransactionType(text, explicitType = null) {
     if (upper === 'DEBIT' || upper === 'EXPENSE') return 'DB';
   }
 
-  if (!text || typeof text !== 'string') return 'CR'; // default to CR for incoming notifications
-
-  const lower = text.toLowerCase();
-
-  const debitKeywords = [
-    'bayar', 'debit', 'keluar', 'belanja', 'transfer keluar',
-    'pembayaran keluar', 'tarik tunai', 'terdebet', 'terpotong'
-  ];
-
-  const incomeKeywords = [
-    'masuk', 'cr', 'kredit', 'credit', 'terima', 'diterima',
-    'deposit', 'incoming', 'top up', 'topup', 'uang masuk',
-    'ditambahkan', 'received'
-  ];
-
-  const hasIncome = incomeKeywords.some(k => lower.includes(k));
-  const hasDebit = debitKeywords.some(k => lower.includes(k));
-
-  if (hasDebit && !hasIncome) {
-    return 'DB';
-  }
-
+  if (!text || typeof text !== 'string') return 'CR';
+  if (isDebitPattern(text)) return 'DB';
   return 'CR';
 }
 
@@ -158,12 +293,20 @@ async function processInboundMutation(payload, apiKey) {
     return { success: false, reason: 'AMOUNT_NOT_FOUND' };
   }
 
-  const type = detectTransactionType(rawText, payload.type);
-
   // Determine sender / bank / description
   const senderInfo = payload.sender_name || payload.app_name || payload.title || payload.device_name || auth.device.device_name || 'Bank';
   const description = payload.description || payload.content || payload.title || `Transfer ${amount}`;
   const sourceType = payload.source_type || (payload.app_name ? 'MOBILE' : (payload.account_number ? 'EMAIL' : 'API'));
+
+  // Classify based on real patterns (CR vs DB, PENDING vs IGNORED)
+  const classification = classifyMutation({
+    rawText,
+    senderInfo,
+    amount,
+    explicitType: payload.type,
+  });
+  const type = classification.type;
+  const initialStatus = classification.status;
 
   // Deduplication check: check if exact same raw_content or (amount, description, created_at within 60s) exists
   const dupCheck = await query(
@@ -200,15 +343,15 @@ async function processInboundMutation(payload, apiKey) {
       description,
       senderInfo,
       JSON.stringify(payload),
-      type === 'DB' ? 'IGNORED' : 'PENDING',
+      initialStatus,
     ]
   );
 
   const mutation = insertRes.rows[0];
-  logger.info(`[AutopayEngine] New mutation recorded (ID: ${mutation.id}, Rp ${amount}, Type: ${type}, Sender: ${senderInfo})`);
+  logger.info(`[AutopayEngine] New mutation recorded (ID: ${mutation.id}, Rp ${amount}, Type: ${type}, Status: ${initialStatus}, Sender: ${senderInfo}, Reason: ${classification.reason})`);
 
-  // If CR, attempt instant auto-match
-  if (type === 'CR') {
+  // If CR and not IGNORED, attempt instant auto-match
+  if (type === 'CR' && initialStatus === 'PENDING') {
     const matchResult = await autoMatchMutation(mutation.id);
     return {
       success: true,
@@ -224,7 +367,8 @@ async function processInboundMutation(payload, apiKey) {
     mutation_id: mutation.id,
     amount,
     type,
-    status: 'IGNORED',
+    status: initialStatus,
+    reason: classification.reason,
   };
 }
 
@@ -274,34 +418,61 @@ async function autoMatchMutation(mutationId) {
            AND i.paid_at >= NOW() - INTERVAL '24 hours'
            AND (
              i.amount_with_code = $1
-             OR (i.unique_code IS NULL AND (ROUND(i.amount) = $1 OR ROUND(i.total_amount) = $1))
+             OR ROUND(i.amount) = $1
+             OR ROUND(i.total_amount) = $1
            )
            AND NOT EXISTS (
              SELECT 1 FROM bank_mutations bm WHERE bm.matched_invoice_id = i.id
            )
-         ORDER BY i.paid_at DESC
-         LIMIT 1`,
+         ORDER BY i.paid_at DESC`,
         [amount]
       );
 
+      let targetAlreadyPaid = null;
       if (recentlyPaidRes.rows.length === 1) {
-        const alreadyPaidInvoice = recentlyPaidRes.rows[0];
+        targetAlreadyPaid = recentlyPaidRes.rows[0];
+      } else if (recentlyPaidRes.rows.length > 1) {
+        // Match customer name from mutation description / sender_info
+        const descLower = (mutation.description || '').toLowerCase();
+        const senderLower = (mutation.sender_info || '').toLowerCase();
+        const nameMatches = recentlyPaidRes.rows.filter(inv => {
+          if (!inv.customer_name) return false;
+          const tokens = inv.customer_name.toLowerCase().split(/\s+/).filter(t => t.length >= 3 && !['bpk', 'ibu', 'sdra', 'bp', 'pak'].includes(t));
+          return tokens.some(t => descLower.includes(t) || senderLower.includes(t));
+        });
+
+        if (nameMatches.length === 1) {
+          targetAlreadyPaid = nameMatches[0];
+        } else {
+          targetAlreadyPaid = recentlyPaidRes.rows[0];
+        }
+      }
+
+      if (targetAlreadyPaid) {
         await query(
           `UPDATE bank_mutations
            SET status = 'MATCHED',
                matched_invoice_id = $1,
                matched_at = NOW()
            WHERE id = $2`,
-          [alreadyPaidInvoice.id, mutation.id]
+          [targetAlreadyPaid.id, mutation.id]
+        );
+        await query(
+          `UPDATE invoices
+           SET unique_code = NULL,
+               amount_with_code = NULL,
+               updated_at = NOW()
+           WHERE id = $1`,
+          [targetAlreadyPaid.id]
         );
         logger.info(
-          `[AutopayEngine] Mutation ${mutationId} (Rp ${amount}) automatically linked to recently paid invoice #${alreadyPaidInvoice.id} (${alreadyPaidInvoice.invoice_number})`
+          `[AutopayEngine] Mutation ${mutationId} (Rp ${amount}) automatically linked to recently paid invoice #${targetAlreadyPaid.id} (${targetAlreadyPaid.invoice_number})`
         );
         return {
           matched: true,
           already_paid: true,
-          invoice_id: alreadyPaidInvoice.id,
-          invoice_number: alreadyPaidInvoice.invoice_number,
+          invoice_id: targetAlreadyPaid.id,
+          invoice_number: targetAlreadyPaid.invoice_number,
         };
       }
     } catch (recentErr) {
@@ -314,7 +485,21 @@ async function autoMatchMutation(mutationId) {
 
   // Filter exact amount_with_code matches first
   const codeMatches = candidates.filter(inv => Number(inv.amount_with_code) === amount);
-  const targetInvoice = codeMatches.length === 1 ? codeMatches[0] : (candidates.length === 1 ? candidates[0] : null);
+  let targetInvoice = codeMatches.length === 1 ? codeMatches[0] : (candidates.length === 1 ? candidates[0] : null);
+
+  if (!targetInvoice && candidates.length > 1) {
+    const descLower = (mutation.description || '').toLowerCase();
+    const senderLower = (mutation.sender_info || '').toLowerCase();
+    const nameMatches = candidates.filter(inv => {
+      if (!inv.customer_name) return false;
+      const tokens = inv.customer_name.toLowerCase().split(/\s+/).filter(t => t.length >= 3 && !['bpk', 'ibu', 'sdra', 'bp', 'pak'].includes(t));
+      return tokens.some(t => descLower.includes(t) || senderLower.includes(t));
+    });
+    if (nameMatches.length === 1) {
+      targetInvoice = nameMatches[0];
+      logger.info(`[AutopayEngine] Disambiguated ${candidates.length} candidates by customer name match: ${targetInvoice.customer_name}`);
+    }
+  }
 
   if (!targetInvoice) {
     logger.warn(
@@ -564,12 +749,150 @@ async function ignoreMutation(mutationId) {
   return res.rows[0];
 }
 
+/**
+ * Link an existing PENDING bank mutation when an invoice is marked as paid
+ * (called from Billing payments, Rapel, Payment verification, Chatbot, AutopayService)
+ */
+async function linkPendingMutationOnInvoicePaid(invoiceId, paidAmount = null, customerName = null) {
+  try {
+    if (!invoiceId && !paidAmount) return { linked: false, reason: 'MISSING_PARAMS' };
+
+    let invoice = null;
+    if (invoiceId) {
+      const invRes = await query(
+        `SELECT i.*, c.name as customer_name, c.phone as customer_phone
+         FROM invoices i
+         LEFT JOIN customers c ON c.id::text = i.customer_id::text
+         WHERE i.id = $1`,
+        [invoiceId]
+      );
+      if (invRes.rows.length > 0) {
+        invoice = invRes.rows[0];
+      }
+    }
+
+    const candidateAmounts = new Set();
+    if (paidAmount !== null && paidAmount !== undefined && !isNaN(Number(paidAmount))) {
+      candidateAmounts.add(Math.round(Number(paidAmount)));
+    }
+    if (invoice) {
+      if (invoice.amount_with_code) candidateAmounts.add(Math.round(Number(invoice.amount_with_code)));
+      if (invoice.amount) candidateAmounts.add(Math.round(Number(invoice.amount)));
+      if (invoice.total_amount) candidateAmounts.add(Math.round(Number(invoice.total_amount)));
+    }
+
+    const amountsArr = Array.from(candidateAmounts).filter(a => a > 0);
+    if (amountsArr.length === 0) return { linked: false, reason: 'NO_VALID_AMOUNT' };
+
+    // Find pending mutations within last 48 hours matching any candidate amount
+    const mutRes = await query(
+      `SELECT * FROM bank_mutations
+       WHERE status = 'PENDING'
+         AND type = 'CR'
+         AND created_at >= NOW() - INTERVAL '48 hours'
+         AND amount = ANY($1::numeric[])
+       ORDER BY created_at DESC`,
+      [amountsArr]
+    );
+
+    if (mutRes.rows.length === 0) {
+      return { linked: false, reason: 'NO_PENDING_MUTATION' };
+    }
+
+    let targetMutation = null;
+    const custName = (customerName || invoice?.customer_name || '').toLowerCase().trim();
+
+    if (mutRes.rows.length === 1) {
+      targetMutation = mutRes.rows[0];
+    } else {
+      // 1. Try matching by exact amount_with_code if available
+      if (invoice?.amount_with_code) {
+        const codeMatch = mutRes.rows.filter(m => Math.round(Number(m.amount)) === Math.round(Number(invoice.amount_with_code)));
+        if (codeMatch.length === 1) {
+          targetMutation = codeMatch[0];
+        }
+      }
+
+      // 2. Try matching customer name in mutation description or sender_info
+      if (!targetMutation && custName) {
+        const tokens = custName.split(/\s+/).filter(t => t.length >= 3 && !['bpk', 'ibu', 'sdra', 'bp', 'pak'].includes(t));
+        const nameMatches = mutRes.rows.filter(m => {
+          const desc = (m.description || '').toLowerCase();
+          const sender = (m.sender_info || '').toLowerCase();
+          return tokens.some(t => desc.includes(t) || sender.includes(t));
+        });
+        if (nameMatches.length === 1) {
+          targetMutation = nameMatches[0];
+        }
+      }
+
+      // 3. If only 1 mutation with this exact amount within 48h, pick it
+      if (!targetMutation) {
+        const exactTargetAmount = paidAmount ? Math.round(Number(paidAmount)) : (invoice?.amount ? Math.round(Number(invoice.amount)) : null);
+        if (exactTargetAmount) {
+          const exactAmountMatches = mutRes.rows.filter(m => Math.round(Number(m.amount)) === exactTargetAmount);
+          if (exactAmountMatches.length === 1) {
+            targetMutation = exactAmountMatches[0];
+          }
+        }
+      }
+    }
+
+    if (!targetMutation) {
+      logger.info(
+        `[AutopayEngine] linkPendingMutation: Ambiguous candidates (${mutRes.rows.length}) for invoice #${invoiceId} — remains for manual match`
+      );
+      return { linked: false, reason: 'AMBIGUOUS_CANDIDATES', count: mutRes.rows.length };
+    }
+
+    // Link mutation to invoice
+    await query(
+      `UPDATE bank_mutations
+       SET status = 'MATCHED',
+           matched_invoice_id = $1,
+           matched_at = NOW()
+       WHERE id = $2`,
+      [invoiceId || invoice?.id, targetMutation.id]
+    );
+
+    // Reset unique code on invoice
+    if (invoiceId || invoice?.id) {
+      await query(
+        `UPDATE invoices
+         SET unique_code = NULL,
+             amount_with_code = NULL,
+             updated_at = NOW()
+         WHERE id = $1`,
+        [invoiceId || invoice?.id]
+      );
+    }
+
+    logger.info(
+      `[AutopayEngine] Linked pending mutation #${targetMutation.id} (Rp ${targetMutation.amount}) to paid invoice #${invoiceId || invoice?.id}`
+    );
+
+    return {
+      linked: true,
+      mutation_id: targetMutation.id,
+      invoice_id: invoiceId || invoice?.id,
+    };
+  } catch (err) {
+    logger.error('[AutopayEngine] Error in linkPendingMutationOnInvoicePaid:', err.message);
+    return { linked: false, error: err.message };
+  }
+}
+
 module.exports = {
   extractAmount,
   detectTransactionType,
+  classifyMutation,
+  isRealIncomePattern,
+  isDebitPattern,
+  isPromoOrNonIspPattern,
   validateApiKey,
   processInboundMutation,
   autoMatchMutation,
   manualMatchMutation,
   ignoreMutation,
+  linkPendingMutationOnInvoicePaid,
 };
