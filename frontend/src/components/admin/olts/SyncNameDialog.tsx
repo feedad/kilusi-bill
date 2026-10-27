@@ -39,7 +39,8 @@ export function SyncNameDialog({ oltId, onuIndex, currentName, onuSn, onSuccess,
     // Fetch suggested customer name from MAC when dialog opens
     const handleOpen = async (isOpen: boolean) => {
         if (isOpen) {
-            const current = currentName && currentName !== '-' ? currentName : ''
+            const isDefaultName = !currentName || currentName === '-' || /^n\/?a$/i.test(currentName.trim()) || /^ONU\d+\/\d+$/i.test(currentName.trim())
+            const current = isDefaultName ? '' : currentName
             setName(current)
             // Try to fetch suggested name from backend
             if (onuSn) {

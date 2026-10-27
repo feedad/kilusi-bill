@@ -67,7 +67,12 @@ export default function OltMonitorPage() {
         try {
             const res = await api.post('/api/v1/realtime/olt-onus/rename', { olt_id: id, dry_run: false })
             if (res.data?.success) {
-                toast.success(`Renamed ${res.data.renamed || 0} ONUs, ${res.data.skipped || 0} skipped, ${res.data.errors || 0} errors`)
+                const summary = res.data?.data?.summary ?? res.data
+                if ((summary?.renamed || 0) === 0 && (summary?.errors || 0) > 0) {
+                    toast.error(`Gagal rename ${summary.errors} ONU (SNMP write ditolak OLT), ${summary.skipped || 0} dilewati`)
+                } else {
+                    toast.success(`Renamed ${summary?.renamed || 0} ONUs, ${summary?.skipped || 0} skipped, ${summary?.errors || 0} errors`)
+                }
                 refetch()
             } else {
                 toast.error(res.data?.message || 'Gagal')
@@ -190,7 +195,7 @@ export default function OltMonitorPage() {
                                             <TableCell className="text-right">
                                                 <div className="flex justify-end gap-1">
                                                     <SyncNameDialog
-                                                        oltId={params.id}
+                                                        oltId={id}
                                                         onuIndex={onu.rawIndex || onu.index}
                                                         currentName={onu.name}
                                                         onuSn={onu.sn}

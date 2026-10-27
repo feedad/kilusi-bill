@@ -114,10 +114,10 @@ function snmpGet(session, oids) {
 /**
  * Promisified SNMP Walk
  */
-function snmpWalk(session, oid) {
+function snmpWalk(session, oid, maxRepetitions = 20) {
   return new Promise((resolve, reject) => {
     const items = [];
-    session.subtree(oid, 20, (varbinds) => {
+    session.subtree(oid, maxRepetitions, (varbinds) => {
       varbinds.forEach(vb => items.push({ oid: vb.oid, value: vb.value }));
     }, (error) => {
       if (error) reject(error);
@@ -306,10 +306,10 @@ async function setOnuName(config, index, name) {
     // Sanitize name: only ASCII alphanumeric, space, underscore, hyphen — max 30 chars
     const safeName = name.replace(/[^a-zA-Z0-9 _-]/g, '').substring(0, 30);
 
-    // Pad to 16 bytes with nulls — OLT uses fixed-size buffer, without padding
+    // Pad to 32 bytes with nulls — OLT uses fixed-size buffer, without padding
     // it reads adjacent memory as part of the name (garbage bytes after the string)
-    const padded = Buffer.alloc(16);
-    padded.write(safeName, 0, safeName.length, 'ascii');
+    const padded = Buffer.alloc(32);
+    padded.write(safeName, 0, Math.min(safeName.length, 30), 'ascii');
 
     await new Promise((resolve, reject) => {
       session.set([{
@@ -323,6 +323,7 @@ async function setOnuName(config, index, name) {
     });
 
     session.close();
+    oltOnuCache.delete(`${host}:${vendor}`);
     return { success: true, message: `ONU Name updated to ${safeName}` };
 
   } catch (err) {
@@ -398,7 +399,7 @@ async function getOnuList(config) {
 
 
     try {
-      nameList = await snmpWalk(session, onuName);
+      nameList = await snmpWalk(session, onuName, vendor === 'hioso' ? 1 : 20);
       console.log(`[OLT Monitor] Name Walk returned ${nameList.length} items`);
     } catch (e) {
       console.error(`[OLT Monitor] Name Walk failed: ${e.message}`);
@@ -549,7 +550,7 @@ async function getOnuList(config) {
 
       if (onuMap[suffix]) {
         const rawName = Buffer.isBuffer(item.value) ? item.value.toString('latin1') : String(item.value);
-        const name = rawName.replace(/[^\x20-\x7E]/g, '').trim();
+        const name = rawName.split('\0')[0].replace(/[^\x20-\x7E]/g, '').trim();
         onuMap[suffix].name = name || '-';
 
 

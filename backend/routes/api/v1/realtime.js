@@ -1141,53 +1141,78 @@ router.post('/olt-onus/rename', async (req, res) => {
             });
         }
 
-        // Build MAC → customer_name map from RADIUS accounting data
-        // radacct.callingstationid contains actual device MAC address
-        const techDetailsQuery = `
-            WITH active_macs AS (
-                SELECT DISTINCT LOWER(TRIM(callingstationid)) as mac
-                FROM radacct
-                WHERE acctstoptime IS NULL
-            )
-            SELECT 
-                td.pppoe_username,
-                LOWER(td.mac_address) as mac_address,
-                s.id as service_id,
-                s.customer_id,
-                c.name as customer_name
-            FROM technical_details td
-            LEFT JOIN services s ON td.service_id = s.id
-            LEFT JOIN customers c ON s.customer_id = c.id::text
-            WHERE td.mac_address IS NOT NULL
-              AND c.name IS NOT NULL
-              AND LOWER(td.mac_address) IN (SELECT mac FROM active_macs)
-        `;
-        const techDetailsResult = await query(techDetailsQuery);
+        // Build MAC → customer_name map from RADIUS accounting data + technical_details
+        const normalizeMac = (m) => String(m || '').toLowerCase().replace(/[:-\s]/g, '');
         const macToCustomer = new Map();
 
-        techDetailsResult.rows.forEach(row => {
-            const mac = row.mac_address.toLowerCase();
-            macToCustomer.set(mac, row.customer_name);
-        });
-
-        // Also add non-online MACs (fallback for devices not currently in radacct)
-        const allMacsQuery = `
-            SELECT LOWER(td.mac_address) as mac, c.name as customer_name
-            FROM technical_details td
-            LEFT JOIN services s ON td.service_id = s.id
-            LEFT JOIN customers c ON s.customer_id = c.id::text
-            WHERE td.mac_address IS NOT NULL AND c.name IS NOT NULL
+        // 1. Active radacct sessions joined via pppoe_username
+        const radacctMacsQuery = `
+            SELECT DISTINCT LOWER(TRIM(r.callingstationid)) as mac, c.name as customer_name
+            FROM radacct r
+            JOIN technical_details td ON LOWER(TRIM(r.username)) = LOWER(TRIM(td.pppoe_username))
+            JOIN services s ON td.service_id = s.id
+            JOIN customers c ON s.customer_id = c.id::text
+            WHERE r.acctstoptime IS NULL
+              AND r.callingstationid IS NOT NULL
+              AND c.name IS NOT NULL
         `;
-        const allMacsResult = await query(allMacsQuery);
-        allMacsResult.rows.forEach(row => {
-            const mac = row.mac.toLowerCase();
-            if (!macToCustomer.has(mac)) {
+        const radacctMacsResult = await query(radacctMacsQuery);
+        radacctMacsResult.rows.forEach(row => {
+            const mac = normalizeMac(row.mac);
+            if (mac.length === 12) {
                 macToCustomer.set(mac, row.customer_name);
             }
         });
 
-        logger.info(`Built customer MAC map: ${macToCustomer.size} entries`);
+        // 2. All technical_details.mac_address rows (fallback for devices not currently in radacct)
+        const allMacsQuery = `
+            SELECT LOWER(TRIM(td.mac_address)) as mac, c.name as customer_name
+            FROM technical_details td
+            JOIN services s ON td.service_id = s.id
+            JOIN customers c ON s.customer_id = c.id::text
+            WHERE td.mac_address IS NOT NULL AND td.mac_address != '' AND c.name IS NOT NULL
+        `;
+        const allMacsResult = await query(allMacsQuery);
+        allMacsResult.rows.forEach(row => {
+            const mac = normalizeMac(row.mac);
+            if (mac.length === 12 && !macToCustomer.has(mac)) {
+                macToCustomer.set(mac, row.customer_name);
+            }
+        });
 
+        const findCustomerByMac = (onuSn, macMap) => {
+            const onuMac = normalizeMac(onuSn);
+            if (onuMac.length !== 12) return null;
+
+            if (macMap.has(onuMac)) {
+                return { customerName: macMap.get(onuMac), matchType: 'exact', matchedMac: onuMac };
+            }
+
+            try {
+                const targetNum = BigInt('0x' + onuMac);
+                let bestMatch = null;
+                let minDiff = BigInt(0x11);
+
+                for (const [knownMac, customerName] of macMap.entries()) {
+                    if (knownMac.length !== 12) continue;
+                    try {
+                        const knownNum = BigInt('0x' + knownMac);
+                        const diff = knownNum > targetNum ? knownNum - targetNum : targetNum - knownNum;
+                        if (diff <= BigInt(0x10) && diff < minDiff) {
+                            minDiff = diff;
+                            bestMatch = { customerName, matchType: 'fuzzy', matchedMac: knownMac, diff: Number(diff) };
+                        }
+                    } catch (_) {
+                        // skip non-hex MAC
+                    }
+                }
+                return bestMatch;
+            } catch (_) {
+                return null;
+            }
+        };
+
+        logger.info(`Built customer MAC map: ${macToCustomer.size} entries`);
         const renameResults = [];
         let totalOnus = 0;
         let renamedCount = 0;
@@ -1217,8 +1242,8 @@ router.post('/olt-onus/rename', async (req, res) => {
                 logger.info(`[Rename] Found ${onus.length} ONUs on ${olt.name}`);
 
                 for (const onu of onus) {
-                    const onuMac = onu.sn ? onu.sn.toLowerCase() : null;
-                    const customerName = onuMac ? macToCustomer.get(onuMac) : null;
+                    const match = onu.sn ? findCustomerByMac(onu.sn, macToCustomer) : null;
+                    const customerName = match ? match.customerName : null;
 
                     const result = {
                         olt_name: olt.name,
@@ -1226,14 +1251,16 @@ router.post('/olt-onus/rename', async (req, res) => {
                         onu_sn: onu.sn,
                         current_name: onu.name,
                         customer_name: customerName || null,
+                        match_type: match ? match.matchType : null,
+                        matched_mac: match ? match.matchedMac : null,
                         action: null,
                         status: null,
                         message: null
                     };
 
-                    // Only rename unnamed ONUs (empty, dash, or whitespace)
+                    // Only rename unnamed ONUs (empty, dash, NA, or factory default ONUxx/yy)
                     const currentName = (onu.name || '').trim();
-                    const isUnnamed = !currentName || currentName === '-' || currentName === '--';
+                    const isUnnamed = !currentName || currentName === '-' || currentName === '--' || /^n\/?a$/i.test(currentName) || /^ONU\d+\/\d+$/i.test(currentName);
 
                     if (!isUnnamed) {
                         result.action = 'skip';
@@ -1256,9 +1283,12 @@ router.post('/olt-onus/rename', async (req, res) => {
                         if (!dry_run) {
                             try {
                                 await new Promise(r => setTimeout(r, 150));
-                                await oltSnmpMonitor.setOnuName(oltConfig, onu.rawIndex, customerName);
+                                const writeRes = await oltSnmpMonitor.setOnuName(oltConfig, onu.rawIndex, customerName);
+                                if (!writeRes || !writeRes.success) {
+                                    throw new Error(writeRes?.message || 'SNMP write failed');
+                                }
                                 result.status = 'success';
-                                result.message = `Renamed from "" to "${customerName}"`;
+                                result.message = `Renamed from "${currentName}" to "${customerName}"`;
                                 renamedCount++;
                                 logger.info(`[Rename] ✅ ${olt.name} ONU ${onu.index}: "${onu.name}" → "${customerName}"`);
                             } catch (renameError) {
@@ -1269,7 +1299,7 @@ router.post('/olt-onus/rename', async (req, res) => {
                             }
                         } else {
                             result.status = 'dry_run';
-                            result.message = `Would rename from "" to "${customerName}"`;
+                            result.message = `Would rename from "${currentName}" to "${customerName}"`;
                             renamedCount++;
                         }
                     } else {

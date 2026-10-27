@@ -18,6 +18,8 @@ const { chatbotAuth, chatbotPublicAuth } = require('../../../middleware/chatbotA
 const { query, getOne } = require('../../../config/database');
 const { logger } = require('../../../config/logger');
 
+const uniqueCodeGenerator = require('../../../config/unique-code');
+const { getSetting } = require('../../../config/settingsManager');
 // In-memory cache
 const cache = new Map();
 function getCached(key, ttl = 300000) {
@@ -38,6 +40,420 @@ function getPhoneVariants(raw) {
     return [...new Set(variants)];
 }
 
+
+// Format date-only value in local timezone (Asia/Jakarta) as YYYY-MM-DD
+function formatLocalDate(val) {
+    if (!val) return null;
+    if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val)) return val;
+    const d = new Date(val);
+    if (isNaN(d.getTime())) return null;
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+// Derive YYYY-MM billing period from invoice_number (INV-YYYYMM-XXXX) or due_date/created_at
+function deriveInvoicePeriod(inv) {
+    const match = String(inv?.invoice_number || '').match(/^INV-(\d{4})(\d{2})-/i);
+    if (match) return `${match[1]}-${match[2]}`;
+    const dateStr = formatLocalDate(inv?.due_date || inv?.created_at);
+    return dateStr ? dateStr.slice(0, 7) : null;
+}
+
+// Resolve payment_method code (e.g. bank_xxx / ewallet_xxx) to human-readable label
+function resolvePaymentMethodDisplay(paymentMethod) {
+    if (!paymentMethod) return 'Transfer';
+    if (paymentMethod === 'cash') return 'Tunai';
+    if (paymentMethod.startsWith('bank_') || paymentMethod.startsWith('ewallet_')) {
+        try {
+            const raw = getSetting('payment_settings', '');
+            const ps = typeof raw === 'string' ? JSON.parse(raw || '{}') : (raw || {});
+            const prefix = paymentMethod.startsWith('bank_') ? 'bank_' : 'ewallet_';
+            const id = paymentMethod.replace(prefix, '');
+            const accounts = ps?.bank_accounts || ps?.bankAccounts || [];
+            const wallets = ps?.ewallets || ps?.eWallets || [];
+            const found = [...accounts, ...wallets].find(b => String(b.id) === String(id));
+            if (found) {
+                if (found.bankName || found.bank_name) {
+                    const num = found.accountNumber || found.account_number || '';
+                    return num ? `${found.bankName || found.bank_name} - ${num}` : (found.bankName || found.bank_name);
+                }
+                if (found.provider) {
+                    const num = found.phoneNumber || found.phone_number || '';
+                    return num ? `${found.provider} - ${num}` : found.provider;
+                }
+            }
+        } catch (e) {
+            // fallback below
+        }
+        return paymentMethod.startsWith('bank_') ? 'Transfer Bank' : 'E-Wallet';
+    }
+    return paymentMethod;
+}
+
+// Format an unpaid/open invoice with base_amount, unique_code, amount_with_code, service_number, period
+function formatUnpaidInvoice(inv) {
+    const baseAmount = Math.round(parseFloat(inv.amount) || 0);
+    const uniqueCode = parseInt(inv.unique_code ?? inv.autopay_unique_code ?? 0, 10) || 0;
+    const rawWithCode = inv.amount_with_code ?? inv.autopay_amount;
+    const amountWithCode = rawWithCode
+        ? Math.round(parseFloat(rawWithCode))
+        : (uniqueCode > 0 ? baseAmount + uniqueCode : baseAmount);
+    return {
+        id: inv.id,
+        invoice_number: inv.invoice_number,
+        service_number: inv.service_number || null,
+        period: deriveInvoicePeriod(inv),
+        base_amount: baseAmount,
+        amount: baseAmount,
+        unique_code: uniqueCode,
+        amount_with_code: amountWithCode,
+        due_date: formatLocalDate(inv.due_date),
+        status: inv.status,
+    };
+}
+
+// Format a paid invoice record into last_paid_invoice structure
+function formatPaidInvoice(row) {
+    if (!row) return null;
+    const baseAmount = Math.round(parseFloat(row.amount) || 0);
+    const paidAmount = Math.round(
+        parseFloat(row.p_amount ?? row.pt_amount ?? row.autopay_amount ?? row.amount_with_code ?? row.amount) || 0
+    );
+    const rawMethod = row.inv_payment_method || row.p_method || row.pt_method || null;
+    const rawGateway = row.pt_gateway || row.inv_payment_gateway || row.p_gateway || null;
+
+    let settledBy = 'admin';
+    if (rawGateway === 'autopay' || /autopay/i.test(rawMethod || '')) {
+        settledBy = 'autopay';
+    } else if (
+        (rawGateway && !['manual', 'autopay'].includes(String(rawGateway).toLowerCase())) ||
+        /tripay|qris|va|virtual account/i.test(rawMethod || '')
+    ) {
+        settledBy = 'gateway';
+    }
+
+    let uniqueCode = parseInt(row.unique_code ?? row.autopay_unique_code ?? 0, 10) || 0;
+    if (uniqueCode === 0 && settledBy === 'autopay' && paidAmount > baseAmount && (paidAmount - baseAmount) < 1000000) {
+        uniqueCode = paidAmount - baseAmount;
+    }
+    const rawWithCode = row.amount_with_code ?? row.autopay_amount;
+    const amountWithCode = rawWithCode
+        ? Math.round(parseFloat(rawWithCode))
+        : (uniqueCode > 0 ? baseAmount + uniqueCode : baseAmount);
+
+    const paidAtRaw = row.paid_at || row.pt_paid_at || row.p_date || row.updated_at || null;
+    const paidAt = paidAtRaw ? new Date(paidAtRaw).toISOString().replace(/\.\d{3}Z$/, 'Z') : null;
+
+    return {
+        id: row.id,
+        invoice_number: row.invoice_number,
+        service_number: row.service_number || null,
+        period: deriveInvoicePeriod(row),
+        base_amount: baseAmount,
+        unique_code: uniqueCode,
+        amount_with_code: amountWithCode,
+        paid_amount: paidAmount,
+        paid_at: paidAt,
+        payment_method: resolvePaymentMethodDisplay(rawMethod),
+        settled_by: settledBy,
+    };
+}
+
+// Fetch paid invoices for a customer (latest first)
+async function getPaidInvoicesForCustomer(customerId, limit = 10) {
+    const result = await query(
+        `SELECT i.id, i.invoice_number, i.service_number, i.amount,
+                i.unique_code, i.amount_with_code, i.autopay_unique_code, i.autopay_amount,
+                i.due_date, i.created_at, i.paid_at, i.updated_at,
+                i.payment_method as inv_payment_method, i.payment_gateway as inv_payment_gateway,
+                p.amount as p_amount, p.payment_method as p_method, p.payment_date as p_date,
+                p.processed_by, p.payment_gateway as p_gateway,
+                pt.gateway as pt_gateway, pt.amount as pt_amount, pt.payment_method as pt_method, pt.paid_at as pt_paid_at
+         FROM invoices i
+         LEFT JOIN LATERAL (
+             SELECT amount, payment_method, payment_date, processed_by, payment_gateway
+             FROM payments
+             WHERE invoice_id = i.id AND COALESCE(is_rolled_back, false) = false
+             ORDER BY created_at DESC LIMIT 1
+         ) p ON true
+         LEFT JOIN LATERAL (
+             SELECT gateway, amount, payment_method, paid_at
+             FROM payment_transactions
+             WHERE invoice_id = i.id AND status = 'paid'
+             ORDER BY COALESCE(paid_at, created_at) DESC LIMIT 1
+         ) pt ON true
+         WHERE i.customer_id = $1 AND i.status = 'paid'
+         ORDER BY COALESCE(i.paid_at, p.payment_date, i.updated_at, i.created_at) DESC, i.id DESC
+         LIMIT $2`,
+        [customerId, limit]
+    );
+    return result.rows.map(formatPaidInvoice);
+}
+
+// Determine whether a customer uses unique codes on their invoices
+function determineUsesUniqueCode(unpaidInvoices, lastPaidInvoice) {
+    if (Array.isArray(unpaidInvoices) && unpaidInvoices.length > 0) {
+        return unpaidInvoices.some(inv => (inv.unique_code || 0) > 0);
+    }
+    if (lastPaidInvoice && (lastPaidInvoice.unique_code || 0) > 0) {
+        return true;
+    }
+    return Boolean(uniqueCodeGenerator.isEnabled());
+}
+
+// Build deterministic verification result for POST /payment-proof
+function buildPaymentProofVerification({
+    customer,
+    unpaidInvoices = [],
+    lastPaidInvoice = null,
+    scannedAmount = 0,
+    usesUniqueCode = false,
+    primaryServiceNumber = null,
+}) {
+    const scanned = Math.round(parseFloat(scannedAmount) || 0);
+    const maxCode = uniqueCodeGenerator.getMaxCode();
+
+    if (!customer) {
+        return {
+            matchedInvoice: null,
+            verification: {
+                status: 'customer_not_found',
+                requires_unique_code_reminder: false,
+                reminder_reason: null,
+                matched_invoice_number: null,
+                matched_service_number: null,
+                expected_base_amount: null,
+                expected_unique_code: null,
+                expected_total_amount: null,
+                scanned_amount: scanned,
+                amount_diff: null,
+                auto_approved: false,
+            },
+        };
+    }
+
+    if (unpaidInvoices.length > 0) {
+        // 1. Exact match on amount_with_code (or base_amount when invoice does not use unique_code)
+        let matched = unpaidInvoices.find(
+            inv => inv.amount_with_code === scanned || (inv.unique_code === 0 && inv.base_amount === scanned)
+        );
+        if (matched) {
+            return {
+                matchedInvoice: matched,
+                verification: {
+                    status: 'exact_unpaid',
+                    requires_unique_code_reminder: false,
+                    reminder_reason: null,
+                    matched_invoice_number: matched.invoice_number,
+                    matched_service_number: matched.service_number || primaryServiceNumber || null,
+                    expected_base_amount: matched.base_amount,
+                    expected_unique_code: matched.unique_code,
+                    expected_total_amount: matched.amount_with_code,
+                    scanned_amount: scanned,
+                    amount_diff: scanned - matched.amount_with_code,
+                    auto_approved: false,
+                },
+            };
+        }
+
+        // 2. Transferred exact base_amount without unique_code
+        matched = unpaidInvoices.find(inv => inv.base_amount === scanned && inv.unique_code > 0);
+        if (matched) {
+            return {
+                matchedInvoice: matched,
+                verification: {
+                    status: 'base_amount_only',
+                    requires_unique_code_reminder: true,
+                    reminder_reason: 'transferred_base_without_unique_code',
+                    matched_invoice_number: matched.invoice_number,
+                    matched_service_number: matched.service_number || primaryServiceNumber || null,
+                    expected_base_amount: matched.base_amount,
+                    expected_unique_code: matched.unique_code,
+                    expected_total_amount: matched.amount_with_code,
+                    scanned_amount: scanned,
+                    amount_diff: scanned - matched.amount_with_code,
+                    auto_approved: false,
+                },
+            };
+        }
+
+        // 3. Transferred base_amount + wrong unique code (e.g. previous month's code)
+        matched = unpaidInvoices.find(
+            inv => scanned > inv.base_amount && (scanned - inv.base_amount) <= maxCode && scanned !== inv.amount_with_code
+        );
+        if (matched) {
+            const needsReminder = Boolean(matched.unique_code > 0 || usesUniqueCode);
+            return {
+                matchedInvoice: matched,
+                verification: {
+                    status: 'wrong_unique_code',
+                    requires_unique_code_reminder: needsReminder,
+                    reminder_reason: needsReminder ? 'transferred_wrong_unique_code' : null,
+                    matched_invoice_number: matched.invoice_number,
+                    matched_service_number: matched.service_number || primaryServiceNumber || null,
+                    expected_base_amount: matched.base_amount,
+                    expected_unique_code: matched.unique_code,
+                    expected_total_amount: matched.amount_with_code,
+                    scanned_amount: scanned,
+                    amount_diff: scanned - matched.amount_with_code,
+                    auto_approved: false,
+                },
+            };
+        }
+
+        // 4. Amount mismatch — pick closest invoice by amount_with_code (or earliest due)
+        matched = unpaidInvoices.reduce((best, inv) => {
+            if (!best) return inv;
+            return Math.abs(scanned - inv.amount_with_code) < Math.abs(scanned - best.amount_with_code) ? inv : best;
+        }, null) || unpaidInvoices[0];
+        const needsReminder = Boolean(matched.unique_code > 0 || usesUniqueCode);
+        return {
+            matchedInvoice: matched,
+            verification: {
+                status: 'amount_mismatch',
+                requires_unique_code_reminder: needsReminder,
+                reminder_reason: needsReminder ? 'transferred_amount_mismatch' : null,
+                matched_invoice_number: matched.invoice_number,
+                matched_service_number: matched.service_number || primaryServiceNumber || null,
+                expected_base_amount: matched.base_amount,
+                expected_unique_code: matched.unique_code,
+                expected_total_amount: matched.amount_with_code,
+                scanned_amount: scanned,
+                amount_diff: scanned - matched.amount_with_code,
+                auto_approved: false,
+            },
+        };
+    }
+
+    // No open/unpaid invoices: distinguish current/recent paid invoice vs no_open_invoice
+    const nowLocal = formatLocalDate(new Date());
+    const currentPeriod = nowLocal ? nowLocal.slice(0, 7) : '';
+    const paidAtMs = lastPaidInvoice?.paid_at ? new Date(lastPaidInvoice.paid_at).getTime() : 0;
+    const paidRecently = paidAtMs > 0 && (Date.now() - paidAtMs) <= 7 * 86400 * 1000;
+    const isCurrentOrRecentPeriod = Boolean(
+        lastPaidInvoice && (
+            (lastPaidInvoice.period && currentPeriod && lastPaidInvoice.period >= currentPeriod) ||
+            paidRecently
+        )
+    );
+
+    if (lastPaidInvoice && isCurrentOrRecentPeriod) {
+        const isAutopay = lastPaidInvoice.settled_by === 'autopay';
+        const status = isAutopay ? 'already_paid_autopay' : 'already_paid_manual';
+        const isRoundBase = lastPaidInvoice.unique_code > 0 && scanned === lastPaidInvoice.base_amount;
+        const isWrongCode = lastPaidInvoice.unique_code > 0 && scanned !== lastPaidInvoice.amount_with_code && !isRoundBase;
+        const requiresReminder = Boolean(
+            usesUniqueCode && (isRoundBase || (!isAutopay && isWrongCode))
+        );
+        let reminderReason = null;
+        if (requiresReminder) {
+            reminderReason = isRoundBase ? 'transferred_base_without_unique_code' : 'transferred_wrong_unique_code';
+        }
+        return {
+            matchedInvoice: null,
+            verification: {
+                status,
+                requires_unique_code_reminder: requiresReminder,
+                reminder_reason: reminderReason,
+                matched_invoice_number: lastPaidInvoice.invoice_number,
+                matched_service_number: lastPaidInvoice.service_number || primaryServiceNumber || null,
+                expected_base_amount: lastPaidInvoice.base_amount,
+                expected_unique_code: lastPaidInvoice.unique_code,
+                expected_total_amount: lastPaidInvoice.amount_with_code,
+                scanned_amount: scanned,
+                amount_diff: scanned - lastPaidInvoice.amount_with_code,
+                auto_approved: isAutopay,
+            },
+        };
+    }
+
+    // Customer has no open invoice and no current-period paid invoice (e.g. advance payment)
+    const refBase = lastPaidInvoice?.base_amount || null;
+    const isRoundAmount = scanned > 0 && (scanned === refBase || scanned % 1000 === 0);
+    const isOldCodeAmount = Boolean(refBase && scanned > refBase && (scanned - refBase) <= maxCode);
+    const requiresReminder = Boolean(usesUniqueCode && (isRoundAmount || isOldCodeAmount));
+    let reminderReason = null;
+    if (requiresReminder) {
+        reminderReason = isRoundAmount ? 'transferred_base_without_unique_code' : 'transferred_old_unique_code';
+    }
+
+    return {
+        matchedInvoice: null,
+        verification: {
+            status: 'no_open_invoice',
+            requires_unique_code_reminder: requiresReminder,
+            reminder_reason: reminderReason,
+            matched_invoice_number: null,
+            matched_service_number: lastPaidInvoice?.service_number || primaryServiceNumber || null,
+            expected_base_amount: refBase,
+            expected_unique_code: null,
+            expected_total_amount: null,
+            scanned_amount: scanned,
+            amount_diff: null,
+            auto_approved: false,
+        },
+    };
+}
+
+// Assemble full customer + billing + verification payload for payment-proof endpoints
+async function buildCustomerProofPayload(customer, scannedAmount, { phoneIsOwner = true } = {}) {
+    const [invsResult, service, paidInvoices] = await Promise.all([
+        query(
+            `SELECT id, invoice_number, service_number, amount, unique_code, amount_with_code,
+                    autopay_unique_code, autopay_amount, due_date, created_at, status
+             FROM invoices
+             WHERE customer_id = $1
+               AND status IN ('unpaid', 'suspended', 'overdue', 'sent', 'draft')
+             ORDER BY due_date ASC, id ASC`,
+            [customer.id]
+        ),
+        getOne(
+            `SELECT s.status as service_status, s.service_number
+             FROM services s WHERE s.customer_id = $1 ORDER BY s.created_at DESC LIMIT 1`,
+            [customer.id]
+        ),
+        getPaidInvoicesForCustomer(customer.id, 1),
+    ]);
+
+    const formattedInvoices = invsResult.rows.map(formatUnpaidInvoice);
+    const lastPaidInvoice = paidInvoices[0] || null;
+    const usesUniqueCode = determineUsesUniqueCode(formattedInvoices, lastPaidInvoice);
+    const todayStr = formatLocalDate(new Date());
+    const totalUnpaid = formattedInvoices.reduce((sum, inv) => sum + inv.base_amount, 0);
+    const totalUnpaidWithCode = formattedInvoices.reduce((sum, inv) => sum + inv.amount_with_code, 0);
+    const hasOverdue = formattedInvoices.some(
+        inv => inv.status === 'overdue' || (inv.due_date && todayStr && inv.due_date < todayStr)
+    );
+
+    const { matchedInvoice, verification } = buildPaymentProofVerification({
+        customer,
+        unpaidInvoices: formattedInvoices,
+        lastPaidInvoice,
+        scannedAmount,
+        usesUniqueCode,
+        primaryServiceNumber: service?.service_number || null,
+    });
+
+    return {
+        matchedInvoice,
+        customerPayload: {
+            id: customer.id,
+            name: customer.name,
+            phone: customer.phone,
+            phone_is_owner: Boolean(phoneIsOwner),
+            service_status: service?.service_status || 'unknown',
+            uses_unique_code: usesUniqueCode,
+        },
+        verification,
+        billing: {
+            total_unpaid: totalUnpaid,
+            total_unpaid_with_code: totalUnpaidWithCode,
+            overdue: hasOverdue,
+            invoices: formattedInvoices,
+            last_paid_invoice: lastPaidInvoice,
+        },
+    };
+}
 // Generate unique ticket number (SUP-YYYYMM-NNN)
 async function generateTicketNumber() {
     const prefix = 'SUP';
@@ -106,36 +522,43 @@ router.get('/billing/:phone', chatbotAuth, async (req, res) => {
             [customer.id]
         );
 
-        // 3. Get ALL unpaid/suspended/overdue invoices with service_number
-        const invoices = await query(
-            `SELECT invoice_number, amount, amount_with_code, unique_code,
-                    due_date, status, service_number
-             FROM invoices
-             WHERE customer_id = $1
-               AND status IN ('unpaid', 'suspended', 'overdue', 'sent', 'draft')
-             ORDER BY due_date ASC`,
-            [customer.id]
-        );
+        // 3. Get ALL unpaid/suspended/overdue invoices + paid invoices for this customer
+        const [invoices, paidInvoices] = await Promise.all([
+            query(
+                `SELECT id, invoice_number, amount, amount_with_code, unique_code,
+                        autopay_amount, autopay_unique_code, due_date, created_at, status, service_number
+                 FROM invoices
+                 WHERE customer_id = $1
+                   AND status IN ('unpaid', 'suspended', 'overdue', 'sent', 'draft')
+                 ORDER BY due_date ASC, id ASC`,
+                [customer.id]
+            ),
+            getPaidInvoicesForCustomer(customer.id, 10),
+        ]);
+
+        const lastPaidOverall = paidInvoices[0] || null;
+        const lastPaidByService = {};
+        for (const paidInv of paidInvoices) {
+            const svcNum = paidInv.service_number || '__unknown__';
+            if (!lastPaidByService[svcNum]) lastPaidByService[svcNum] = paidInv;
+        }
 
         // 4. Group invoices by service_number and build per-service response
+        const todayStr = formatLocalDate(new Date());
         const invoicesByService = {};
         for (const inv of invoices.rows) {
             const svcNum = inv.service_number || '__unknown__';
             if (!invoicesByService[svcNum]) invoicesByService[svcNum] = [];
-            invoicesByService[svcNum].push({
-                invoice_number: inv.invoice_number,
-                amount: Math.round(parseFloat(inv.amount)),
-                amount_with_code: inv.amount_with_code ? Math.round(inv.amount_with_code) : null,
-                unique_code: inv.unique_code || 0,
-                due_date: inv.due_date ? new Date(inv.due_date).toISOString().split('T')[0] : null,
-                status: inv.status,
-            });
+            invoicesByService[svcNum].push(formatUnpaidInvoice(inv));
         }
 
         const services = servicesResult.rows.map(s => {
             const svcInvoices = invoicesByService[s.service_number] || [];
-            const totalUnpaid = svcInvoices.reduce((sum, inv) => sum + inv.amount, 0);
-            const hasOverdue = svcInvoices.some(inv => inv.due_date && new Date(inv.due_date) < new Date());
+            const totalUnpaid = svcInvoices.reduce((sum, inv) => sum + inv.base_amount, 0);
+            const totalUnpaidWithCode = svcInvoices.reduce((sum, inv) => sum + inv.amount_with_code, 0);
+            const hasOverdue = svcInvoices.some(
+                inv => inv.status === 'overdue' || (inv.due_date && todayStr && inv.due_date < todayStr)
+            );
             return {
                 service_number: s.service_number,
                 service_status: s.service_status,
@@ -146,12 +569,13 @@ router.get('/billing/:phone', chatbotAuth, async (req, res) => {
                 address_installation: s.address_installation || null,
                 billing: {
                     total_unpaid: totalUnpaid,
+                    total_unpaid_with_code: totalUnpaidWithCode,
                     overdue: hasOverdue,
                     invoices: svcInvoices,
+                    last_paid_invoice: lastPaidByService[s.service_number] || lastPaidOverall || null,
                 },
             };
         });
-
         // 5. Get payment methods (filtered by customer's mitra + company accounts)
         const customerMitraId = servicesResult.rows[0]?.mitra_id || null;
         const paymentMethods = [];
@@ -211,9 +635,13 @@ router.get('/billing/:phone', chatbotAuth, async (req, res) => {
         }
 
         // 7. Compute customer-level totals across all services
-        const allInvoices = services.flatMap(s => s.billing.invoices);
-        const totalUnpaid = allInvoices.reduce((sum, inv) => sum + inv.amount, 0);
-        const hasOverdue = allInvoices.some(inv => inv.due_date && new Date(inv.due_date) < new Date());
+        const allInvoices = invoices.rows.map(formatUnpaidInvoice);
+        const totalUnpaid = allInvoices.reduce((sum, inv) => sum + inv.base_amount, 0);
+        const totalUnpaidWithCode = allInvoices.reduce((sum, inv) => sum + inv.amount_with_code, 0);
+        const hasOverdue = allInvoices.some(
+            inv => inv.status === 'overdue' || (inv.due_date && todayStr && inv.due_date < todayStr)
+        );
+        const usesUniqueCode = determineUsesUniqueCode(allInvoices, lastPaidOverall);
 
         // Primary service = first (most recently created)
         const primary = services[0] || {};
@@ -225,7 +653,9 @@ router.get('/billing/:phone', chatbotAuth, async (req, res) => {
                 name: customer.name,
                 firstName: customer.name?.split(' ')[0] || customer.name,
                 phone: customer.phone,
+                phone_is_owner: true,
                 service_status: primary.service_status || 'unknown',
+                uses_unique_code: usesUniqueCode,
                 package_name: primary.package_name || '-',
                 mitra: primary.mitra || null,
                 region_name: primary.region_name || null,
@@ -233,8 +663,10 @@ router.get('/billing/:phone', chatbotAuth, async (req, res) => {
             },
             billing: {
                 total_unpaid: totalUnpaid,
+                total_unpaid_with_code: totalUnpaidWithCode,
                 overdue: hasOverdue,
                 invoices: allInvoices,
+                last_paid_invoice: lastPaidOverall,
             },
             services,
             payment_methods: paymentMethods,
@@ -266,9 +698,10 @@ router.get('/invoices/search', chatbotPublicAuth, async (req, res) => {
 
         const result = await query(`
             SELECT DISTINCT ON (i.id)
-                i.invoice_number, i.amount, i.due_date, i.status,
+                i.id, i.invoice_number, i.amount, i.unique_code, i.amount_with_code,
+                i.autopay_unique_code, i.autopay_amount, i.due_date, i.created_at, i.status,
                 c.id as customer_id, c.name as customer_name, c.phone as customer_phone,
-                s.service_number, p.name as package_name
+                COALESCE(i.service_number, s.service_number) as service_number, p.name as package_name
             FROM invoices i
             JOIN customers c ON c.id = i.customer_id
             LEFT JOIN services s ON s.customer_id = c.id AND s.status IN ('active','suspended')
@@ -276,24 +709,23 @@ router.get('/invoices/search', chatbotPublicAuth, async (req, res) => {
             WHERE i.status IN ('unpaid','suspended','overdue','sent','draft')
               AND (i.invoice_number ILIKE '%' || $1 || '%'
                 OR c.name ILIKE '%' || $1 || '%'
-                OR s.service_number ILIKE '%' || $1 || '%')
+                OR COALESCE(i.service_number, s.service_number) ILIKE '%' || $1 || '%')
             ORDER BY i.id, s.created_at DESC NULLS LAST
             LIMIT 20
         `, [q]);
 
         return res.json({
             success: true,
-            data: result.rows.map(row => ({
-                invoice_number: row.invoice_number,
-                amount: Math.round(parseFloat(row.amount)),
-                due_date: row.due_date ? new Date(row.due_date).toISOString().split('T')[0] : null,
-                status: row.status,
-                customer_id: row.customer_id,
-                customer_name: row.customer_name,
-                customer_phone: row.customer_phone,
-                service_number: row.service_number,
-                package_name: row.package_name,
-            })),
+            data: result.rows.map(row => {
+                const formatted = formatUnpaidInvoice(row);
+                return {
+                    ...formatted,
+                    customer_id: row.customer_id,
+                    customer_name: row.customer_name,
+                    customer_phone: row.customer_phone,
+                    package_name: row.package_name,
+                };
+            }),
         });
     } catch (error) {
         logger.error('[Chatbot] Invoice search error:', error);
@@ -610,7 +1042,7 @@ router.post('/payment-proof', chatbotAuth, async (req, res) => {
             [
                 scanned_amount || 0,
                 image_url,
-                JSON.stringify({ scanned_amount, scanned_bank, scanned_date, caption, customer_id: null }),
+                JSON.stringify({ scanned_amount, scanned_bank, scanned_date, caption, sender_phone: cleanPhone, customer_id: null }),
                 scanned_bank || 'Transfer',
             ]
         );
@@ -622,14 +1054,26 @@ router.post('/payment-proof', chatbotAuth, async (req, res) => {
         );
 
         if (!customer) {
+            const { verification } = buildPaymentProofVerification({
+                customer: null,
+                scannedAmount: parsedAmount,
+            });
             return res.json({
                 success: true,
                 transaction_id: txId,
                 match_status: 'not_found',
                 customer: null,
+                verification,
                 billing: null,
+                scanned: { amount: scanned_amount, bank: scanned_bank, date: scanned_date },
             });
         }
+
+        const { matchedInvoice, customerPayload, verification, billing } = await buildCustomerProofPayload(
+            customer,
+            parsedAmount,
+            { phoneIsOwner: true }
+        );
 
         // Check if customer already has pending_verification transaction
         const existingTx = await getOne(`
@@ -640,30 +1084,10 @@ router.post('/payment-proof', chatbotAuth, async (req, res) => {
               AND pt.status = 'pending_verification'
               AND pt.gateway = 'manual'
               AND pt.proof_of_payment IS NOT NULL
+              AND pt.id != $2
             LIMIT 1
-        `, [customer.id]);
+        `, [customer.id, txId]);
         if (existingTx) {
-            // Return existing transaction instead of creating duplicate
-            const invs = await query(
-                `SELECT id, invoice_number, amount, due_date, status
-                 FROM invoices WHERE customer_id = $1
-                   AND status IN ('unpaid','suspended','sent','draft')
-                 ORDER BY due_date ASC`,
-                [customer.id]
-            );
-            const billing = {
-                total_unpaid: invs.rows.reduce((s, i) => s + parseFloat(i.amount), 0),
-                invoices: invs.rows.map(i => ({
-                    id: i.id,
-                    invoice_number: i.invoice_number,
-                    amount: Math.round(parseFloat(i.amount)),
-                    due_date: i.due_date ? new Date(i.due_date).toISOString().split('T')[0] : null,
-                })),
-            };
-            const svc = await getOne(
-                `SELECT status as service_status FROM services WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1`,
-                [customer.id]
-            );
             // Delete the duplicate transaction we just created
             await query('DELETE FROM payment_transactions WHERE id = $1', [txId]);
             logger.info(`[Chatbot] Duplicate payment-proof blocked, using existing #${existingTx.id} for ${customer.name}`);
@@ -672,63 +1096,30 @@ router.post('/payment-proof', chatbotAuth, async (req, res) => {
                 transaction_id: existingTx.id,
                 match_status: 'found',
                 existing: true,
-                customer: {
-                    id: customer.id,
-                    name: customer.name,
-                    phone: customer.phone,
-                    service_status: svc?.service_status || 'unknown',
-                },
+                customer: customerPayload,
+                verification,
                 billing,
+                scanned: { amount: scanned_amount, bank: scanned_bank, date: scanned_date },
                 message: `Bukti bayar sebelumnya masih diproses (Invoice ${existingTx.invoice_number})`,
             });
         }
 
-        // Get unpaid invoices (need for invoice_id + billing response)
-        const invoices = await query(
-            `SELECT id, invoice_number, amount, due_date, status
-             FROM invoices WHERE customer_id = $1
-               AND status IN ('unpaid','suspended','sent','draft')
-             ORDER BY due_date ASC`,
-            [customer.id]
-        );
-
-        // Get service status
-        const service = await getOne(
-            `SELECT s.status as service_status
-             FROM services s WHERE s.customer_id = $1 ORDER BY s.created_at DESC LIMIT 1`,
-            [customer.id]
-        );
-
-        // Update transaction with customer_id + link to first unpaid invoice
-        const firstInvoiceId = invoices.rows.length > 0 ? invoices.rows[0].id : null;
-        const details = { scanned_amount, scanned_bank, scanned_date, caption, customer_id: customer.id };
+        // Update transaction with customer_id + link to matched (or first unpaid) invoice
+        const linkedInvoiceId = matchedInvoice?.id || (billing.invoices.length > 0 ? billing.invoices[0].id : null);
+        const details = { scanned_amount, scanned_bank, scanned_date, caption, sender_phone: cleanPhone, customer_id: customer.id };
         await query(
             'UPDATE payment_transactions SET manual_payment_details = $1, invoice_id = $2 WHERE id = $3',
-            [JSON.stringify(details), firstInvoiceId, txId]
+            [JSON.stringify(details), linkedInvoiceId, txId]
         );
 
-        const billing = {
-            total_unpaid: invoices.rows.reduce((s, i) => s + parseFloat(i.amount), 0),
-            invoices: invoices.rows.map(i => ({
-                id: i.id,
-                invoice_number: i.invoice_number,
-                amount: Math.round(parseFloat(i.amount)),
-                due_date: i.due_date ? new Date(i.due_date).toISOString().split('T')[0] : null,
-            })),
-        };
-
-        logger.info(`[Chatbot] Payment proof #${txId} recorded for ${customer.name}`);
+        logger.info(`[Chatbot] Payment proof #${txId} recorded for ${customer.name} (verification: ${verification.status})`);
 
         return res.json({
             success: true,
             transaction_id: txId,
             match_status: 'found',
-            customer: {
-                id: customer.id,
-                name: customer.name,
-                phone: customer.phone,
-                service_status: service?.service_status || 'unknown',
-            },
+            customer: customerPayload,
+            verification,
             billing,
             scanned: { amount: scanned_amount, bank: scanned_bank, date: scanned_date },
         });
@@ -767,53 +1158,34 @@ router.post('/payment-proof/:id/assign-customer', chatbotAuth, async (req, res) 
         );
         if (!customer) return res.json({ success: false, message: 'Customer tidak ditemukan' });
 
-        // Get service status + unpaid invoices (need for invoice_id + billing response)
-        const service = await getOne(
-            `SELECT s.status as service_status
-             FROM services s WHERE s.customer_id = $1 ORDER BY s.created_at DESC LIMIT 1`,
-            [customer.id]
-        );
-
-        const invoices = await query(
-            `SELECT id, invoice_number, amount, due_date, status
-             FROM invoices WHERE customer_id = $1
-               AND status IN ('unpaid','suspended','sent','draft')
-             ORDER BY due_date ASC`,
-            [customer.id]
-        );
-
-        // Update manual_payment_details + link to first unpaid invoice
         const details = typeof tx.manual_payment_details === 'string'
             ? JSON.parse(tx.manual_payment_details) : (tx.manual_payment_details || {});
-        details.customer_id = customer.id;
-        const firstInvoiceId = invoices.rows.length > 0 ? invoices.rows[0].id : null;
-        await query(
-            'UPDATE payment_transactions SET manual_payment_details = $1, invoice_id = $2, updated_at = NOW() WHERE id = $3',
-            [JSON.stringify(details), firstInvoiceId, txId]
+        const scannedAmount = details.scanned_amount ?? tx.amount ?? 0;
+        const senderVariants = details.sender_phone ? getPhoneVariants(details.sender_phone) : [];
+        const phoneIsOwner = senderVariants.length > 0 ? senderVariants.includes(customer.phone) : false;
+
+        const { matchedInvoice, customerPayload, verification, billing } = await buildCustomerProofPayload(
+            customer,
+            scannedAmount,
+            { phoneIsOwner }
         );
 
-        const billing = {
-            total_unpaid: invoices.rows.reduce((s, i) => s + parseFloat(i.amount), 0),
-            invoices: invoices.rows.map(i => ({
-                id: i.id,
-                invoice_number: i.invoice_number,
-                amount: Math.round(parseFloat(i.amount)),
-                due_date: i.due_date ? new Date(i.due_date).toISOString().split('T')[0] : null,
-            })),
-        };
+        // Update manual_payment_details + link to matched (or first unpaid) invoice
+        details.customer_id = customer.id;
+        const linkedInvoiceId = matchedInvoice?.id || (billing.invoices.length > 0 ? billing.invoices[0].id : null);
+        await query(
+            'UPDATE payment_transactions SET manual_payment_details = $1, invoice_id = $2, updated_at = NOW() WHERE id = $3',
+            [JSON.stringify(details), linkedInvoiceId, txId]
+        );
 
-        logger.info(`[Chatbot] Customer ${customer.id} assigned to proof #${txId}`);
+        logger.info(`[Chatbot] Customer ${customer.id} assigned to proof #${txId} (verification: ${verification.status})`);
 
         return res.json({
             success: true,
             transaction_id: Number(txId),
             match_status: 'found',
-            customer: {
-                id: customer.id,
-                name: customer.name,
-                phone: customer.phone,
-                service_status: service?.service_status || 'unknown',
-            },
+            customer: customerPayload,
+            verification,
             billing,
         });
     } catch (error) {
@@ -930,6 +1302,11 @@ router.post('/approve-payment', chatbotAuth, async (req, res) => {
             });
         }
 
+
+        // Invalidate billing cache for customer phone variants
+        for (const variant of getPhoneVariants(customer.phone)) {
+            cache.delete(`billing:${variant}`);
+        }
         // 5. Notify Omnichat (non-blocking)
         notifyOmnichat({
             transaction_id,
