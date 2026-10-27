@@ -408,7 +408,7 @@ router.use('/broadcast-public', require('./broadcast-public'));
 router.use('/maintenance', jwtAuth, require('./maintenance')); // New maintenance route
 router.use('/services', jwtAuth, require('./services'));
 router.use('/technical-details', jwtAuth, require('./technical-details')); // Technical details & MAC sync
-router.use('/radius-comments', jwtAuth, require('./radius-comments'));
+router.use('/radius-comments', require('./radius-comments'));
 router.use('/branding-public', require('./branding-public'));
 router.use('/branding', jwtAuth, require('./branding'));
 router.use('/system', require('./system'));

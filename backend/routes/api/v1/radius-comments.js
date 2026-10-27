@@ -2,13 +2,93 @@ const express = require('express');
 const router = express.Router();
 const { logger } = require('../../../config/logger');
 const { jwtAuth } = require('../../../middleware/jwtAuth');
+const localIpOnly = require('../../../middleware/localIpOnly');
 const { asyncHandler } = require('../../../middleware/response');
 const RadiusCommentService = require('../../../services/radius-comment-service');
 
-// POST /api/v1/radius-comments/sync - Sync all customer comments to RADIUS
+// GET /api/v1/radius-comments/lookup - Plain-text customer name lookup for MikroTik RouterOS scripts
+router.get('/lookup', localIpOnly, asyncHandler(async (req, res) => {
+    const username = req.query.user || req.query.username;
+    const wantJson = req.query.format === 'json';
+    const includeFull = req.query.full === '1' || req.query.full === 'true';
+
+    if (!username) {
+        if (wantJson) {
+            return res.status(400).json({
+                success: false,
+                message: 'Query parameter user or username is required',
+                data: null
+            });
+        }
+        return res.status(400).type('text/plain; charset=utf-8').send('UNKNOWN');
+    }
+
+    const customer = await RadiusCommentService.getCustomerByPppoeUsername(username);
+
+    if (wantJson) {
+        return res.json({
+            success: true,
+            data: customer
+        });
+    }
+
+    res.type('text/plain; charset=utf-8');
+    if (!customer || !customer.sanitized_name) {
+        return res.send('UNKNOWN');
+    }
+
+    if (includeFull) {
+        return res.send(RadiusCommentService.formatComment(customer, RadiusCommentService.normalizeUsername(username)));
+    }
+
+    return res.send(customer.sanitized_name);
+}));
+
+// GET /api/v1/radius-comments/mikrotik-script - Generate RouterOS PPP profile on-up/on-down & active session sync script
+router.get('/mikrotik-script', localIpOnly, asyncHandler(async (req, res) => {
+    const defaultHost = req.headers.host ? `http://${req.headers.host}` : 'http://172.22.10.103:3001';
+    const apiUrl = String(req.query.api_url || defaultHost).replace(/\/+$/, '');
+    const profileFilter = req.query.profile || '';
+
+    const script = [
+        '# ============================================================================',
+        '# Kilusi Bill - MikroTik PPPoE Customer Name Comment (Address-List PPPOE-ACTIVE)',
+        '# View in WinBox: IP -> Firewall -> Address Lists (Filter List: PPPOE-ACTIVE)',
+        '# ============================================================================',
+        '',
+        '# 1. PPP Profile on-up script (paste into /ppp profile on-up):',
+        ':local custName "UNKNOWN";',
+        `:do { :local res [/tool fetch url=("${apiUrl}/api/v1/radius-comments/lookup?user=" . $user) as-value output=user]; :if (($res->"status") = "finished") do={ :set custName ($res->"data"); } } on-error={};`,
+        ':do { /ip firewall address-list remove [find where list="PPPOE-ACTIVE" and (address=$"remote-address" or comment~"^" . $user . " - ")]; } on-error={};',
+        ':do { /ip firewall address-list add list="PPPOE-ACTIVE" address=$"remote-address" comment=($user . " - " . $custName); } on-error={};',
+        ':log info ("PPPoE-UP: " . $user . " (" . $custName . ") IP=" . $"remote-address");',
+        '',
+        '# 2. PPP Profile on-down script (paste into /ppp profile on-down):',
+        ':do { /ip firewall address-list remove [find where list="PPPOE-ACTIVE" and (address=$"remote-address" or comment~"^" . $user . " - ")]; } on-error={};',
+        '',
+        '# 3. One-time sync for all currently active PPPoE sessions (run in Terminal):',
+        ':foreach i in=[/ppp active find where service="pppoe"] do={',
+        '    :local u [/ppp active get $i name];',
+        '    :local ip [/ppp active get $i address];',
+        '    :local custName "UNKNOWN";',
+        `    :do { :local res [/tool fetch url=("${apiUrl}/api/v1/radius-comments/lookup?user=" . $u) as-value output=user]; :if (($res->"status") = "finished") do={ :set custName ($res->"data"); } } on-error={};`,
+        '    :do { /ip firewall address-list remove [find where list="PPPOE-ACTIVE" and (address=$ip or comment~"^" . $u . " - ")]; } on-error={};',
+        '    :do { /ip firewall address-list add list="PPPOE-ACTIVE" address=$ip comment=($u . " - " . $custName); } on-error={};',
+        '}',
+        ...(profileFilter ? [
+            '',
+            `# 4. Apply on-up / on-down to PPP profile "${profileFilter}":`,
+            `/ppp profile set [find where name="${profileFilter}"] on-up=":local custName \\"UNKNOWN\\"; :do { :local res [/tool fetch url=(\\"${apiUrl}/api/v1/radius-comments/lookup?user=\\" . \\$user) as-value output=user]; :if ((\\$res->\\"status\\") = \\"finished\\") do={ :set custName (\\$res->\\"data\\"); } } on-error={}; :do { /ip firewall address-list remove [find where list=\\"PPPOE-ACTIVE\\" and (address=\\$\\\"remote-address\\\" or comment~\\"^\\" . \\$user . \\" - \\")]; } on-error={}; :do { /ip firewall address-list add list=\\"PPPOE-ACTIVE\\" address=\\$\\\"remote-address\\\" comment=(\\$user . \\" - \\" . \\$custName); } on-error={}; :log info (\\"PPPoE-UP: \\" . \\$user . \\" (\\" . \\$custName . \\") IP=\\" . \\$\\\"remote-address\\\");" on-down=":do { /ip firewall address-list remove [find where list=\\"PPPOE-ACTIVE\\" and (address=\\$\\\"remote-address\\\" or comment~\\"^\\" . \\$user . \\" - \\")]; } on-error={};"`
+        ] : [])
+    ].join('\n');
+
+    res.type('text/plain; charset=utf-8').send(script + '\n');
+}));
+
+// POST /api/v1/radius-comments/sync - Clean up invalid radreply comments & verify lookup readiness
 router.post('/sync', jwtAuth, asyncHandler(async (req, res) => {
     try {
-        logger.info('🔄 Starting manual sync of all customer comments to RADIUS...');
+        logger.info('🔄 Starting manual sync/cleanup of RADIUS comments...');
 
         // Check if RADIUS is accessible
         const radiusAccessible = await RadiusCommentService.checkRadiusAccess();
@@ -21,12 +101,12 @@ router.post('/sync', jwtAuth, asyncHandler(async (req, res) => {
             );
         }
 
-        // Perform bulk sync
+        // Perform bulk sync / cleanup
         const syncedCount = await RadiusCommentService.syncAllCustomerComments();
 
         return res.sendSuccess({
             syncedCount,
-            message: `Successfully synced ${syncedCount} customer comments to RADIUS`
+            message: `Successfully verified ${syncedCount} customer PPPoE comment lookups`
         }, {
             totalSynced: syncedCount,
             radiusAccessible: radiusAccessible
@@ -50,37 +130,41 @@ router.get('/status', jwtAuth, asyncHandler(async (req, res) => {
         // Get some statistics
         const { query } = require('../../../config/database');
 
-        let totalComments = 0;
+        let invalidRadreplyComments = 0;
         let totalCustomersWithPPPoE = 0;
 
         if (radiusAccessible) {
-            // Count existing RADIUS comments
+            // Count any remaining invalid Mikrotik-Comment rows in radreply
             const commentCount = await query(`
                 SELECT COUNT(*) as count
                 FROM radreply
                 WHERE attribute = 'Mikrotik-Comment'
             `);
-            totalComments = parseInt(commentCount.rows[0].count);
+            invalidRadreplyComments = parseInt(commentCount.rows[0].count, 10);
 
-            // Count customers with PPPoE
+            // Count customers with PPPoE in technical_details
             const pppoeCount = await query(`
                 SELECT COUNT(*) as count
-                FROM customers
-                WHERE pppoe_username IS NOT NULL AND pppoe_username != ''
+                FROM technical_details td
+                JOIN services s ON td.service_id = s.id
+                JOIN customers c ON s.customer_id::text = c.id::text
+                WHERE td.pppoe_username IS NOT NULL AND td.pppoe_username != ''
             `);
-            totalCustomersWithPPPoE = parseInt(pppoeCount.rows[0].count);
+            totalCustomersWithPPPoE = parseInt(pppoeCount.rows[0].count, 10);
         }
 
         return res.sendSuccess({
             radiusAccessible,
-            totalComments,
+            totalComments: totalCustomersWithPPPoE,
+            invalidRadreplyComments,
             totalCustomersWithPPPoE,
-            syncStatus: totalComments === totalCustomersWithPPPoE ? 'synced' : 'out_of_sync'
+            syncStatus: invalidRadreplyComments === 0 ? 'synced' : 'cleanup_needed'
         }, {
             serviceStatus: 'active',
+            lookupEndpoint: '/api/v1/radius-comments/lookup',
+            scriptEndpoint: '/api/v1/radius-comments/mikrotik-script',
             lastChecked: new Date().toISOString()
         });
-
     } catch (error) {
         logger.error('Error checking RADIUS comment status:', error);
         return res.sendError(
