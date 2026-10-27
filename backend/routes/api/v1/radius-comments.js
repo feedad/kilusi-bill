@@ -2,12 +2,13 @@ const express = require('express');
 const router = express.Router();
 const { logger } = require('../../../config/logger');
 const { jwtAuth } = require('../../../middleware/jwtAuth');
-const localIpOnly = require('../../../middleware/localIpOnly');
+const mikrotikAuth = require('../../../middleware/mikrotikAuth');
+const { getSetting } = require('../../../config/settingsManager');
 const { asyncHandler } = require('../../../middleware/response');
 const RadiusCommentService = require('../../../services/radius-comment-service');
 
 // GET /api/v1/radius-comments/lookup - Plain-text customer name + region lookup for MikroTik RouterOS scripts
-router.get('/lookup', localIpOnly, asyncHandler(async (req, res) => {
+router.get('/lookup', mikrotikAuth, asyncHandler(async (req, res) => {
     const username = req.query.user || req.query.username;
     const wantJson = req.query.format === 'json';
     const includeFull = req.query.full === '1' || req.query.full === 'true';
@@ -50,8 +51,9 @@ router.get('/lookup', localIpOnly, asyncHandler(async (req, res) => {
 }));
 
 // GET /api/v1/radius-comments/mikrotik-script - Generate RouterOS PPP profile on-up/on-down & active session sync script
-router.get('/mikrotik-script', localIpOnly, asyncHandler(async (req, res) => {
-    const apiUrl = String(req.query.api_url || 'http://172.22.10.103:3001').replace(/\/+$/, '');
+router.get('/mikrotik-script', mikrotikAuth, asyncHandler(async (req, res) => {
+    const apiUrl = String(req.query.api_url || 'https://api.kilusi.id').replace(/\/+$/, '');
+    const apiKey = String(getSetting('mikrotik_api_key', '')).replace(/["\\]/g, '');
     const checkCertOpt = apiUrl.startsWith('https://') ? ' check-certificate=no' : '';
     const profileFilter = req.query.profile || '';
 
@@ -65,21 +67,21 @@ router.get('/mikrotik-script', localIpOnly, asyncHandler(async (req, res) => {
         '',
         '# 1. PPP Profile on-up script (paste into /ppp profile on-up, kosongkan on-down):',
         ':local custName $user;',
-        `:do { :local res [/tool fetch url=("${apiUrl}/api/v1/radius-comments/lookup?user=" . $user)${checkCertOpt} as-value output=user]; :if (($res->"status") = "finished" and ($res->"data") != "") do={ :set custName ($res->"data"); } } on-error={};`,
+        `:do { :local res [/tool fetch url=("${apiUrl}/api/v1/radius-comments/lookup?user=" . $user) http-header-field="X-API-Key: ${apiKey}"${checkCertOpt} as-value output=user]; :if (($res->"status") = "finished" and ($res->"data") != "") do={ :set custName ($res->"data"); } } on-error={};`,
         ':local ifName ("<pppoe-" . $user . ">");',
         ':do { :if ([:len [/interface pppoe-server find where user=$user]] > 0) do={ /interface pppoe-server set [find where user=$user] name=$ifName comment=$custName; } else={ /interface pppoe-server add name=$ifName user=$user comment=$custName; } } on-error={};',
         ':do { /queue simple set [find where name=("<" . $ifName . ">") or target=$ifName] comment=$custName; } on-error={};',
         ':log info ("PPPoE-UP: " . $user . " -> " . $custName);',
         '',
         '# 2. Bulk import semua pelanggan ke /interface pppoe-server (jalankan 1x di New Terminal):',
-        `/tool fetch url="${apiUrl}/api/v1/radius-comments/mikrotik-bindings"${checkCertOpt} dst-path=kilusi-pppoe-bindings.rsc;`,
+        `/tool fetch url="${apiUrl}/api/v1/radius-comments/mikrotik-bindings" http-header-field="X-API-Key: ${apiKey}"${checkCertOpt} dst-path=kilusi-pppoe-bindings.rsc;`,
         '/import file-name=kilusi-pppoe-bindings.rsc;',
         '',
         '# 3. Sync untuk sesi PPPoE yang sedang aktif saat ini:',
         ':foreach i in=[/ppp active find where service="pppoe"] do={',
         '    :local u [/ppp active get $i name];',
         '    :local custName $u;',
-        `    :do { :local res [/tool fetch url=("${apiUrl}/api/v1/radius-comments/lookup?user=" . $u)${checkCertOpt} as-value output=user]; :if (($res->"status") = "finished" and ($res->"data") != "") do={ :set custName ($res->"data"); } } on-error={};`,
+        `    :do { :local res [/tool fetch url=("${apiUrl}/api/v1/radius-comments/lookup?user=" . $u) http-header-field="X-API-Key: ${apiKey}"${checkCertOpt} as-value output=user]; :if (($res->"status") = "finished" and ($res->"data") != "") do={ :set custName ($res->"data"); } } on-error={};`,
         '    :local ifName ("<pppoe-" . $u . ">");',
         '    :do { :if ([:len [/interface pppoe-server find where user=$u]] > 0) do={ /interface pppoe-server set [find where user=$u] name=$ifName comment=$custName; } else={ /interface pppoe-server add name=$ifName user=$u comment=$custName; } } on-error={};',
         '    :do { /queue simple set [find where name=("<" . $ifName . ">") or target=$ifName] comment=$custName; } on-error={};',
@@ -90,7 +92,7 @@ router.get('/mikrotik-script', localIpOnly, asyncHandler(async (req, res) => {
         ...(profileFilter ? [
             '',
             `# 5. Apply on-up ke PPP profile "${profileFilter}" (on-down dikosongkan):`,
-            `/ppp profile set [find where name="${profileFilter}"] on-up=":local custName \\$user; :do { :local res [/tool fetch url=(\\"${apiUrl}/api/v1/radius-comments/lookup?user=\\" . \\$user)${checkCertOpt} as-value output=user]; :if ((\\$res->\\"status\\") = \\"finished\\" and (\\$res->\\"data\\") != \\"\\") do={ :set custName (\\$res->\\"data\\"); } } on-error={}; :local ifName (\\"<pppoe-\\" . \\$user . \\">\\"); :do { :if ([:len [/interface pppoe-server find where user=\\$user]] > 0) do={ /interface pppoe-server set [find where user=\\$user] name=\\$ifName comment=\\$custName; } else={ /interface pppoe-server add name=\\$ifName user=\\$user comment=\\$custName; } } on-error={}; :do { /queue simple set [find where name=(\\"<\\" . \\$ifName . \\">\\") or target=\\$ifName] comment=\\$custName; } on-error={}; :log info (\\"PPPoE-UP: \\" . \\$user . \\" -> \\" . \\$custName);" on-down=""`
+            `/ppp profile set [find where name="${profileFilter}"] on-up=":local custName \\$user; :do { :local res [/tool fetch url=(\\"${apiUrl}/api/v1/radius-comments/lookup?user=\\" . \\$user) http-header-field=\\"X-API-Key: ${apiKey}\\"${checkCertOpt} as-value output=user]; :if ((\\$res->\\"status\\") = \\"finished\\" and (\\$res->\\"data\\") != \\"\\") do={ :set custName (\\$res->\\"data\\"); } } on-error={}; :local ifName (\\"<pppoe-\\" . \\$user . \\">\\"); :do { :if ([:len [/interface pppoe-server find where user=\\$user]] > 0) do={ /interface pppoe-server set [find where user=\\$user] name=\\$ifName comment=\\$custName; } else={ /interface pppoe-server add name=\\$ifName user=\\$user comment=\\$custName; } } on-error={}; :do { /queue simple set [find where name=(\\"<\\" . \\$ifName . \\">\\") or target=\\$ifName] comment=\\$custName; } on-error={}; :log info (\\"PPPoE-UP: \\" . \\$user . \\" -> \\" . \\$custName);" on-down=""`
         ] : [])
     ].join('\n');
 
@@ -98,7 +100,7 @@ router.get('/mikrotik-script', localIpOnly, asyncHandler(async (req, res) => {
 }));
 
 // GET /api/v1/radius-comments/mikrotik-bindings - Generate RouterOS .rsc file for all customer PPPoE server bindings
-router.get('/mikrotik-bindings', localIpOnly, asyncHandler(async (req, res) => {
+router.get('/mikrotik-bindings', mikrotikAuth, asyncHandler(async (req, res) => {
     const bindings = await RadiusCommentService.getAllCustomerPppoeBindings();
     const lines = [
         '# Kilusi Bill - Static PPPoE Server Interface Bindings (name <pppoe-user>, comment NAMA-MITRA)',
