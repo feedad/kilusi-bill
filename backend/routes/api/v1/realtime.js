@@ -1145,16 +1145,19 @@ router.post('/olt-onus/rename', async (req, res) => {
         const normalizeMac = (m) => String(m || '').toLowerCase().replace(/[:-\s]/g, '');
         const macToCustomer = new Map();
 
-        // 1. Active radacct sessions joined via pppoe_username
+        // 1. radacct sessions (active prioritized first, then recent historical) joined via pppoe_username
         const radacctMacsQuery = `
-            SELECT DISTINCT LOWER(TRIM(r.callingstationid)) as mac, c.name as customer_name
+            SELECT DISTINCT ON (LOWER(TRIM(r.callingstationid)))
+                LOWER(TRIM(r.callingstationid)) as mac,
+                c.name as customer_name
             FROM radacct r
             JOIN technical_details td ON LOWER(TRIM(r.username)) = LOWER(TRIM(td.pppoe_username))
             JOIN services s ON td.service_id = s.id
             JOIN customers c ON s.customer_id = c.id::text
-            WHERE r.acctstoptime IS NULL
-              AND r.callingstationid IS NOT NULL
+            WHERE r.callingstationid IS NOT NULL
+              AND TRIM(r.callingstationid) != ''
               AND c.name IS NOT NULL
+            ORDER BY LOWER(TRIM(r.callingstationid)), (r.acctstoptime IS NULL) DESC, r.acctstarttime DESC NULLS LAST
         `;
         const radacctMacsResult = await query(radacctMacsQuery);
         radacctMacsResult.rows.forEach(row => {
@@ -1236,8 +1239,7 @@ router.post('/olt-onus/rename', async (req, res) => {
                 const onus = await oltSnmpMonitor.getOnuList({
                     ...oltConfig,
                     community: olt.snmp_community // Use read community for getting list
-                });
-
+                }, { forceRefresh: true, skipMetrics: true });
                 totalOnus += onus.length;
                 logger.info(`[Rename] Found ${onus.length} ONUs on ${olt.name}`);
 

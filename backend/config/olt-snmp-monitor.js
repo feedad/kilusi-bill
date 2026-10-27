@@ -1,7 +1,9 @@
 const snmp = require('net-snmp');
 
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes (signal rarely changes)
+const ONU_LIST_CACHE_TTL_MS = 60 * 1000; // 60 seconds for UI pagination/search/refetch
 const oltOnuCache = new Map(); // key: `${host}:${vendor}`, value: { onus, cachedAt }
+const inFlightOnuList = new Map(); // key: `${host}:${vendor}`, value: Promise<Array>
 let signalByUsernameCache = new Map(); // key: pppoeUsername, value: { rx_power, tx_power, distance, temperature, olt_name, onu_index, cachedAt }
 let lastSignalRefreshTime = 0;
 let cacheRefreshInProgress = false;
@@ -311,19 +313,45 @@ async function setOnuName(config, index, name) {
     const padded = Buffer.alloc(32);
     padded.write(safeName, 0, Math.min(safeName.length, 30), 'ascii');
 
-    await new Promise((resolve, reject) => {
-      session.set([{
-        oid: targetOid,
-        type: snmp.ObjectType.OctetString,
-        value: padded
-      }], (error) => {
-        if (error) reject(error);
-        else resolve();
-      });
-    });
+    const maxAttempts = vendor === 'hioso' ? 4 : 1;
+    let lastError = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await new Promise((resolve, reject) => {
+          session.set([{
+            oid: targetOid,
+            type: snmp.ObjectType.OctetString,
+            value: padded
+          }], (error, varbinds) => {
+            if (error) return reject(error);
+            if (varbinds && varbinds[0] && snmp.isVarbindError(varbinds[0])) {
+              return reject(new Error(snmp.varbindError(varbinds[0])));
+            }
+            resolve();
+          });
+        });
+        lastError = null;
+        break;
+      } catch (err) {
+        lastError = err;
+        if (attempt < maxAttempts) {
+          await new Promise(r => setTimeout(r, 1200));
+        }
+      }
+    }
+    if (lastError) {
+      throw lastError;
+    }
 
     session.close();
-    oltOnuCache.delete(`${host}:${vendor}`);
+    const cacheKey = `${host}:${vendor}`;
+    const cached = oltOnuCache.get(cacheKey);
+    if (cached && Array.isArray(cached.onus)) {
+      const target = cached.onus.find(o => String(o.rawIndex) === String(index) || String(o.index) === String(index));
+      if (target) {
+        target.name = safeName || '-';
+      }
+    }
     return { success: true, message: `ONU Name updated to ${safeName}` };
 
   } catch (err) {
@@ -337,7 +365,35 @@ async function setOnuName(config, index, name) {
  * @param {Object} config - SNMP config
  * @returns {Promise<Array>} List of ONUs
  */
-async function getOnuList(config) {
+async function getOnuList(config, opts = {}) {
+  const { host, community = 'public', version = '2c', port = 161, vendor = 'zte' } = config;
+  const cacheKey = `${host}:${vendor}`;
+
+  if (!opts.forceRefresh) {
+    const cached = oltOnuCache.get(cacheKey);
+    const maxAge = opts.maxAgeMs ?? ONU_LIST_CACHE_TTL_MS;
+    if (cached && (Date.now() - cached.cachedAt) < maxAge) {
+      return cached.onus;
+    }
+    if (inFlightOnuList.has(cacheKey)) {
+      return inFlightOnuList.get(cacheKey);
+    }
+  }
+
+  const promise = _fetchOnuList(config, cacheKey, opts);
+  if (!opts.skipMetrics) {
+    inFlightOnuList.set(cacheKey, promise);
+  }
+  try {
+    return await promise;
+  } finally {
+    if (inFlightOnuList.get(cacheKey) === promise) {
+      inFlightOnuList.delete(cacheKey);
+    }
+  }
+}
+
+async function _fetchOnuList(config, cacheKey, opts = {}) {
   const { host, community = 'public', version = '2c', port = 161, vendor = 'zte' } = config;
 
   // Create session with longer timeout for walks
@@ -370,41 +426,83 @@ async function getOnuList(config) {
 
     // Sequential walks for better debugging
     let snList = [], statusList = [], rxList = [], nameList = [], distList = [], tempList = [], txList = [];
-
-    try {
-      snList = await snmpWalk(session, onuSn);
-      console.log(`[OLT Monitor] SN Walk returned ${snList.length} items`);
-    } catch (e) {
-      console.error(`[OLT Monitor] SN Walk failed: ${e.message}`);
-    }
-
-    try {
-      statusList = await snmpWalk(session, onuStatus);
-      console.log(`[OLT Monitor] Status Walk returned ${statusList.length} items`);
-    } catch (e) {
-      console.error(`[OLT Monitor] Status Walk failed: ${e.message}`);
-    }
-
-    // --- Hioso Optimization: Walk only Name and Status, others on-demand ---
     const useOnDemandProbe = (vendor === 'hioso' || vendor === 'hsgq');
 
-    try {
-      if (!useOnDemandProbe) {
-        rxList = await snmpWalk(session, onuRxPower);
-        console.log(`[OLT Monitor] RxPower Walk returned ${rxList.length} items`);
+    if (vendor === 'hioso') {
+      // Hioso EPON firmware refreshes one PON port at a time in a ~3.0s cycle,
+      // causing any single SNMP walk to miss whichever PON port is mid-refresh.
+      // Two maxRepetitions=1 passes separated by ~3.3s guarantee complete data.
+      const mergeWalkItems = (pass1, pass2, preferNonEmpty = false) => {
+        const merged = new Map();
+        for (const item of pass1) {
+          if (!snmp.isVarbindError(item)) merged.set(item.oid, item);
+        }
+        for (const item of pass2) {
+          if (snmp.isVarbindError(item)) continue;
+          if (!merged.has(item.oid)) {
+            merged.set(item.oid, item);
+          } else if (preferNonEmpty) {
+            const prevVal = Buffer.isBuffer(merged.get(item.oid).value)
+              ? merged.get(item.oid).value.toString('latin1').split('\0')[0].trim()
+              : String(merged.get(item.oid).value || '').trim();
+            const nextVal = Buffer.isBuffer(item.value)
+              ? item.value.toString('latin1').split('\0')[0].trim()
+              : String(item.value || '').trim();
+            if ((!prevVal || prevVal === '-') && nextVal && nextVal !== '-') {
+              merged.set(item.oid, item);
+            }
+          }
+        }
+        return Array.from(merged.values());
+      };
+
+      const t0 = Date.now();
+      const sn1 = await snmpWalk(session, onuSn, 1).catch(e => { console.error(`[OLT Monitor] SN Walk p1 failed: ${e.message}`); return []; });
+      const st1 = await snmpWalk(session, onuStatus, 1).catch(e => { console.error(`[OLT Monitor] Status Walk p1 failed: ${e.message}`); return []; });
+      const nm1 = await snmpWalk(session, onuName, 1).catch(e => { console.error(`[OLT Monitor] Name Walk p1 failed: ${e.message}`); return []; });
+
+      const waitMs = Math.max(0, 3300 - (Date.now() - t0));
+      if (waitMs > 0) await new Promise(r => setTimeout(r, waitMs));
+
+      const sn2 = await snmpWalk(session, onuSn, 1).catch(e => { console.error(`[OLT Monitor] SN Walk p2 failed: ${e.message}`); return []; });
+      const st2 = await snmpWalk(session, onuStatus, 1).catch(e => { console.error(`[OLT Monitor] Status Walk p2 failed: ${e.message}`); return []; });
+      const nm2 = await snmpWalk(session, onuName, 1).catch(e => { console.error(`[OLT Monitor] Name Walk p2 failed: ${e.message}`); return []; });
+
+      snList = mergeWalkItems(sn1, sn2, false);
+      statusList = mergeWalkItems(st1, st2, false);
+      nameList = mergeWalkItems(nm1, nm2, true);
+      console.log(`[OLT Monitor] Hioso 2-pass Walk: SN=${snList.length} (${sn1.length}+${sn2.length}), Status=${statusList.length}, Name=${nameList.length} (${nm1.length}+${nm2.length})`);
+    } else {
+      try {
+        snList = await snmpWalk(session, onuSn);
+        console.log(`[OLT Monitor] SN Walk returned ${snList.length} items`);
+      } catch (e) {
+        console.error(`[OLT Monitor] SN Walk failed: ${e.message}`);
       }
-    } catch (e) {
-      console.error(`[OLT Monitor] RxPower Walk failed: ${e.message}`);
+
+      try {
+        statusList = await snmpWalk(session, onuStatus);
+        console.log(`[OLT Monitor] Status Walk returned ${statusList.length} items`);
+      } catch (e) {
+        console.error(`[OLT Monitor] Status Walk failed: ${e.message}`);
+      }
+
+      try {
+        if (!useOnDemandProbe) {
+          rxList = await snmpWalk(session, onuRxPower);
+          console.log(`[OLT Monitor] RxPower Walk returned ${rxList.length} items`);
+        }
+      } catch (e) {
+        console.error(`[OLT Monitor] RxPower Walk failed: ${e.message}`);
+      }
+
+      try {
+        nameList = await snmpWalk(session, onuName);
+        console.log(`[OLT Monitor] Name Walk returned ${nameList.length} items`);
+      } catch (e) {
+        console.error(`[OLT Monitor] Name Walk failed: ${e.message}`);
+      }
     }
-
-
-    try {
-      nameList = await snmpWalk(session, onuName, vendor === 'hioso' ? 1 : 20);
-      console.log(`[OLT Monitor] Name Walk returned ${nameList.length} items`);
-    } catch (e) {
-      console.error(`[OLT Monitor] Name Walk failed: ${e.message}`);
-    }
-
     if (onuDistance && !useOnDemandProbe) {
       try {
         distList = await snmpWalk(session, onuDistance);
@@ -638,7 +736,7 @@ async function getOnuList(config) {
     }
 
     // --- Hioso On-Demand Probe Logic ---
-    if (useOnDemandProbe) {
+    if (useOnDemandProbe && !opts.skipMetrics) {
       console.log(`[OLT Monitor] Starting Hioso On-Demand Probe for Metrics...`);
       const targetSuffixes = Object.keys(onuMap).filter(s => onuMap[s].status === 'online');
 
@@ -734,12 +832,26 @@ async function getOnuList(config) {
       }
 
       await Promise.all(chunkPromises);
+    } else if (opts.skipMetrics) {
+      // Preserve previously cached metrics if available
+      const prevCached = oltOnuCache.get(cacheKey);
+      if (prevCached && Array.isArray(prevCached.onus)) {
+        const prevByIdx = new Map(prevCached.onus.map(o => [o.rawIndex || o.index, o]));
+        Object.keys(onuMap).forEach(k => {
+          const prev = prevByIdx.get(k);
+          if (prev) {
+            if (prev.rxPower && prev.rxPower !== '-') onuMap[k].rxPower = prev.rxPower;
+            if (prev.distance && prev.distance !== '-') onuMap[k].distance = prev.distance;
+            if (prev.temperature && prev.temperature !== '-') onuMap[k].temperature = prev.temperature;
+          }
+        });
+      }
     }
-
     try { session.close(); } catch (e) { }
-    console.log(`[OLT Monitor] Returning ${Object.keys(onuMap).length} ONUs`);
-    return Object.values(onuMap);
-
+    const resultList = Object.values(onuMap);
+    oltOnuCache.set(cacheKey, { onus: resultList, cachedAt: Date.now() });
+    console.log(`[OLT Monitor] Returning ${resultList.length} ONUs`);
+    return resultList;
   } catch (err) {
     console.error(`[OLT Monitor] Error in getOnuList: ${err.message}`);
     try { session.close(); } catch (e) { }

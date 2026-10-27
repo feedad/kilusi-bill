@@ -359,38 +359,55 @@ router.get('/lookup-customer-by-mac/:mac', asyncHandler(async (req, res) => {
         return res.json({ success: false, data: null, message: 'MAC address terlalu pendek' });
     }
 
-    const normalizedInput = mac.toLowerCase().replace(/[:-]/g, '');
+    const normalizedInput = mac.toLowerCase().replace(/[:-\s]/g, '');
 
     try {
-        // Get active RADIUS sessions with MAC, joined to technical_details and customers
+        // Get RADIUS sessions (active prioritized) + technical_details MACs, joined to customers
         const result = await query(`
-            SELECT DISTINCT
+            SELECT
                 LOWER(TRIM(r.callingstationid)) as radius_mac,
                 c.name as customer_name,
                 c.id as customer_id,
                 c.phone as customer_phone,
-                td.pppoe_username
+                td.pppoe_username,
+                CASE WHEN r.acctstoptime IS NULL THEN 1 ELSE 2 END as priority
             FROM radacct r
-            JOIN technical_details td ON td.pppoe_username = r.username
+            JOIN technical_details td ON LOWER(TRIM(td.pppoe_username)) = LOWER(TRIM(r.username))
             JOIN services s ON td.service_id = s.id
-            JOIN customers c ON s.customer_id = c.id
-            WHERE r.acctstoptime IS NULL
-              AND r.callingstationid IS NOT NULL
+            JOIN customers c ON s.customer_id = c.id::text
+            WHERE r.callingstationid IS NOT NULL
               AND TRIM(r.callingstationid) != ''
               AND LENGTH(TRIM(r.callingstationid)) >= 8
+              AND c.name IS NOT NULL
+            UNION ALL
+            SELECT
+                LOWER(TRIM(td.mac_address)) as radius_mac,
+                c.name as customer_name,
+                c.id as customer_id,
+                c.phone as customer_phone,
+                td.pppoe_username,
+                3 as priority
+            FROM technical_details td
+            JOIN services s ON td.service_id = s.id
+            JOIN customers c ON s.customer_id = c.id::text
+            WHERE td.mac_address IS NOT NULL
+              AND TRIM(td.mac_address) != ''
+              AND LENGTH(TRIM(td.mac_address)) >= 8
+              AND c.name IS NOT NULL
+            ORDER BY priority ASC
         `);
 
         if (result.rows.length === 0) {
-            return res.json({ success: false, data: null, message: 'Tidak ada sesi RADIUS aktif' });
+            return res.json({ success: false, data: null, message: 'Tidak ada data MAC pelanggan' });
         }
 
-        // Fuzzy match input MAC against RADIUS MACs
+        // Fuzzy match input MAC against RADIUS/technical_details MACs
         let bestMatch = null;
         let minDiff = Infinity;
         const MAX_DIFF = 0x10;
 
         for (const row of result.rows) {
-            const normalizedRadiusMac = row.radius_mac.replace(/[:-]/g, '');
+            const normalizedRadiusMac = row.radius_mac.replace(/[:-\s]/g, '');
             if (normalizedRadiusMac.length !== normalizedInput.length) continue;
 
             try {
