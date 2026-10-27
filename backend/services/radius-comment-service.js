@@ -47,11 +47,13 @@ class RadiusCommentService {
                     s.service_number,
                     td.pppoe_username,
                     r.name AS region_name,
+                    m.name AS mitra_name,
                     s.status
                 FROM technical_details td
                 JOIN services s ON td.service_id = s.id
                 JOIN customers c ON s.customer_id::text = c.id::text
                 LEFT JOIN regions r ON s.region_id = r.id
+                LEFT JOIN mitra m ON m.id = r.mitra_id
                 WHERE LOWER(td.pppoe_username) = LOWER($1)
                    OR LOWER(SPLIT_PART(td.pppoe_username, '@', 1)) = LOWER(SPLIT_PART($1, '@', 1))
                    OR LOWER(s.service_number) = LOWER(SPLIT_PART($1, '@', 1))
@@ -66,13 +68,15 @@ class RadiusCommentService {
             const row = result.rows[0];
             const sanitizedName = this.sanitizeName(row.name);
             const sanitizedRegion = row.region_name ? this.sanitizeName(row.region_name) : null;
+            const sanitizedMitra = row.mitra_name ? this.sanitizeName(row.mitra_name) : sanitizedRegion;
             return {
                 customer_id: row.customer_id,
                 name: row.name,
                 sanitized_name: sanitizedName,
-                display_label: sanitizedRegion ? `${sanitizedName} (${sanitizedRegion})` : sanitizedName,
+                display_label: sanitizedMitra ? `${sanitizedName}-${sanitizedMitra}` : sanitizedName,
                 service_number: row.service_number,
                 pppoe_username: row.pppoe_username,
+                mitra_name: sanitizedMitra,
                 region_name: sanitizedRegion,
                 status: row.status || null
             };
@@ -90,12 +94,11 @@ class RadiusCommentService {
      */
     static formatComment(customer, fallbackUsername = '') {
         if (!customer || !customer.name) {
-            return fallbackUsername ? `${fallbackUsername} - UNKNOWN` : 'UNKNOWN';
+            return fallbackUsername || 'UNKNOWN';
         }
         const sanitizedName = this.sanitizeName(customer.name);
-        const userPart = customer.pppoe_username || fallbackUsername;
-        const regionPart = customer.region_name ? ` (${this.sanitizeName(customer.region_name)})` : '';
-        return userPart ? `${userPart} - ${sanitizedName}${regionPart}` : `${sanitizedName}${regionPart}`;
+        const areaLabel = customer.mitra_name || customer.region_name;
+        return areaLabel ? `${sanitizedName}-${this.sanitizeName(areaLabel)}` : sanitizedName;
     }
 
     /**
