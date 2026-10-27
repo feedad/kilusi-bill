@@ -2,118 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { logger } = require('../../../config/logger');
 const { jwtAuth } = require('../../../middleware/jwtAuth');
-const mikrotikAuth = require('../../../middleware/mikrotikAuth');
-const { getSetting } = require('../../../config/settingsManager');
 const { asyncHandler } = require('../../../middleware/response');
 const RadiusCommentService = require('../../../services/radius-comment-service');
-
-// GET /api/v1/radius-comments/lookup - Plain-text customer name + region lookup for MikroTik RouterOS scripts
-router.get('/lookup', mikrotikAuth, asyncHandler(async (req, res) => {
-    const username = req.query.user || req.query.username;
-    const wantJson = req.query.format === 'json';
-    const includeFull = req.query.full === '1' || req.query.full === 'true';
-    const excludeRegion = req.query.region === '0' || req.query.region === 'false';
-
-    if (!username) {
-        if (wantJson) {
-            return res.status(400).json({
-                success: false,
-                message: 'Query parameter user or username is required',
-                data: null
-            });
-        }
-        return res.status(400).type('text/plain; charset=utf-8').send('UNKNOWN');
-    }
-
-    const customer = await RadiusCommentService.getCustomerByPppoeUsername(username);
-
-    if (wantJson) {
-        return res.json({
-            success: true,
-            data: customer
-        });
-    }
-
-    res.type('text/plain; charset=utf-8');
-    if (!customer || !customer.sanitized_name) {
-        return res.send('UNKNOWN');
-    }
-
-    if (includeFull) {
-        return res.send(RadiusCommentService.formatComment(customer, RadiusCommentService.normalizeUsername(username)));
-    }
-
-    if (excludeRegion) {
-        return res.send(customer.sanitized_name);
-    }
-
-    return res.send(customer.display_label);
-}));
-
-// GET /api/v1/radius-comments/mikrotik-script - Generate RouterOS PPP profile on-up/on-down & active session sync script
-router.get('/mikrotik-script', mikrotikAuth, asyncHandler(async (req, res) => {
-    const apiUrl = String(req.query.api_url || 'https://api.kilusi.id').replace(/\/+$/, '');
-    const apiKey = String(getSetting('mikrotik_api_key', '')).replace(/["\\]/g, '');
-    const checkCertOpt = apiUrl.startsWith('https://') ? ' check-certificate=no' : '';
-    const profileFilter = req.query.profile || '';
-
-    const script = [
-        '# ============================================================================',
-        '# Kilusi Bill - MikroTik PPPoE Customer Label: NAMA-MITRA (comment only)',
-        '# Muncul di WinBox:',
-        '#   1. PPP -> Interface (Name tetap <pppoe-user>, Comment = NAMA-MITRA)',
-        '#   2. Queues -> Simple Queues (Comment = NAMA-MITRA, jika RouterOS izinkan comment di queue dinamis)',
-        '# ============================================================================',
-        '',
-        '# 1. PPP Profile on-up script (paste into /ppp profile on-up, kosongkan on-down):',
-        ':local custName $user;',
-        `:do { :local res [/tool fetch url=("${apiUrl}/api/v1/radius-comments/lookup?user=" . $user) http-header-field="X-API-Key: ${apiKey}"${checkCertOpt} as-value output=user]; :if (($res->"status") = "finished" and ($res->"data") != "") do={ :set custName ($res->"data"); } } on-error={};`,
-        ':local ifName ("<pppoe-" . $user . ">");',
-        ':do { :if ([:len [/interface pppoe-server find where user=$user]] > 0) do={ /interface pppoe-server set [find where user=$user] name=$ifName comment=$custName; } else={ /interface pppoe-server add name=$ifName user=$user comment=$custName; } } on-error={};',
-        ':do { /queue simple set [find where name=("<" . $ifName . ">") or target=$ifName] comment=$custName; } on-error={};',
-        ':log info ("PPPoE-UP: " . $user . " -> " . $custName);',
-        '',
-        '# 2. Bulk import semua pelanggan ke /interface pppoe-server (jalankan 1x di New Terminal):',
-        `/tool fetch url="${apiUrl}/api/v1/radius-comments/mikrotik-bindings" http-header-field="X-API-Key: ${apiKey}"${checkCertOpt} dst-path=kilusi-pppoe-bindings.rsc;`,
-        '/import file-name=kilusi-pppoe-bindings.rsc;',
-        '',
-        '# 3. Sync untuk sesi PPPoE yang sedang aktif saat ini:',
-        ':foreach i in=[/ppp active find where service="pppoe"] do={',
-        '    :local u [/ppp active get $i name];',
-        '    :local custName $u;',
-        `    :do { :local res [/tool fetch url=("${apiUrl}/api/v1/radius-comments/lookup?user=" . $u) http-header-field="X-API-Key: ${apiKey}"${checkCertOpt} as-value output=user]; :if (($res->"status") = "finished" and ($res->"data") != "") do={ :set custName ($res->"data"); } } on-error={};`,
-        '    :local ifName ("<pppoe-" . $u . ">");',
-        '    :do { :if ([:len [/interface pppoe-server find where user=$u]] > 0) do={ /interface pppoe-server set [find where user=$u] name=$ifName comment=$custName; } else={ /interface pppoe-server add name=$ifName user=$u comment=$custName; } } on-error={};',
-        '    :do { /queue simple set [find where name=("<" . $ifName . ">") or target=$ifName] comment=$custName; } on-error={};',
-        '}',
-        '',
-        '# 4. Hapus sisa address-list PPPOE-ACTIVE dari versi script lama:',
-        '/ip firewall address-list remove [find where list="PPPOE-ACTIVE"];',
-        ...(profileFilter ? [
-            '',
-            `# 5. Apply on-up ke PPP profile "${profileFilter}" (on-down dikosongkan):`,
-            `/ppp profile set [find where name="${profileFilter}"] on-up=":local custName \\$user; :do { :local res [/tool fetch url=(\\"${apiUrl}/api/v1/radius-comments/lookup?user=\\" . \\$user) http-header-field=\\"X-API-Key: ${apiKey}\\"${checkCertOpt} as-value output=user]; :if ((\\$res->\\"status\\") = \\"finished\\" and (\\$res->\\"data\\") != \\"\\") do={ :set custName (\\$res->\\"data\\"); } } on-error={}; :local ifName (\\"<pppoe-\\" . \\$user . \\">\\"); :do { :if ([:len [/interface pppoe-server find where user=\\$user]] > 0) do={ /interface pppoe-server set [find where user=\\$user] name=\\$ifName comment=\\$custName; } else={ /interface pppoe-server add name=\\$ifName user=\\$user comment=\\$custName; } } on-error={}; :do { /queue simple set [find where name=(\\"<\\" . \\$ifName . \\">\\") or target=\\$ifName] comment=\\$custName; } on-error={}; :log info (\\"PPPoE-UP: \\" . \\$user . \\" -> \\" . \\$custName);" on-down=""`
-        ] : [])
-    ].join('\n');
-
-    res.type('text/plain; charset=utf-8').send(script + '\n');
-}));
-
-// GET /api/v1/radius-comments/mikrotik-bindings - Generate RouterOS .rsc file for all customer PPPoE server bindings
-router.get('/mikrotik-bindings', mikrotikAuth, asyncHandler(async (req, res) => {
-    const bindings = await RadiusCommentService.getAllCustomerPppoeBindings();
-    const lines = [
-        '# Kilusi Bill - Static PPPoE Server Interface Bindings (name <pppoe-user>, comment NAMA-MITRA)',
-        ...bindings.map(b => {
-            const u = b.pppoe_username.replace(/["\\]/g, '');
-            const label = b.display_label.replace(/["\\]/g, '');
-            const ifName = `<pppoe-${u}>`;
-            return `:do { :if ([:len [/interface pppoe-server find where user="${u}"]] > 0) do={ /interface pppoe-server set [find where user="${u}"] name="${ifName}" comment="${label}"; } else={ /interface pppoe-server add name="${ifName}" user="${u}" comment="${label}"; } } on-error={}; :do { /queue simple set [find where name="<${ifName}>" or target="${ifName}"] comment="${label}"; } on-error={};`;
-        })
-    ];
-    res.type('text/plain; charset=utf-8').send(lines.join('\n') + '\n');
-}));
-
 // POST /api/v1/radius-comments/sync - Clean up invalid radreply comments & verify lookup readiness
 router.post('/sync', jwtAuth, asyncHandler(async (req, res) => {
     try {
@@ -190,8 +80,7 @@ router.get('/status', jwtAuth, asyncHandler(async (req, res) => {
             syncStatus: invalidRadreplyComments === 0 ? 'synced' : 'cleanup_needed'
         }, {
             serviceStatus: 'active',
-            lookupEndpoint: '/api/v1/radius-comments/lookup',
-            scriptEndpoint: '/api/v1/radius-comments/mikrotik-script',
+            note: 'RouterOS does not support a RADIUS reply attribute for PPPoE comments',
             lastChecked: new Date().toISOString()
         });
     } catch (error) {
