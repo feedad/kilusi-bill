@@ -102,6 +102,46 @@ class RadiusCommentService {
     }
 
     /**
+     * Get all active/registered PPPoE usernames with their formatted NAMA-MITRA label
+     * @returns {Promise<Array<{pppoe_username: string, display_label: string}>>}
+     */
+    static async getAllCustomerPppoeBindings() {
+        try {
+            const result = await query(`
+                SELECT DISTINCT ON (LOWER(TRIM(td.pppoe_username)))
+                    TRIM(td.pppoe_username) AS pppoe_username,
+                    c.name,
+                    r.name AS region_name,
+                    m.name AS mitra_name
+                FROM technical_details td
+                JOIN services s ON td.service_id = s.id
+                JOIN customers c ON s.customer_id::text = c.id::text
+                LEFT JOIN regions r ON s.region_id = r.id
+                LEFT JOIN mitra m ON m.id = r.mitra_id
+                WHERE td.pppoe_username IS NOT NULL
+                  AND TRIM(td.pppoe_username) != ''
+                ORDER BY
+                    LOWER(TRIM(td.pppoe_username)),
+                    CASE WHEN s.status = 'active' THEN 0 ELSE 1 END,
+                    s.updated_at DESC NULLS LAST
+            `);
+
+            return result.rows.map(row => {
+                const sanitizedName = this.sanitizeName(row.name);
+                const sanitizedRegion = row.region_name ? this.sanitizeName(row.region_name) : null;
+                const sanitizedMitra = row.mitra_name ? this.sanitizeName(row.mitra_name) : sanitizedRegion;
+                return {
+                    pppoe_username: row.pppoe_username,
+                    display_label: sanitizedMitra ? `${sanitizedName}-${sanitizedMitra}` : sanitizedName
+                };
+            });
+        } catch (error) {
+            logger.error('Error getting all customer PPPoE bindings:', error);
+            return [];
+        }
+    }
+
+    /**
      * Remove all invalid Mikrotik-Comment rows from radreply
      * @returns {Promise<number>} Number of rows deleted
      */
