@@ -57,18 +57,19 @@ router.get('/mikrotik-script', asyncHandler(async (req, res) => {
 
     const script = [
         '# ============================================================================',
-        '# Kilusi Bill - MikroTik PPPoE Customer Label: NAMA-MITRA',
+        '# Kilusi Bill - MikroTik PPPoE Customer Label: NAMA-MITRA (comment only)',
         '# Muncul di WinBox:',
-        '#   1. PPP -> Interface (Name & Comment = NAMA-MITRA, status R Running, Tx/Rx)',
-        '#   2. Queues -> Simple Queues (Name & Target otomatis berisi NAMA-MITRA)',
+        '#   1. PPP -> Interface (Name tetap <pppoe-user>, Comment = NAMA-MITRA)',
+        '#   2. Queues -> Simple Queues (Comment = NAMA-MITRA, jika RouterOS izinkan comment di queue dinamis)',
         '#   3. IP -> Firewall -> Address Lists (Filter List: PPPOE-ACTIVE)',
         '# ============================================================================',
         '',
         '# 1. PPP Profile on-up script (paste into /ppp profile on-up):',
         ':local custName $user;',
         `:do { :local res [/tool fetch url=("${apiUrl}/api/v1/radius-comments/lookup?user=" . $user)${checkCertOpt} as-value output=user]; :if (($res->"status") = "finished" and ($res->"data") != "") do={ :set custName ($res->"data"); } } on-error={};`,
-        ':local ifName ("<pppoe-" . $user . "> " . $custName);',
+        ':local ifName ("<pppoe-" . $user . ">");',
         ':do { :if ([:len [/interface pppoe-server find where user=$user]] > 0) do={ /interface pppoe-server set [find where user=$user] name=$ifName comment=$custName; } else={ /interface pppoe-server add name=$ifName user=$user comment=$custName; } } on-error={};',
+        ':do { /queue simple set [find where name=("<" . $ifName . ">") or target=$ifName] comment=$custName; } on-error={};',
         ':do { /ip firewall address-list remove [find where list="PPPOE-ACTIVE" and address=$"remote-address"]; } on-error={};',
         ':do { /ip firewall address-list add list="PPPOE-ACTIVE" address=$"remote-address" comment=$custName; } on-error={};',
         ':log info ("PPPoE-UP: " . $user . " -> " . $custName . " IP=" . $"remote-address");',
@@ -86,15 +87,16 @@ router.get('/mikrotik-script', asyncHandler(async (req, res) => {
         '    :local ip [/ppp active get $i address];',
         '    :local custName $u;',
         `    :do { :local res [/tool fetch url=("${apiUrl}/api/v1/radius-comments/lookup?user=" . $u)${checkCertOpt} as-value output=user]; :if (($res->"status") = "finished" and ($res->"data") != "") do={ :set custName ($res->"data"); } } on-error={};`,
-        '    :local ifName ("<pppoe-" . $u . "> " . $custName);',
+        '    :local ifName ("<pppoe-" . $u . ">");',
         '    :do { :if ([:len [/interface pppoe-server find where user=$u]] > 0) do={ /interface pppoe-server set [find where user=$u] name=$ifName comment=$custName; } else={ /interface pppoe-server add name=$ifName user=$u comment=$custName; } } on-error={};',
+        '    :do { /queue simple set [find where name=("<" . $ifName . ">") or target=$ifName] comment=$custName; } on-error={};',
         '    :do { /ip firewall address-list remove [find where list="PPPOE-ACTIVE" and address=$ip]; } on-error={};',
         '    :do { /ip firewall address-list add list="PPPOE-ACTIVE" address=$ip comment=$custName; } on-error={};',
         '}',
         ...(profileFilter ? [
             '',
             `# 5. Apply on-up / on-down to PPP profile "${profileFilter}":`,
-            `/ppp profile set [find where name="${profileFilter}"] on-up=":local custName \\$user; :do { :local res [/tool fetch url=(\\"${apiUrl}/api/v1/radius-comments/lookup?user=\\" . \\$user)${checkCertOpt} as-value output=user]; :if ((\\$res->\\"status\\") = \\"finished\\" and (\\$res->\\"data\\") != \\"\\") do={ :set custName (\\$res->\\"data\\"); } } on-error={}; :local ifName (\\"<pppoe-\\" . \\$user . \\"> \\" . \\$custName); :do { :if ([:len [/interface pppoe-server find where user=\\$user]] > 0) do={ /interface pppoe-server set [find where user=\\$user] name=\\$ifName comment=\\$custName; } else={ /interface pppoe-server add name=\\$ifName user=\\$user comment=\\$custName; } } on-error={}; :do { /ip firewall address-list remove [find where list=\\"PPPOE-ACTIVE\\" and address=\\$\\\"remote-address\\\"]; } on-error={}; :do { /ip firewall address-list add list=\\"PPPOE-ACTIVE\\" address=\\$\\\"remote-address\\\" comment=\\$custName; } on-error={}; :log info (\\"PPPoE-UP: \\" . \\$user . \\" -> \\" . \\$custName . \\" IP=\\" . \\$\\\"remote-address\\\");" on-down=":do { /ip firewall address-list remove [find where list=\\"PPPOE-ACTIVE\\" and address=\\$\\\"remote-address\\\"]; } on-error={};"`
+            `/ppp profile set [find where name="${profileFilter}"] on-up=":local custName \\$user; :do { :local res [/tool fetch url=(\\"${apiUrl}/api/v1/radius-comments/lookup?user=\\" . \\$user)${checkCertOpt} as-value output=user]; :if ((\\$res->\\"status\\") = \\"finished\\" and (\\$res->\\"data\\") != \\"\\") do={ :set custName (\\$res->\\"data\\"); } } on-error={}; :local ifName (\\"<pppoe-\\" . \\$user . \\">\\"); :do { :if ([:len [/interface pppoe-server find where user=\\$user]] > 0) do={ /interface pppoe-server set [find where user=\\$user] name=\\$ifName comment=\\$custName; } else={ /interface pppoe-server add name=\\$ifName user=\\$user comment=\\$custName; } } on-error={}; :do { /queue simple set [find where name=(\\"<\\" . \\$ifName . \\">\\") or target=\\$ifName] comment=\\$custName; } on-error={}; :do { /ip firewall address-list remove [find where list=\\"PPPOE-ACTIVE\\" and address=\\$\\\"remote-address\\\"]; } on-error={}; :do { /ip firewall address-list add list=\\"PPPOE-ACTIVE\\" address=\\$\\\"remote-address\\\" comment=\\$custName; } on-error={}; :log info (\\"PPPoE-UP: \\" . \\$user . \\" -> \\" . \\$custName . \\" IP=\\" . \\$\\\"remote-address\\\");" on-down=":do { /ip firewall address-list remove [find where list=\\"PPPOE-ACTIVE\\" and address=\\$\\\"remote-address\\\"]; } on-error={};"`
         ] : [])
     ].join('\n');
 
@@ -105,12 +107,12 @@ router.get('/mikrotik-script', asyncHandler(async (req, res) => {
 router.get('/mikrotik-bindings', asyncHandler(async (req, res) => {
     const bindings = await RadiusCommentService.getAllCustomerPppoeBindings();
     const lines = [
-        '# Kilusi Bill - Static PPPoE Server Interface Bindings (PPP -> Interface & Simple Queues)',
+        '# Kilusi Bill - Static PPPoE Server Interface Bindings (name <pppoe-user>, comment NAMA-MITRA)',
         ...bindings.map(b => {
             const u = b.pppoe_username.replace(/["\\]/g, '');
             const label = b.display_label.replace(/["\\]/g, '');
-            const ifName = `<pppoe-${u}> ${label}`;
-            return `:do { :if ([:len [/interface pppoe-server find where user="${u}"]] > 0) do={ /interface pppoe-server set [find where user="${u}"] name="${ifName}" comment="${label}"; } else={ /interface pppoe-server add name="${ifName}" user="${u}" comment="${label}"; } } on-error={};`;
+            const ifName = `<pppoe-${u}>`;
+            return `:do { :if ([:len [/interface pppoe-server find where user="${u}"]] > 0) do={ /interface pppoe-server set [find where user="${u}"] name="${ifName}" comment="${label}"; } else={ /interface pppoe-server add name="${ifName}" user="${u}" comment="${label}"; } } on-error={}; :do { /queue simple set [find where name="<${ifName}>" or target="${ifName}"] comment="${label}"; } on-error={};`;
         })
     ];
     res.type('text/plain; charset=utf-8').send(lines.join('\n') + '\n');
