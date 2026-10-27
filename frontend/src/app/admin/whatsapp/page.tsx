@@ -48,7 +48,8 @@ import {
   Eye,
   Loader2,
   Filter,
-  Trash2
+  Trash2,
+  Bot
 } from 'lucide-react'
 
 // Import components
@@ -62,6 +63,7 @@ import { OmnichatDashboard } from '@/components/WhatsApp/Omnichat'
 import CreateTemplateModal from '@/components/WhatsApp/CreateTemplateModal'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import OperationalNotificationsTab from '@/components/WhatsApp/OperationalNotificationsTab'
+import InternalAgentTab from '@/components/WhatsApp/InternalAgentTab'
 
 export default function WhatsAppDashboard() {
   const {
@@ -1563,7 +1565,7 @@ export default function WhatsAppDashboard() {
 
       {/* Main Content Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="dashboard">
             <BarChart3 className="w-4 h-4 mr-2" />
             Dashboard
@@ -1579,6 +1581,10 @@ export default function WhatsAppDashboard() {
           <TabsTrigger value="operational">
             <Activity className="w-4 h-4 mr-2" />
             Notifikasi Operasional
+          </TabsTrigger>
+          <TabsTrigger value="ai-agent">
+            <Bot className="w-4 h-4 mr-2" />
+            AI Agent Internal
           </TabsTrigger>
           <TabsTrigger value="settings">
             <Settings className="w-4 h-4 mr-2" />
@@ -2242,6 +2248,11 @@ export default function WhatsAppDashboard() {
         {/* Operational Notifications Tab */}
         <TabsContent value="operational" className="space-y-4">
           <OperationalNotificationsTab onSwitchToTemplates={() => setActiveTab('templates')} />
+        </TabsContent>
+
+        {/* Internal AI Operational Agent Tab */}
+        <TabsContent value="ai-agent" className="space-y-4">
+          <InternalAgentTab />
         </TabsContent>
 
       </Tabs>

@@ -4634,8 +4634,8 @@ async function handleIncomingMessage(sock, message) {
         if (message.message.conversation) {
             messageText = message.message.conversation;
             console.debug('Conversation message received');
-        } else if (message.extendedTextMessage) {
-            messageText = message.message.extendedTextMessage.text;
+        } else if (message.message.extendedTextMessage?.text || message.extendedTextMessage) {
+            messageText = message.message.extendedTextMessage?.text || message.extendedTextMessage?.text || '';
             console.debug('Extended text message received');
         } else {
             // Tipe pesan tidak didukung
@@ -4648,7 +4648,8 @@ async function handleIncomingMessage(sock, message) {
         // Ekstrak nomor pengirim dengan penanganan error
         let senderNumber;
         try {
-            senderNumber = remoteJid.split('@')[0];
+            const senderJid = (remoteJid.includes('@g.us') && message.key.participant) ? message.key.participant : remoteJid;
+            senderNumber = senderJid.split('@')[0].split(':')[0];
         } catch (error) {
             console.error('Error extracting sender number', { remoteJid, error: error.message });
             return;
@@ -4665,6 +4666,17 @@ async function handleIncomingMessage(sock, message) {
         if (!messageText.trim()) {
             console.debug('Empty message, ignoring');
             return;
+        }
+
+        // Internal AI Operational Agent (Superadmin, Admin, Mitra, Technician)
+        try {
+            const internalAgent = require('../services/internal-agent');
+            const agentResult = await internalAgent.handleWhatsAppIncoming(sock, remoteJid, senderNumber, messageText);
+            if (agentResult && agentResult.handled) {
+                return;
+            }
+        } catch (agentError) {
+            console.error('Error in internal AI agent handler:', agentError);
         }
 
         // Proses perintah

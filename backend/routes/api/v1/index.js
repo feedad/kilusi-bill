@@ -181,6 +181,7 @@ router.use('/realtime', jwtAuth, require('./realtime'));
 router.use('/radius', jwtAuth, require('./radius'));
 router.use('/genieacs', require('./genieacs'));
 router.use('/technician', jwtAuth, require('./technician'));
+router.use('/whatsapp/internal-agent', jwtAuth, require('./internal-agent')); // Internal WhatsApp LLM Agent config & playground
 router.use('/whatsapp', require('./whatsapp')); // Re-enabled WhatsApp functionality
 router.use('/whatsapp-templates', require('./whatsapp-templates')); // Unified WhatsApp templates (public read for dev)
 router.use('/baileys', jwtAuth, require('./baileys')); // Baileys QR & Management
