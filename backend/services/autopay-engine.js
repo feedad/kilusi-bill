@@ -160,6 +160,19 @@ function isPromoOrNonIspPattern(text, senderInfo, amount) {
   if (combined.includes('shopeepay')) {
     return true;
   }
+  // Personal e-wallet top-up (owner isi saldo pribadi dari bank/alfamart, bukan pembayaran DANA Bisnis)
+  if (combined.includes('berhasil top up saldo')) {
+    return true;
+  }
+
+  // Internal company accounts & personal transfers
+  if (
+    combined.includes('**ta ***alu ***kon') || // PT KITA SELALU TERKONEKSI
+    combined.includes('**pay **bit ***one') || // ShopeePay / wallet settlement
+    combined.includes('elda zaqiah')
+  ) {
+    return true;
+  }
 
   const promoKeywords = [
     'klaim', 'diskon', 'voucher', 'promo', 'tarifnya mulai',
