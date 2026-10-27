@@ -7,7 +7,7 @@ const { asyncHandler } = require('../../../middleware/response');
 const RadiusCommentService = require('../../../services/radius-comment-service');
 
 // GET /api/v1/radius-comments/lookup - Plain-text customer name + region lookup for MikroTik RouterOS scripts
-router.get('/lookup', asyncHandler(async (req, res) => {
+router.get('/lookup', localIpOnly, asyncHandler(async (req, res) => {
     const username = req.query.user || req.query.username;
     const wantJson = req.query.format === 'json';
     const includeFull = req.query.full === '1' || req.query.full === 'true';
@@ -50,8 +50,8 @@ router.get('/lookup', asyncHandler(async (req, res) => {
 }));
 
 // GET /api/v1/radius-comments/mikrotik-script - Generate RouterOS PPP profile on-up/on-down & active session sync script
-router.get('/mikrotik-script', asyncHandler(async (req, res) => {
-    const apiUrl = String(req.query.api_url || 'https://api.kilusi.id').replace(/\/+$/, '');
+router.get('/mikrotik-script', localIpOnly, asyncHandler(async (req, res) => {
+    const apiUrl = String(req.query.api_url || 'http://172.22.10.103:3001').replace(/\/+$/, '');
     const checkCertOpt = apiUrl.startsWith('https://') ? ' check-certificate=no' : '';
     const profileFilter = req.query.profile || '';
 
@@ -98,7 +98,7 @@ router.get('/mikrotik-script', asyncHandler(async (req, res) => {
 }));
 
 // GET /api/v1/radius-comments/mikrotik-bindings - Generate RouterOS .rsc file for all customer PPPoE server bindings
-router.get('/mikrotik-bindings', asyncHandler(async (req, res) => {
+router.get('/mikrotik-bindings', localIpOnly, asyncHandler(async (req, res) => {
     const bindings = await RadiusCommentService.getAllCustomerPppoeBindings();
     const lines = [
         '# Kilusi Bill - Static PPPoE Server Interface Bindings (name <pppoe-user>, comment NAMA-MITRA)',
