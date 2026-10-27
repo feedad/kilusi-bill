@@ -64,13 +64,16 @@ class RadiusCommentService {
             }
 
             const row = result.rows[0];
+            const sanitizedName = this.sanitizeName(row.name);
+            const sanitizedRegion = row.region_name ? this.sanitizeName(row.region_name) : null;
             return {
                 customer_id: row.customer_id,
                 name: row.name,
-                sanitized_name: this.sanitizeName(row.name),
+                sanitized_name: sanitizedName,
+                display_label: sanitizedRegion ? `${sanitizedName} (${sanitizedRegion})` : sanitizedName,
                 service_number: row.service_number,
                 pppoe_username: row.pppoe_username,
-                region_name: row.region_name || null,
+                region_name: sanitizedRegion,
                 status: row.status || null
             };
         } catch (error) {
@@ -168,7 +171,7 @@ class RadiusCommentService {
     static async getMikrotikComment(pppoeUsername) {
         try {
             const customer = await this.getCustomerByPppoeUsername(pppoeUsername);
-            return customer ? customer.sanitized_name : null;
+            return customer ? customer.display_label : null;
         } catch (error) {
             logger.error('Error getting Mikrotik comment:', error);
             return null;

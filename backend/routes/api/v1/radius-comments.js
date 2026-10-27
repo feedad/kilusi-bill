@@ -6,11 +6,12 @@ const localIpOnly = require('../../../middleware/localIpOnly');
 const { asyncHandler } = require('../../../middleware/response');
 const RadiusCommentService = require('../../../services/radius-comment-service');
 
-// GET /api/v1/radius-comments/lookup - Plain-text customer name lookup for MikroTik RouterOS scripts
-router.get('/lookup', localIpOnly, asyncHandler(async (req, res) => {
+// GET /api/v1/radius-comments/lookup - Plain-text customer name + region lookup for MikroTik RouterOS scripts
+router.get('/lookup', asyncHandler(async (req, res) => {
     const username = req.query.user || req.query.username;
     const wantJson = req.query.format === 'json';
     const includeFull = req.query.full === '1' || req.query.full === 'true';
+    const excludeRegion = req.query.region === '0' || req.query.region === 'false';
 
     if (!username) {
         if (wantJson) {
@@ -41,27 +42,31 @@ router.get('/lookup', localIpOnly, asyncHandler(async (req, res) => {
         return res.send(RadiusCommentService.formatComment(customer, RadiusCommentService.normalizeUsername(username)));
     }
 
-    return res.send(customer.sanitized_name);
+    if (excludeRegion) {
+        return res.send(customer.sanitized_name);
+    }
+
+    return res.send(customer.display_label);
 }));
 
 // GET /api/v1/radius-comments/mikrotik-script - Generate RouterOS PPP profile on-up/on-down & active session sync script
-router.get('/mikrotik-script', localIpOnly, asyncHandler(async (req, res) => {
-    const defaultHost = req.headers.host ? `http://${req.headers.host}` : 'http://172.22.10.103:3001';
-    const apiUrl = String(req.query.api_url || defaultHost).replace(/\/+$/, '');
+router.get('/mikrotik-script', asyncHandler(async (req, res) => {
+    const apiUrl = String(req.query.api_url || 'https://api.kilusi.id').replace(/\/+$/, '');
+    const checkCertOpt = apiUrl.startsWith('https://') ? ' check-certificate=no' : '';
     const profileFilter = req.query.profile || '';
 
     const script = [
         '# ============================================================================',
-        '# Kilusi Bill - MikroTik PPPoE Customer Name Comment (Address-List PPPOE-ACTIVE)',
+        '# Kilusi Bill - MikroTik PPPoE Customer Name + Region Comment (PPPOE-ACTIVE)',
         '# View in WinBox: IP -> Firewall -> Address Lists (Filter List: PPPOE-ACTIVE)',
         '# ============================================================================',
         '',
         '# 1. PPP Profile on-up script (paste into /ppp profile on-up):',
         ':local custName "UNKNOWN";',
-        `:do { :local res [/tool fetch url=("${apiUrl}/api/v1/radius-comments/lookup?user=" . $user) as-value output=user]; :if (($res->"status") = "finished") do={ :set custName ($res->"data"); } } on-error={};`,
+        `:do { :local res [/tool fetch url=("${apiUrl}/api/v1/radius-comments/lookup?user=" . $user)${checkCertOpt} as-value output=user]; :if (($res->"status") = "finished") do={ :set custName ($res->"data"); } } on-error={};`,
         ':do { /ip firewall address-list remove [find where list="PPPOE-ACTIVE" and (address=$"remote-address" or comment~"^" . $user . " - ")]; } on-error={};',
         ':do { /ip firewall address-list add list="PPPOE-ACTIVE" address=$"remote-address" comment=($user . " - " . $custName); } on-error={};',
-        ':log info ("PPPoE-UP: " . $user . " (" . $custName . ") IP=" . $"remote-address");',
+        ':log info ("PPPoE-UP: " . $user . " - " . $custName . " IP=" . $"remote-address");',
         '',
         '# 2. PPP Profile on-down script (paste into /ppp profile on-down):',
         ':do { /ip firewall address-list remove [find where list="PPPOE-ACTIVE" and (address=$"remote-address" or comment~"^" . $user . " - ")]; } on-error={};',
@@ -71,14 +76,14 @@ router.get('/mikrotik-script', localIpOnly, asyncHandler(async (req, res) => {
         '    :local u [/ppp active get $i name];',
         '    :local ip [/ppp active get $i address];',
         '    :local custName "UNKNOWN";',
-        `    :do { :local res [/tool fetch url=("${apiUrl}/api/v1/radius-comments/lookup?user=" . $u) as-value output=user]; :if (($res->"status") = "finished") do={ :set custName ($res->"data"); } } on-error={};`,
+        `    :do { :local res [/tool fetch url=("${apiUrl}/api/v1/radius-comments/lookup?user=" . $u)${checkCertOpt} as-value output=user]; :if (($res->"status") = "finished") do={ :set custName ($res->"data"); } } on-error={};`,
         '    :do { /ip firewall address-list remove [find where list="PPPOE-ACTIVE" and (address=$ip or comment~"^" . $u . " - ")]; } on-error={};',
         '    :do { /ip firewall address-list add list="PPPOE-ACTIVE" address=$ip comment=($u . " - " . $custName); } on-error={};',
         '}',
         ...(profileFilter ? [
             '',
             `# 4. Apply on-up / on-down to PPP profile "${profileFilter}":`,
-            `/ppp profile set [find where name="${profileFilter}"] on-up=":local custName \\"UNKNOWN\\"; :do { :local res [/tool fetch url=(\\"${apiUrl}/api/v1/radius-comments/lookup?user=\\" . \\$user) as-value output=user]; :if ((\\$res->\\"status\\") = \\"finished\\") do={ :set custName (\\$res->\\"data\\"); } } on-error={}; :do { /ip firewall address-list remove [find where list=\\"PPPOE-ACTIVE\\" and (address=\\$\\\"remote-address\\\" or comment~\\"^\\" . \\$user . \\" - \\")]; } on-error={}; :do { /ip firewall address-list add list=\\"PPPOE-ACTIVE\\" address=\\$\\\"remote-address\\\" comment=(\\$user . \\" - \\" . \\$custName); } on-error={}; :log info (\\"PPPoE-UP: \\" . \\$user . \\" (\\" . \\$custName . \\") IP=\\" . \\$\\\"remote-address\\\");" on-down=":do { /ip firewall address-list remove [find where list=\\"PPPOE-ACTIVE\\" and (address=\\$\\\"remote-address\\\" or comment~\\"^\\" . \\$user . \\" - \\")]; } on-error={};"`
+            `/ppp profile set [find where name="${profileFilter}"] on-up=":local custName \\"UNKNOWN\\"; :do { :local res [/tool fetch url=(\\"${apiUrl}/api/v1/radius-comments/lookup?user=\\" . \\$user)${checkCertOpt} as-value output=user]; :if ((\\$res->\\"status\\") = \\"finished\\") do={ :set custName (\\$res->\\"data\\"); } } on-error={}; :do { /ip firewall address-list remove [find where list=\\"PPPOE-ACTIVE\\" and (address=\\$\\\"remote-address\\\" or comment~\\"^\\" . \\$user . \\" - \\")]; } on-error={}; :do { /ip firewall address-list add list=\\"PPPOE-ACTIVE\\" address=\\$\\\"remote-address\\\" comment=(\\$user . \\" - \\" . \\$custName); } on-error={}; :log info (\\"PPPoE-UP: \\" . \\$user . \\" - \\" . \\$custName . \\" IP=\\" . \\$\\\"remote-address\\\");" on-down=":do { /ip firewall address-list remove [find where list=\\"PPPOE-ACTIVE\\" and (address=\\$\\\"remote-address\\\" or comment~\\"^\\" . \\$user . \\" - \\")]; } on-error={};"`
         ] : [])
     ].join('\n');
 
