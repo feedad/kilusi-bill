@@ -57,13 +57,16 @@ router.get('/mikrotik-script', asyncHandler(async (req, res) => {
 
     const script = [
         '# ============================================================================',
-        '# Kilusi Bill - MikroTik PPPoE Customer Comment: NAMA-MITRA (PPPOE-ACTIVE)',
-        '# View in WinBox: IP -> Firewall -> Address Lists (Filter List: PPPOE-ACTIVE)',
+        '# Kilusi Bill - MikroTik PPPoE Customer Comment: NAMA-MITRA',
+        '# View in WinBox:',
+        '#   1. PPP -> Interface (kolom Comment + status R Running + Tx/Rx trafik)',
+        '#   2. IP -> Firewall -> Address Lists (Filter List: PPPOE-ACTIVE)',
         '# ============================================================================',
         '',
         '# 1. PPP Profile on-up script (paste into /ppp profile on-up):',
         ':local custName $user;',
         `:do { :local res [/tool fetch url=("${apiUrl}/api/v1/radius-comments/lookup?user=" . $user)${checkCertOpt} as-value output=user]; :if (($res->"status") = "finished" and ($res->"data") != "") do={ :set custName ($res->"data"); } } on-error={};`,
+        ':do { :if ([:len [/interface pppoe-server find where user=$user]] > 0) do={ /interface pppoe-server set [find where user=$user] comment=$custName; } else={ /interface pppoe-server add name=("<pppoe-" . $user . ">") user=$user comment=$custName; } } on-error={};',
         ':do { /ip firewall address-list remove [find where list="PPPOE-ACTIVE" and address=$"remote-address"]; } on-error={};',
         ':do { /ip firewall address-list add list="PPPOE-ACTIVE" address=$"remote-address" comment=$custName; } on-error={};',
         ':log info ("PPPoE-UP: " . $user . " -> " . $custName . " IP=" . $"remote-address");',
@@ -77,13 +80,14 @@ router.get('/mikrotik-script', asyncHandler(async (req, res) => {
         '    :local ip [/ppp active get $i address];',
         '    :local custName $u;',
         `    :do { :local res [/tool fetch url=("${apiUrl}/api/v1/radius-comments/lookup?user=" . $u)${checkCertOpt} as-value output=user]; :if (($res->"status") = "finished" and ($res->"data") != "") do={ :set custName ($res->"data"); } } on-error={};`,
+        '    :do { :if ([:len [/interface pppoe-server find where user=$u]] > 0) do={ /interface pppoe-server set [find where user=$u] comment=$custName; } else={ /interface pppoe-server add name=("<pppoe-" . $u . ">") user=$u comment=$custName; } } on-error={};',
         '    :do { /ip firewall address-list remove [find where list="PPPOE-ACTIVE" and address=$ip]; } on-error={};',
         '    :do { /ip firewall address-list add list="PPPOE-ACTIVE" address=$ip comment=$custName; } on-error={};',
         '}',
         ...(profileFilter ? [
             '',
             `# 4. Apply on-up / on-down to PPP profile "${profileFilter}":`,
-            `/ppp profile set [find where name="${profileFilter}"] on-up=":local custName \\$user; :do { :local res [/tool fetch url=(\\"${apiUrl}/api/v1/radius-comments/lookup?user=\\" . \\$user)${checkCertOpt} as-value output=user]; :if ((\\$res->\\"status\\") = \\"finished\\" and (\\$res->\\"data\\") != \\"\\") do={ :set custName (\\$res->\\"data\\"); } } on-error={}; :do { /ip firewall address-list remove [find where list=\\"PPPOE-ACTIVE\\" and address=\\$\\\"remote-address\\\"]; } on-error={}; :do { /ip firewall address-list add list=\\"PPPOE-ACTIVE\\" address=\\$\\\"remote-address\\\" comment=\\$custName; } on-error={}; :log info (\\"PPPoE-UP: \\" . \\$user . \\" -> \\" . \\$custName . \\" IP=\\" . \\$\\\"remote-address\\\");" on-down=":do { /ip firewall address-list remove [find where list=\\"PPPOE-ACTIVE\\" and address=\\$\\\"remote-address\\\"]; } on-error={};"`
+            `/ppp profile set [find where name="${profileFilter}"] on-up=":local custName \\$user; :do { :local res [/tool fetch url=(\\"${apiUrl}/api/v1/radius-comments/lookup?user=\\" . \\$user)${checkCertOpt} as-value output=user]; :if ((\\$res->\\"status\\") = \\"finished\\" and (\\$res->\\"data\\") != \\"\\") do={ :set custName (\\$res->\\"data\\"); } } on-error={}; :do { :if ([:len [/interface pppoe-server find where user=\\$user]] > 0) do={ /interface pppoe-server set [find where user=\\$user] comment=\\$custName; } else={ /interface pppoe-server add name=(\\"<pppoe-\\" . \\$user . \\">\\") user=\\$user comment=\\$custName; } } on-error={}; :do { /ip firewall address-list remove [find where list=\\"PPPOE-ACTIVE\\" and address=\\$\\\"remote-address\\\"]; } on-error={}; :do { /ip firewall address-list add list=\\"PPPOE-ACTIVE\\" address=\\$\\\"remote-address\\\" comment=\\$custName; } on-error={}; :log info (\\"PPPoE-UP: \\" . \\$user . \\" -> \\" . \\$custName . \\" IP=\\" . \\$\\\"remote-address\\\");" on-down=":do { /ip firewall address-list remove [find where list=\\"PPPOE-ACTIVE\\" and address=\\$\\\"remote-address\\\"]; } on-error={};"`
         ] : [])
     ].join('\n');
 
