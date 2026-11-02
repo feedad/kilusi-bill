@@ -1,6 +1,7 @@
 const { query } = require('../../../config/database');
 const radiusPostgres = require('../../../config/radius-postgres');
 const { formatRp } = require('../actions');
+const { parseDateRange } = require('./search-helper');
 
 function formatDateId(val) {
     if (!val) return '-';
@@ -343,21 +344,37 @@ const readTools = [
         name: 'list_unpaid_invoices',
         kind: 'read',
         roles: ['superadmin', 'admin', 'mitra'],
-        description: 'Daftar tagihan (invoice) yang belum dibayar (unpaid/overdue/suspended/sent). Bisa difilter berdasarkan nama wilayah/region dan jatuh tempo.',
+        description: 'Daftar tagihan (invoice) yang belum dibayar (unpaid/overdue/suspended/sent). Bisa difilter berdasarkan bulan, mitra, nama wilayah/region, status tagihan, dan jatuh tempo.',
         parameters: {
             type: 'object',
             properties: {
+                month: {
+                    type: 'string',
+                    description: 'Filter bulan jatuh tempo tagihan (format YYYY-MM seperti "2026-10", atau nama bulan seperti "oktober").'
+                },
+                year: {
+                    type: 'number',
+                    description: 'Filter tahun jatuh tempo tagihan (misal: 2026).'
+                },
+                status: {
+                    type: 'string',
+                    description: 'Filter status spesifik: "all" (semua belum lunas), "unpaid", "overdue", "suspended", "sent". Default "all".'
+                },
+                mitra: {
+                    type: 'string',
+                    description: 'Filter nama mitra (misal: "TALAGA SUNDA", "PONCOL", "BSR2", "PLD").'
+                },
                 region: {
                     type: 'string',
-                    description: 'Filter opsional nama wilayah/region/mitra (misal: Cibogo, Kirana, Poncol, PLD)'
+                    description: 'Filter nama wilayah/region (misal: Cibogo, Kirana, Poncol, PLD).'
                 },
                 overdue_only: {
                     type: 'boolean',
-                    description: 'Jika true, hanya tampilkan yang sudah lewat jatuh tempo'
+                    description: 'Jika true, hanya tampilkan yang sudah lewat jatuh tempo.'
                 },
                 limit: {
                     type: 'number',
-                    description: 'Maksimal baris yang ditampilkan (default 15, maks 25)'
+                    description: 'Maksimal baris yang ditampilkan (default 15, maks 25).'
                 }
             }
         },
@@ -369,20 +386,51 @@ const readTools = [
 
             const limit = Math.min(25, Math.max(1, parseInt(args?.limit, 10) || 15));
             const params = [];
-            const conditions = [`i.status IN ('unpaid', 'overdue', 'suspended', 'sent', 'draft')`];
+            const conditions = [];
+
+            // 1. Status Filter
+            const statusFilter = String(args?.status || 'all').trim().toLowerCase();
+            if (statusFilter === 'unpaid') {
+                conditions.push(`i.status = 'unpaid'`);
+            } else if (statusFilter === 'overdue') {
+                conditions.push(`(i.status = 'overdue' OR (i.status IN ('unpaid', 'sent') AND i.due_date < CURRENT_DATE))`);
+            } else if (statusFilter === 'suspended') {
+                conditions.push(`i.status = 'suspended'`);
+            } else if (statusFilter === 'sent') {
+                conditions.push(`i.status = 'sent'`);
+            } else {
+                conditions.push(`i.status IN ('unpaid', 'overdue', 'suspended', 'sent', 'draft')`);
+            }
 
             if (identity.role === 'mitra') {
                 params.push(identity.region_ids);
                 conditions.push(`s.region_id = ANY($${params.length}::uuid[])`);
+            } else {
+                if (args?.region && String(args.region).trim()) {
+                    params.push(`%${String(args.region).trim()}%`);
+                    const idx = params.length;
+                    conditions.push(`(r.name ILIKE $${idx} OR m.name ILIKE $${idx} OR s.area ILIKE $${idx} OR c.address ILIKE $${idx})`);
+                }
+                if (args?.mitra && String(args.mitra).trim()) {
+                    params.push(`%${String(args.mitra).trim()}%`);
+                    const idx = params.length;
+                    conditions.push(`(m.name ILIKE $${idx} OR r.name ILIKE $${idx})`);
+                }
             }
 
-            if (args?.region && String(args.region).trim()) {
-                params.push(`%${String(args.region).trim()}%`);
-                const idx = params.length;
-                conditions.push(`(r.name ILIKE $${idx} OR m.name ILIKE $${idx} OR s.area ILIKE $${idx} OR c.address ILIKE $${idx})`);
+            // 2. Month / Year filter (based on due_date)
+            const period = parseDateRange({
+                month: args?.month,
+                year: args?.year,
+                extendCutoff: false
+            });
+            if (period.hasPeriod && period.startDateOnly && period.endDateOnly) {
+                params.push(period.startDateOnly);
+                params.push(period.endDateOnly);
+                conditions.push(`i.due_date >= $${params.length - 1}::date AND i.due_date <= $${params.length}::date`);
             }
 
-            if (args?.overdue_only === true) {
+            if (args?.overdue_only === true && statusFilter !== 'overdue') {
                 conditions.push(`i.due_date < CURRENT_DATE`);
             }
 
@@ -428,8 +476,10 @@ const readTools = [
             const totalAmount = Number(summaryRes.rows?.[0]?.total_amount || 0);
 
             return {
+                period: period.hasPeriod ? period.label : 'Semua Periode',
                 total_count: totalCount,
                 total_amount: formatRp(totalAmount),
+                total_amount_raw: totalAmount,
                 shown_count: listRes.rows?.length || 0,
                 invoices: (listRes.rows || []).map(row => ({
                     invoice_number: row.invoice_number,
@@ -642,6 +692,255 @@ const readTools = [
         }
     },
     {
+        name: 'get_financial_report',
+        kind: 'read',
+        roles: ['superadmin', 'admin', 'mitra'],
+        description: 'Laporan keuangan dan rekap omzet/pendapatan (bruto, fee payment gateway, pendapatan bersih, jumlah invoice terbayar, dan sisa tagihan belum lunas) berdasarkan periode bulan atau rentang tanggal, dengan filter mitra atau wilayah opsional.',
+        parameters: {
+            type: 'object',
+            properties: {
+                month: {
+                    type: 'string',
+                    description: 'Bulan laporan format YYYY-MM (misal: "2026-10") atau nama bulan (misal: "oktober", "oktober 2026").'
+                },
+                year: {
+                    type: 'number',
+                    description: 'Tahun laporan (misal: 2026). Opsional jika sudah tercakup di month.'
+                },
+                date_from: {
+                    type: 'string',
+                    description: 'Tanggal awal filter rentang kustom (format YYYY-MM-DD).'
+                },
+                date_to: {
+                    type: 'string',
+                    description: 'Tanggal akhir filter rentang kustom (format YYYY-MM-DD).'
+                },
+                mitra: {
+                    type: 'string',
+                    description: 'Filter nama mitra tertentu (misal: "TALAGA SUNDA", "PONCOL", "BSR2", "PLD").'
+                },
+                region: {
+                    type: 'string',
+                    description: 'Filter nama wilayah/region tertentu.'
+                }
+            }
+        },
+        async run(ctx, args) {
+            const { identity } = ctx;
+            if (!assertMitraHasRegions(identity)) {
+                return {
+                    period: 'Tidak ada wilayah',
+                    total_invoices_paid: 0,
+                    gross_revenue: formatRp(0),
+                    merchant_fee: formatRp(0),
+                    net_revenue: formatRp(0),
+                    summary_text: 'Akun mitra Anda belum memiliki wilayah yang ditugaskan.'
+                };
+            }
+
+            const period = parseDateRange({
+                month: args?.month,
+                year: args?.year,
+                date_from: args?.date_from,
+                date_to: args?.date_to,
+                extendCutoff: true
+            });
+
+            const paidConditions = ["i.status = 'paid'"];
+            const paidParams = [];
+
+            if (period.hasPeriod && period.startDate && period.endDate) {
+                paidParams.push(period.startDate);
+                paidParams.push(period.endDate);
+                paidConditions.push(`i.paid_at >= $${paidParams.length - 1} AND i.paid_at <= $${paidParams.length}`);
+            }
+
+            if (identity.role === 'mitra') {
+                paidParams.push(identity.region_ids);
+                paidConditions.push(`s.region_id = ANY($${paidParams.length}::uuid[])`);
+            } else {
+                if (args?.region && String(args.region).trim()) {
+                    paidParams.push(`%${String(args.region).trim()}%`);
+                    paidConditions.push(`r.name ILIKE $${paidParams.length}`);
+                }
+                if (args?.mitra && String(args.mitra).trim()) {
+                    paidParams.push(`%${String(args.mitra).trim()}%`);
+                    paidConditions.push(`(m.name ILIKE $${paidParams.length} OR r.name ILIKE $${paidParams.length})`);
+                }
+            }
+
+            const paidWhereSql = paidConditions.join(' AND ');
+
+            // 1. Overall Revenue Aggregation
+            const revRes = await query(
+                `SELECT
+                    COUNT(*)::int AS total_invoices_paid,
+                    COALESCE(SUM(i.amount), 0) AS gross_revenue,
+                    COALESCE(SUM(CASE WHEN i.fee_bearer = 'merchant' THEN COALESCE(i.payment_fee_amount, 0) ELSE 0 END), 0) AS total_merchant_fee,
+                    COALESCE(SUM(CASE WHEN i.fee_bearer = 'merchant' THEN (i.amount - COALESCE(i.payment_fee_amount, 0)) ELSE i.amount END), 0) AS net_revenue
+                 FROM invoices i
+                 LEFT JOIN services s ON (s.service_number = i.service_number OR (i.service_number IS NULL AND s.customer_id = i.customer_id))
+                 LEFT JOIN regions r ON s.region_id = r.id
+                 LEFT JOIN mitra m ON r.mitra_id = m.id
+                 WHERE ${paidWhereSql}`,
+                paidParams
+            );
+
+            const revRow = revRes.rows?.[0] || {};
+            const totalPaidCount = parseInt(revRow.total_invoices_paid, 10) || 0;
+            const grossNum = Number(revRow.gross_revenue || 0);
+            const feeNum = Number(revRow.total_merchant_fee || 0);
+            const netNum = Number(revRow.net_revenue || 0);
+
+            // 2. Breakdown by Payment Channel
+            const channelRes = await query(
+                `SELECT
+                    CASE
+                        WHEN LOWER(COALESCE(i.payment_gateway, '')) = 'tripay' OR LOWER(COALESCE(i.payment_method, '')) LIKE '%tripay%' THEN 'Tripay'
+                        WHEN LOWER(COALESCE(i.payment_gateway, '')) = 'autopay' OR LOWER(COALESCE(i.payment_method, '')) LIKE '%autopay%' THEN 'Autopay'
+                        WHEN LOWER(COALESCE(i.payment_method, '')) IN ('cash', 'tunai') THEN 'Tunai'
+                        ELSE 'Transfer Bank'
+                    END AS channel,
+                    COUNT(*)::int AS count,
+                    COALESCE(SUM(i.amount), 0) AS total
+                 FROM invoices i
+                 LEFT JOIN services s ON (s.service_number = i.service_number OR (i.service_number IS NULL AND s.customer_id = i.customer_id))
+                 LEFT JOIN regions r ON s.region_id = r.id
+                 LEFT JOIN mitra m ON r.mitra_id = m.id
+                 WHERE ${paidWhereSql}
+                 GROUP BY channel
+                 ORDER BY total DESC`,
+                paidParams
+            );
+
+            // 3. Breakdown by Mitra (if not restricted to single mitra)
+            let mitraBreakdown = [];
+            if (identity.role !== 'mitra') {
+                const mRes = await query(
+                    `SELECT
+                        COALESCE(m.name, 'KILUSI PUSAT') AS mitra_name,
+                        COUNT(*)::int AS paid_count,
+                        COALESCE(SUM(i.amount), 0) AS gross_revenue,
+                        COALESCE(SUM(CASE WHEN i.fee_bearer = 'merchant' THEN (i.amount - COALESCE(i.payment_fee_amount, 0)) ELSE i.amount END), 0) AS net_revenue
+                     FROM invoices i
+                     LEFT JOIN services s ON (s.service_number = i.service_number OR (i.service_number IS NULL AND s.customer_id = i.customer_id))
+                     LEFT JOIN regions r ON s.region_id = r.id
+                     LEFT JOIN mitra m ON r.mitra_id = m.id
+                     WHERE ${paidWhereSql}
+                     GROUP BY m.name
+                     ORDER BY gross_revenue DESC`,
+                    paidParams
+                );
+                mitraBreakdown = (mRes.rows || []).map(r => ({
+                    mitra_name: r.mitra_name,
+                    paid_count: parseInt(r.paid_count, 10) || 0,
+                    gross_revenue: formatRp(r.gross_revenue),
+                    net_revenue: formatRp(r.net_revenue)
+                }));
+            }
+
+            // 4. Unpaid Invoices in same period & scope
+            const unpaidConditions = [`i.status IN ('unpaid', 'overdue', 'suspended', 'sent', 'draft')`];
+            const unpaidParams = [];
+
+            if (period.hasPeriod && period.startDateOnly && period.endDateOnly) {
+                unpaidParams.push(period.startDateOnly);
+                unpaidParams.push(period.endDateOnly);
+                unpaidConditions.push(`i.due_date >= $${unpaidParams.length - 1}::date AND i.due_date <= $${unpaidParams.length}::date`);
+            }
+
+            if (identity.role === 'mitra') {
+                unpaidParams.push(identity.region_ids);
+                unpaidConditions.push(`s.region_id = ANY($${unpaidParams.length}::uuid[])`);
+            } else {
+                if (args?.region && String(args.region).trim()) {
+                    unpaidParams.push(`%${String(args.region).trim()}%`);
+                    unpaidConditions.push(`r.name ILIKE $${unpaidParams.length}`);
+                }
+                if (args?.mitra && String(args.mitra).trim()) {
+                    unpaidParams.push(`%${String(args.mitra).trim()}%`);
+                    unpaidConditions.push(`(m.name ILIKE $${unpaidParams.length} OR r.name ILIKE $${unpaidParams.length})`);
+                }
+            }
+
+            const unpaidRes = await query(
+                `SELECT
+                    COUNT(*)::int AS unpaid_count,
+                    COALESCE(SUM(i.amount), 0) AS unpaid_amount
+                 FROM invoices i
+                 LEFT JOIN services s ON (s.service_number = i.service_number OR (i.service_number IS NULL AND s.customer_id = i.customer_id))
+                 LEFT JOIN regions r ON s.region_id = r.id
+                 LEFT JOIN mitra m ON r.mitra_id = m.id
+                 WHERE ${unpaidConditions.join(' AND ')}`,
+                unpaidParams
+            );
+            const unpaidCount = parseInt(unpaidRes.rows?.[0]?.unpaid_count, 10) || 0;
+            const unpaidAmountNum = Number(unpaidRes.rows?.[0]?.unpaid_amount || 0);
+
+            // 5. Format Summary Text
+            const channels = (channelRes.rows || []).map(c => ({
+                channel: c.channel,
+                count: parseInt(c.count, 10) || 0,
+                total: formatRp(c.total)
+            }));
+
+            const scopeLabel = args?.mitra
+                ? `Mitra ${args.mitra.toUpperCase()}`
+                : (identity.role === 'mitra' ? `Mitra ${identity.name}` : (args?.region ? `Wilayah ${args.region}` : 'Seluruh Wilayah / Pusat'));
+
+            const textLines = [
+                `📊 *LAPORAN KEUANGAN KILUSI BILL*`,
+                `Periode: ${period.label}`,
+                `Cakupan: ${scopeLabel}`,
+                `---------------------------------`,
+                `✅ Total Invoice Lunas: *${totalPaidCount} invoice*`,
+                `💰 Pendapatan Bruto: *${formatRp(grossNum)}*`,
+                feeNum > 0 ? `💳 Biaya Gateway (Merchant): -${formatRp(feeNum)}` : null,
+                `💵 *Pendapatan Bersih: ${formatRp(netNum)}*`,
+                `---------------------------------`,
+                `⏳ Tertunggak (${period.label}): *${unpaidCount} invoice* (${formatRp(unpaidAmountNum)})`,
+                `---------------------------------`,
+                `📌 *Rincian Metode Pembayaran:*`
+            ].filter(Boolean);
+
+            if (channels.length > 0) {
+                for (const ch of channels) {
+                    textLines.push(`• ${ch.channel}: ${ch.count} transaksi (${ch.total})`);
+                }
+            } else {
+                textLines.push(`• Tidak ada transaksi pembayaran.`);
+            }
+
+            if (mitraBreakdown.length > 0) {
+                textLines.push(`---------------------------------`);
+                textLines.push(`🤝 *Rincian Pendapatan per Mitra:*`);
+                for (const mb of mitraBreakdown) {
+                    textLines.push(`• ${mb.mitra_name}: ${mb.paid_count} inv | Bersih: ${mb.net_revenue}`);
+                }
+            }
+
+            return {
+                period: period.label,
+                scope: scopeLabel,
+                date_range: {
+                    from: period.startDate,
+                    to: period.endDate
+                },
+                total_invoices_paid: totalPaidCount,
+                gross_revenue: formatRp(grossNum),
+                gross_revenue_raw: grossNum,
+                merchant_fee: formatRp(feeNum),
+                net_revenue: formatRp(netNum),
+                net_revenue_raw: netNum,
+                unpaid_count: unpaidCount,
+                unpaid_total: formatRp(unpaidAmountNum),
+                by_method: channels,
+                by_mitra: mitraBreakdown,
+                summary_text: textLines.join('\n')
+            };
+        }
+    },
+    {
         name: 'list_tickets',
         kind: 'read',
         roles: ['superadmin', 'admin', 'mitra', 'technician'],
@@ -772,13 +1071,37 @@ const readTools = [
         name: 'list_suspended_services',
         kind: 'read',
         roles: ['superadmin', 'admin', 'mitra'],
-        description: 'Daftar pelanggan dengan layanan sedang terisolir (status suspended).',
+        description: 'Daftar pelanggan dengan layanan terisolir (status suspended atau riwayat isolir pada bulan/tanggal tertentu).',
         parameters: {
             type: 'object',
             properties: {
+                month: {
+                    type: 'string',
+                    description: 'Filter bulan isolir (format YYYY-MM seperti "2026-10", atau nama bulan seperti "oktober").'
+                },
+                year: {
+                    type: 'number',
+                    description: 'Filter tahun isolir (misal: 2026).'
+                },
+                date_from: {
+                    type: 'string',
+                    description: 'Tanggal awal rentang isolir (format YYYY-MM-DD).'
+                },
+                date_to: {
+                    type: 'string',
+                    description: 'Tanggal akhir rentang isolir (format YYYY-MM-DD).'
+                },
+                mitra: {
+                    type: 'string',
+                    description: 'Filter nama mitra (misal: "TALAGA SUNDA", "PONCOL", "BSR2", "PLD").'
+                },
                 region: {
                     type: 'string',
-                    description: 'Filter nama wilayah/region opsional'
+                    description: 'Filter nama wilayah/region opsional.'
+                },
+                limit: {
+                    type: 'number',
+                    description: 'Maksimal baris yang ditampilkan (default 25).'
                 }
             }
         },
@@ -788,26 +1111,50 @@ const readTools = [
                 return { count: 0, services: [] };
             }
 
+            const limit = Math.min(50, Math.max(1, parseInt(args?.limit, 10) || 25));
             const params = [];
-            const conditions = [`s.status = 'suspended'`];
+            const conditions = [];
+
+            const period = parseDateRange({
+                month: args?.month,
+                year: args?.year,
+                date_from: args?.date_from,
+                date_to: args?.date_to,
+                extendCutoff: false
+            });
+
+            if (period.hasPeriod && period.startDateOnly && period.endDateOnly) {
+                params.push(period.startDateOnly);
+                params.push(period.endDateOnly);
+                conditions.push(`s.isolir_date >= $${params.length - 1}::date AND s.isolir_date <= $${params.length}::date`);
+            } else {
+                conditions.push(`s.status = 'suspended'`);
+            }
 
             if (identity.role === 'mitra') {
                 params.push(identity.region_ids);
                 conditions.push(`s.region_id = ANY($${params.length}::uuid[])`);
+            } else {
+                if (args?.region && String(args.region).trim()) {
+                    params.push(`%${String(args.region).trim()}%`);
+                    const idx = params.length;
+                    conditions.push(`(r.name ILIKE $${idx} OR m.name ILIKE $${idx} OR s.area ILIKE $${idx})`);
+                }
+                if (args?.mitra && String(args.mitra).trim()) {
+                    params.push(`%${String(args.mitra).trim()}%`);
+                    const idx = params.length;
+                    conditions.push(`(m.name ILIKE $${idx} OR r.name ILIKE $${idx})`);
+                }
             }
 
-            if (args?.region && String(args.region).trim()) {
-                params.push(`%${String(args.region).trim()}%`);
-                const idx = params.length;
-                conditions.push(`(r.name ILIKE $${idx} OR m.name ILIKE $${idx} OR s.area ILIKE $${idx})`);
-            }
-
+            params.push(limit);
             const res = await query(
                 `SELECT
                     c.id AS customer_id,
                     c.name AS customer_name,
                     c.phone AS customer_phone,
                     s.service_number,
+                    s.status AS service_status,
                     s.isolir_date,
                     td.pppoe_username,
                     r.name AS region_name,
@@ -819,16 +1166,18 @@ const readTools = [
                  LEFT JOIN mitra m ON r.mitra_id = m.id
                  WHERE ${conditions.join(' AND ')}
                  ORDER BY s.isolir_date DESC NULLS LAST, c.name ASC
-                 LIMIT 25`,
+                 LIMIT $${params.length}`,
                 params
             );
 
             return {
+                period: period.hasPeriod ? period.label : 'Sedang Terisolir (Status Suspended)',
                 count: res.rows?.length || 0,
                 services: (res.rows || []).map(row => ({
                     customer_name: row.customer_name,
                     customer_phone: row.customer_phone || '-',
                     service_number: row.service_number || '-',
+                    service_status: row.service_status || '-',
                     pppoe_username: row.pppoe_username || '-',
                     region_name: row.region_name || '-',
                     mitra_name: row.mitra_name || '-',

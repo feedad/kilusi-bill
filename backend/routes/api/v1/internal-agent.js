@@ -27,6 +27,12 @@ const WRITE_TOOL_METADATA = [
         roles: ['superadmin', 'admin', 'mitra', 'technician']
     },
     {
+        name: 'record_rapel_payment',
+        label: 'Catat Pembayaran Rapel',
+        description: 'Mencatat pembayaran di muka 1-12 bulan, otomatis diskon dan perpanjang masa aktif',
+        roles: ['superadmin', 'admin', 'mitra']
+    },
+    {
         name: 'resend_invoice',
         label: 'Kirim Ulang Tagihan',
         description: 'Mengirim ulang notifikasi tagihan WhatsApp ke pelanggan',

@@ -317,7 +317,7 @@ export default function InternalAgentTab() {
       const defaultTools = newMember.can_write
         ? (newMember.member_type === 'technician'
             ? ['record_payment', 'update_ticket_status']
-            : ['record_payment', 'resend_invoice', 'update_ticket_status', 'suspend_service', 'restore_service'])
+            : ['record_payment', 'record_rapel_payment', 'resend_invoice', 'update_ticket_status', 'suspend_service', 'restore_service'])
         : []
 
       const res = await adminApi.post('/api/v1/whatsapp/internal-agent/members', {

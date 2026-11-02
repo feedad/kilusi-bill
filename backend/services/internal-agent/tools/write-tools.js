@@ -2,7 +2,7 @@ const { query } = require('../../../config/database');
 const { getSetting } = require('../../../config/settingsManager');
 const { createPendingAction, formatRp } = require('../actions');
 const { formatDateId } = require('./read-tools');
-
+const { resolveCustomerAndRegion } = require('./search-helper');
 async function loadPaymentSettings() {
     let ps = getSetting('payment_settings', null);
     if (!ps || typeof ps !== 'object') {
@@ -150,7 +150,7 @@ const writeTools = [
             const { identity, previewOnly } = ctx;
             const invNumber = String(args?.invoice_number || '').trim();
             const custQuery = String(args?.customer_query || '').trim();
-            const rawMethod = String(args?.method || 'tunai').trim();
+            let rawMethod = String(args?.method || 'tunai').trim();
 
             if (!invNumber && !custQuery) {
                 return { error: 'Mohon sebutkan nama pelanggan, nomor layanan, atau nomor invoice yang akan dilunaskan.' };
@@ -158,6 +158,44 @@ const writeTools = [
 
             if (identity.role === 'mitra' && (!Array.isArray(identity.region_ids) || identity.region_ids.length === 0)) {
                 return { error: 'Akses ditolak: wilayah mitra tidak ditemukan.' };
+            }
+
+            // Try smart customer resolution first if customer_query is provided without direct invoice number
+            let resolvedCustomer = null;
+            if (custQuery && !invNumber) {
+                const resolved = await resolveCustomerAndRegion(custQuery, {
+                    identity,
+                    limit: 10,
+                    includeInvoices: true
+                });
+
+                // If query contained an extracted payment method (e.g. "bca"), and user didn't specify one or used default "tunai"
+                if (resolved.extractedMethod && (!args?.method || rawMethod.toLowerCase() === 'tunai' || rawMethod.toLowerCase() === 'cash')) {
+                    rawMethod = resolved.extractedMethod;
+                }
+
+                if (resolved.candidateCount > 1) {
+                    const candidates = resolved.candidates.map(c => ({
+                        customer_name: c.customer_name,
+                        service_number: c.service_number,
+                        region_name: c.region_name,
+                        mitra_name: c.mitra_name,
+                        unpaid_invoices: (c.unpaid_invoices || []).map(i => ({
+                            invoice_number: i.invoice_number,
+                            amount: formatRp(i.amount),
+                            due_date: formatDateId(i.due_date)
+                        }))
+                    }));
+                    return {
+                        status: 'disambiguation_required',
+                        message: `Ditemukan ${candidates.length} pelanggan yang cocok dengan "${custQuery}". Mohon sebutkan nama lengkap atau nomor layanan yang dimaksud:`,
+                        candidates
+                    };
+                }
+
+                if (resolved.found && resolved.customer) {
+                    resolvedCustomer = resolved.customer;
+                }
             }
 
             const params = [];
@@ -171,6 +209,13 @@ const writeTools = [
             if (invNumber) {
                 params.push(invNumber);
                 conditions.push(`UPPER(i.invoice_number) = UPPER($${params.length})`);
+            } else if (resolvedCustomer) {
+                params.push(resolvedCustomer.customer_id);
+                conditions.push(`c.id = $${params.length}`);
+                if (resolvedCustomer.service_number && resolvedCustomer.service_number !== '-') {
+                    params.push(resolvedCustomer.service_number);
+                    conditions.push(`(i.service_number = $${params.length} OR s.service_number = $${params.length} OR i.service_number IS NULL)`);
+                }
             } else {
                 params.push(custQuery);
                 const exactIdx = params.length;
@@ -216,6 +261,22 @@ const writeTools = [
 
             const rows = res.rows || [];
             if (rows.length === 0) {
+                if (resolvedCustomer) {
+                    const checkInv = await query(
+                        `SELECT COUNT(*) as total_inv,
+                                COUNT(*) FILTER (WHERE status = 'paid') as paid_inv,
+                                MAX(paid_at) as last_paid_at
+                         FROM invoices WHERE customer_id = $1`,
+                        [resolvedCustomer.customer_id]
+                    );
+                    const totalInv = parseInt(checkInv.rows?.[0]?.total_inv || 0, 10);
+                    const paidInv = parseInt(checkInv.rows?.[0]?.paid_inv || 0, 10);
+                    const lastPaid = formatDateId(checkInv.rows?.[0]?.last_paid_at);
+                    return {
+                        found: false,
+                        error: `Pelanggan "${resolvedCustomer.customer_name}" (${resolvedCustomer.service_number}) saat ini tidak memiliki tagihan yang belum lunas. Dari ${totalInv} tagihan, ${paidInv} sudah lunas (terakhir dibayar ${lastPaid}). Status layanan: ${resolvedCustomer.service_status || 'aktif'}. Jika ingin membayar di muka, gunakan pembayaran rapel (record_rapel_payment).`
+                    };
+                }
                 return {
                     found: false,
                     error: `Tidak ditemukan tagihan belum lunas untuk "${invNumber || custQuery}" di wilayah akses Anda.`
@@ -265,7 +326,6 @@ const writeTools = [
 
             let targetInvoices = targetGroup.invoices;
             if (args?.amount && targetInvoices.length > 1) {
-                // If user specified an exact amount matching one invoice, pick that earliest invoice
                 const exactMatch = targetInvoices.find(i => Number(i.amount) === Number(args.amount));
                 if (exactMatch) {
                     targetInvoices = [exactMatch];
@@ -306,6 +366,184 @@ const writeTools = [
                     invoice_number: invoicePayloads[0].invoice_number,
                     amount: totalAmount,
                     invoices: invoicePayloads,
+                    payment_method_key: methodResolved.key,
+                    payment_method_label: methodResolved.label,
+                    notes: args?.notes || ''
+                },
+                summary,
+                previewOnly
+            });
+
+            ctx.createdPendingAction = pending;
+            return pending;
+        }
+    },
+    {
+        name: 'record_rapel_payment',
+        kind: 'write',
+        roles: ['superadmin', 'admin', 'mitra'],
+        description: 'Siapkan pencatatan pembayaran rapel (bayar di muka 1-12 bulan) untuk pelanggan. Menghitung diskon otomatis dari pengaturan, membuat tagihan rapel, dan memperpanjang masa aktif layanan. Wajib konfirmasi YA sebelum tersimpan.',
+        parameters: {
+            type: 'object',
+            properties: {
+                customer_query: {
+                    type: 'string',
+                    description: 'Nama pelanggan, nomor HP, atau nomor layanan pelanggan (misal: "dhonny", "23000015401").'
+                },
+                months: {
+                    type: 'number',
+                    description: 'Jumlah bulan yang dibayar di muka (1 sampai 12).'
+                },
+                method: {
+                    type: 'string',
+                    description: 'Metode pembayaran: "tunai"/"cash", atau nama bank/ewallet ("bca", "bri", "ocbc", "dana", "gopay").'
+                },
+                service_number: {
+                    type: 'string',
+                    description: 'Nomor layanan opsional jika pelanggan memiliki lebih dari satu layanan.'
+                },
+                notes: {
+                    type: 'string',
+                    description: 'Catatan tambahan pembayaran rapel (opsional).'
+                }
+            },
+            required: ['customer_query']
+        },
+        async run(ctx, args) {
+            const { identity, previewOnly } = ctx;
+            const custQuery = String(args?.customer_query || '').trim();
+
+            if (!custQuery) {
+                return { error: 'Mohon sebutkan nama pelanggan atau nomor layanan yang akan melakukan pembayaran rapel.' };
+            }
+
+            if (identity.role === 'mitra' && (!Array.isArray(identity.region_ids) || identity.region_ids.length === 0)) {
+                return { error: 'Akses ditolak: wilayah mitra tidak ditemukan.' };
+            }
+
+            const resolved = await resolveCustomerAndRegion(custQuery, {
+                identity,
+                limit: 10,
+                includeInvoices: false
+            });
+
+            if (resolved.candidateCount > 1) {
+                const candidates = resolved.candidates.map(c => ({
+                    customer_name: c.customer_name,
+                    service_number: c.service_number,
+                    region_name: c.region_name,
+                    mitra_name: c.mitra_name
+                }));
+                return {
+                    status: 'disambiguation_required',
+                    message: `Ditemukan ${candidates.length} pelanggan yang cocok dengan "${custQuery}". Mohon sebutkan nama lengkap atau nomor layanan yang dimaksud:`,
+                    candidates
+                };
+            }
+
+            if (!resolved.found || !resolved.customer) {
+                return {
+                    found: false,
+                    error: `Pelanggan "${custQuery}" tidak ditemukan di wilayah akses Anda.`
+                };
+            }
+
+            const targetCust = resolved.customer;
+            let numMonths = parseInt(args?.months, 10);
+            if (!numMonths || isNaN(numMonths)) {
+                numMonths = resolved.extractedMonths || 1;
+            }
+            numMonths = Math.max(1, Math.min(12, numMonths));
+
+            const rawMethod = String(args?.method || resolved.extractedMethod || 'tunai').trim();
+            const methodResolved = await resolvePaymentMethod(rawMethod, targetCust.mitra_id);
+            if (methodResolved.error) {
+                return { error: methodResolved.error };
+            }
+
+            // Fetch service & package details
+            const svcNumber = String(args?.service_number || targetCust.service_number || '').trim();
+            let svcQuery = `
+                SELECT s.id AS service_id, s.service_number, s.status AS service_status,
+                       s.isolir_date, s.active_date, s.siklus,
+                       p.id AS package_id, p.name AS package_name, p.price AS package_price
+                FROM services s
+                JOIN packages p ON s.package_id = p.id
+                WHERE s.customer_id = $1
+            `;
+            const svcParams = [targetCust.customer_id];
+            if (svcNumber && svcNumber !== '-') {
+                svcParams.push(svcNumber);
+                svcQuery += ` AND s.service_number = $${svcParams.length}`;
+            }
+            svcQuery += ` ORDER BY (s.status = 'active') DESC LIMIT 1`;
+
+            const svcRes = await query(svcQuery, svcParams);
+            if (!svcRes.rows || svcRes.rows.length === 0) {
+                return { error: `Layanan internet untuk pelanggan "${targetCust.customer_name}" tidak ditemukan.` };
+            }
+            const svc = svcRes.rows[0];
+            const price = parseFloat(svc.package_price) || 0;
+            const originalTotal = price * numMonths;
+
+            // Fetch bulk payment discount
+            let bulkSettings = {};
+            try {
+                const bulkRes = await query(`SELECT * FROM bulk_payment_settings WHERE id = 1`);
+                bulkSettings = bulkRes.rows?.[0] || {};
+            } catch (_) {}
+
+            const discountConfig = {
+                1: { type: bulkSettings.discount_1_month_type, value: parseFloat(bulkSettings.discount_1_month_value) || 0 },
+                2: { type: bulkSettings.discount_2_months_type, value: parseFloat(bulkSettings.discount_2_months_value) || 0 },
+                3: { type: bulkSettings.discount_3_months_type, value: parseFloat(bulkSettings.discount_3_months_value) || 0 },
+                6: { type: bulkSettings.discount_6_months_type, value: parseFloat(bulkSettings.discount_6_months_value) || 0 },
+                12: { type: bulkSettings.discount_12_months_type, value: parseFloat(bulkSettings.discount_12_months_value) || 0 }
+            };
+            const selectedDiscount = discountConfig[numMonths] || { type: 'percentage', value: 0 };
+            let totalDiscount = 0;
+            if (selectedDiscount.type === 'percentage' && selectedDiscount.value > 0) {
+                totalDiscount = Math.round(originalTotal * selectedDiscount.value / 100);
+            } else if (selectedDiscount.type === 'free_months' && selectedDiscount.value > 0) {
+                totalDiscount = Math.round(price * selectedDiscount.value);
+            }
+            const finalTotal = Math.max(0, originalTotal - totalDiscount);
+
+            // Compute estimated new isolir date
+            let baseDate = svc.isolir_date ? new Date(svc.isolir_date) : new Date();
+            if (isNaN(baseDate.getTime())) baseDate = new Date();
+            const estIsolir = new Date(baseDate);
+            estIsolir.setMonth(estIsolir.getMonth() + numMonths);
+            const estIsolirStr = formatDateId(estIsolir);
+
+            const summary = [
+                'Aksi: Catat Pembayaran Rapel (Bayar di Muka)',
+                `Pelanggan: ${targetCust.customer_name} (${svc.service_number})`,
+                `Wilayah: ${targetCust.region_name || '-'} (Mitra: ${targetCust.mitra_name || '-'})`,
+                `Paket: ${svc.package_name} (${formatRp(price)}/bln)`,
+                `Periode: ${numMonths} Bulan`,
+                `Subtotal: ${formatRp(originalTotal)}`,
+                totalDiscount > 0 ? `Diskon: ${formatRp(totalDiscount)}` : null,
+                `Total Tagihan: ${formatRp(finalTotal)}`,
+                `Metode Bayar: ${methodResolved.label}`,
+                `Perkiraan Masa Aktif Baru: s.d. ${estIsolirStr}`,
+                args?.notes ? `Catatan: ${args.notes}` : null
+            ].filter(Boolean).join('\n');
+
+            const pending = await createPendingAction({
+                identity,
+                tool: 'record_rapel_payment',
+                args: {
+                    customer_id: targetCust.customer_id,
+                    service_id: svc.service_id,
+                    service_number: svc.service_number,
+                    customer_name: targetCust.customer_name,
+                    customer_phone: targetCust.customer_phone,
+                    package_name: svc.package_name,
+                    months: numMonths,
+                    subtotal: originalTotal,
+                    discount: totalDiscount,
+                    total_amount: finalTotal,
                     payment_method_key: methodResolved.key,
                     payment_method_label: methodResolved.label,
                     notes: args?.notes || ''

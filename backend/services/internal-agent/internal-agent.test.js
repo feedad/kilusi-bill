@@ -107,3 +107,97 @@ describe('Internal WhatsApp AI Agent - Confirmation Parser & Formatting', () => 
         expect(formatRp(0)).toBe('Rp 0');
     });
 });
+
+const {
+    parseShorthandQuery,
+    buildFuzzyNameRegex,
+    parseDateRange
+} = require('./tools/search-helper');
+
+describe('Internal WhatsApp AI Agent - Smart Search Helper & Date Parser', () => {
+    test('parseShorthandQuery extracts name, payment method, months, and region', async () => {
+        const q1 = await parseShorthandQuery('proses tagihan dhony talaga sunda sudah bayar via bca');
+        expect(q1.cleanedName).toBe('dhony');
+        expect(q1.extractedMethod).toBe('bca');
+        expect(q1.extractedRegion).toBe('talaga sunda');
+
+        const q2 = await parseShorthandQuery('dhonny 3 bulan bca');
+        expect(q2.cleanedName).toBe('dhonny');
+        expect(q2.extractedMonths).toBe(3);
+        expect(q2.extractedMethod).toBe('bca');
+        expect(q2.isRapel).toBe(true);
+
+        const q3 = await parseShorthandQuery('lunas pakde bri');
+        expect(q3.cleanedName).toBe('pakde');
+        expect(q3.extractedMethod).toBe('bri');
+    });
+
+    test('buildFuzzyNameRegex matches phonetic and doubled consonants variants', () => {
+        const regexStr = buildFuzzyNameRegex('dhony');
+        expect(regexStr).not.toBeNull();
+        const regex = new RegExp(regexStr, 'i');
+        expect(regex.test('DHONNY')).toBe(true);
+        expect(regex.test('dhony')).toBe(true);
+        expect(regex.test('doni')).toBe(true);
+        expect(regex.test('budi')).toBe(false);
+    });
+
+    test('parseDateRange parses month strings, Indonesian month names, and years', () => {
+        const p1 = parseDateRange({ month: '2026-10' });
+        expect(p1.hasPeriod).toBe(true);
+        expect(p1.startDateOnly).toBe('2026-10-01');
+        expect(p1.endDateOnly).toBe('2026-10-31');
+
+        const p2 = parseDateRange({ month: 'oktober', year: 2026 });
+        expect(p2.hasPeriod).toBe(true);
+        expect(p2.startDateOnly).toBe('2026-10-01');
+        expect(p2.endDateOnly).toBe('2026-10-31');
+
+        const p3 = parseDateRange({ date_from: '2026-10-05', date_to: '2026-10-20' });
+        expect(p3.hasPeriod).toBe(true);
+        expect(p3.startDateOnly).toBe('2026-10-05');
+        expect(p3.endDateOnly).toBe('2026-10-20');
+    });
+});
+
+describe('Internal WhatsApp AI Agent - New Tools Registration & Permissions', () => {
+    test('get_financial_report tool is accessible to superadmin, admin, mitra but not technician', () => {
+        const tool = TOOL_MAP.get('get_financial_report');
+        expect(tool).toBeDefined();
+        expect(tool.kind).toBe('read');
+        expect(canExecuteTool({ role: 'superadmin', can_read: true }, tool)).toBe(true);
+        expect(canExecuteTool({ role: 'admin', can_read: true }, tool)).toBe(true);
+        expect(canExecuteTool({ role: 'mitra', can_read: true }, tool)).toBe(true);
+        expect(canExecuteTool({ role: 'technician', can_read: true }, tool)).toBe(false);
+    });
+
+    test('record_rapel_payment tool is accessible to superadmin, admin, mitra with write permission', () => {
+        const tool = TOOL_MAP.get('record_rapel_payment');
+        expect(tool).toBeDefined();
+        expect(tool.kind).toBe('write');
+
+        const superadmin = {
+            role: 'superadmin',
+            can_read: true,
+            can_write: true,
+            allowed_write_tools: ['record_rapel_payment']
+        };
+        expect(canExecuteTool(superadmin, tool)).toBe(true);
+
+        const mitraNoPerm = {
+            role: 'mitra',
+            can_read: true,
+            can_write: true,
+            allowed_write_tools: ['record_payment']
+        };
+        expect(canExecuteTool(mitraNoPerm, tool)).toBe(false);
+
+        const technician = {
+            role: 'technician',
+            can_read: true,
+            can_write: true,
+            allowed_write_tools: ['record_rapel_payment']
+        };
+        expect(canExecuteTool(technician, tool)).toBe(false);
+    });
+});

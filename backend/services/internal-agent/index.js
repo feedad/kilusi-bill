@@ -120,9 +120,13 @@ function buildSystemPrompt(identity) {
         'Aturan Utama:',
         '1. Jawab dalam Bahasa Indonesia yang singkat, jelas, dan rapi untuk layar WhatsApp.',
         '2. JANGAN PERNAH mengarang data pelanggan, tagihan, nomor layanan, status koneksi, atau perangkat. Gunakan tool yang tersedia untuk mengambil data asli dari database.',
-        '3. Untuk aksi perubahan data (catat pembayaran lunas, kirim ulang invoice, ubah status tiket, isolir, buka isolir), panggil tool write yang sesuai. Setiap aksi tulis wajib melalui mekanisme kode konfirmasi YA <KODE>.',
-        '4. Jika tool mengembalikan beberapa kandidat pelanggan (disambiguation_required), tampilkan daftar kandidat tersebut dan minta pengirim menyebutkan nomor layanan atau nomor invoice yang dimaksud.',
-        '5. Jangan pernah menyatakan pembayaran atau perubahan telah berhasil disimpan ke database sebelum pengirim mengonfirmasi dengan YA <KODE>.'
+        '3. Untuk pertanyaan keuangan (total omzet, pendapatan, rekap pembayaran/kas, per metode/mitra pada bulan atau tanggal tertentu), panggil tool `get_financial_report`.',
+        '4. Untuk daftar tagihan belum lunas / tunggakan, panggil `list_unpaid_invoices` (bisa difilter bulan, mitra, atau wilayah).',
+        '5. Untuk daftar pelanggan terisolir pada bulan/tanggal tertentu atau yang sedang terisolir, panggil `list_suspended_services`.',
+        '6. Untuk pembayaran tagihan bulanan biasa, panggil `record_payment`. Jika pelanggan ingin bayar di muka (rapel beberapa bulan, misal "3 bulan bca"), panggil `record_rapel_payment`.',
+        '7. Setiap aksi tulis (record_payment, record_rapel_payment, resend_invoice, update_ticket_status, suspend_service, restore_service) wajib melalui mekanisme kode konfirmasi YA <KODE>.',
+        '8. Jika tool mengembalikan beberapa kandidat pelanggan (disambiguation_required), tampilkan daftar kandidat tersebut dan minta pengirim menyebutkan nomor layanan atau nomor invoice yang dimaksud.',
+        '9. Jangan pernah menyatakan pembayaran atau perubahan telah berhasil disimpan ke database sebelum pengirim mengonfirmasi dengan YA <KODE>.'
     ].join('\n');
 }
 

@@ -201,6 +201,43 @@ async function executeWriteAction(identity, pendingRow) {
         };
     }
 
+    if (tool === 'record_rapel_payment') {
+        const noteParts = [];
+        if (args.notes) noteParts.push(args.notes);
+        noteParts.push(`Rapel ${args.months} bulan via Asisten WA oleh ${identity.name} (${identity.role})`);
+
+        const payload = {
+            customer_id: args.customer_id,
+            service_number: args.service_number,
+            months: args.months,
+            payment_method: args.payment_method_key || 'cash',
+            payment_date: new Date().toISOString(),
+            notes: noteParts.join(' | ')
+        };
+
+        const res = await axios.post(`${baseUrl}/billing/invoices/rapel`, payload, {
+            headers,
+            timeout: 25000
+        });
+
+        const data = res.data?.data || {};
+        const newIsolir = data.newIsolirDateStr || '-';
+        return {
+            ok: true,
+            message: [
+                'PEMBAYARAN RAPEL BERHASIL DICATAT',
+                `Pelanggan: ${args.customer_name || '-'} (${args.service_number || '-'})`,
+                `Periode: ${args.months} Bulan`,
+                `Total Tagihan: ${formatRp(args.total_amount || data.total)}`,
+                args.discount > 0 ? `Diskon: ${formatRp(args.discount)}` : null,
+                `Metode: ${args.payment_method_label || args.payment_method_key || 'Tunai'}`,
+                `Masa Aktif Baru: s.d. ${newIsolir}`,
+                `Dicatat oleh: ${identity.name}`
+            ].filter(Boolean).join('\n'),
+            data: res.data
+        };
+    }
+
     if (tool === 'resend_invoice') {
         const res = await axios.post(
             `${baseUrl}/billing/invoices/${encodeURIComponent(args.invoice_id)}/resend`,

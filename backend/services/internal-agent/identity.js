@@ -3,6 +3,7 @@ const logger = require('../../config/logger');
 
 const ALL_WRITE_TOOLS = [
     'record_payment',
+    'record_rapel_payment',
     'resend_invoice',
     'update_ticket_status',
     'suspend_service',
