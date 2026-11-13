@@ -22,10 +22,10 @@ const PAYMENT_METHOD_KEYWORDS = [
 
 // Common noise / filler words in admin billing commands
 const NOISE_WORDS = [
-    'proses', 'proseskan', 'tagihan', 'tagihannya', 'invoice',
+    'proses', 'proseskan', 'tagihan', 'tagihannya', 'invoice', 'pembayaran',
     'sudah', 'telah', 'udah', 'udh', 'sdh',
     'bayar', 'dibayar', 'bayarkan', 'lunas', 'melunasi',
-    'rapel', 'rapelkan', 'cepat', 'dimuka', 'muka', 'perpanjang', 'perpanjangan', 'bulan', 'bln',
+    'rapel', 'rapelkan', 'cepat', 'dimuka', 'muka', 'duluan', 'perpanjang', 'perpanjangan', 'bulan', 'bln', 'depan', 'periode',
     'via', 'lewat', 'melalui', 'pake', 'pakai',
     'atas', 'nama', 'an', 'a.n', 'a/n', 'pelanggan', 'customer', 'cust',
     'tolong', 'mohon', 'bantu', 'min', 'bot', 'admin', 'tolong bantu',
@@ -240,7 +240,7 @@ async function parseShorthandQuery(text) {
             working = working.replace(rapelMatch[0], ' ');
         }
     } else {
-        const quickPayMatch = working.match(/\b(bayar\s+cepat|bayar\s+di\s*muka|rapelkan|rapel|perpanjangan|perpanjang)\b/i);
+        const quickPayMatch = working.match(/\b(bayar\s+cepat|bayar\s+di\s*muka|bayar\s+duluan|rapelkan|rapel|perpanjangan|perpanjang)\b/i);
         if (quickPayMatch) {
             extractedMonths = 1;
             working = working.replace(quickPayMatch[0], ' ');

@@ -873,15 +873,20 @@ const writeTools = [
                 assign_to: {
                     type: 'string',
                     description: 'Nama/username teknisi jika ingin langsung ditugaskan saat tiket dibuat (opsional, misal: "Geding")'
+                },
+                technician_query: {
+                    type: 'string',
+                    description: 'Alias nama/username teknisi jika ingin langsung ditugaskan saat tiket dibuat (opsional)'
                 }
             },
-            required: ['customer_query', 'subject']
+            required: ['customer_query']
         },
         async run(ctx, args) {
             const { identity, previewOnly } = ctx;
             const custQuery = String(args?.customer_query || '').trim();
-            const subject = String(args?.subject || '').trim();
-            const description = String(args?.description || subject).trim();
+            const rawSubject = String(args?.subject || args?.description || '').trim();
+            const subject = rawSubject.length > 100 ? rawSubject.slice(0, 97) + '...' : rawSubject;
+            const description = String(args?.description || args?.subject || '').trim();
             const validCategories = ['technical', 'billing', 'general', 'installation'];
             const validPriorities = ['low', 'medium', 'high', 'urgent'];
             const category = validCategories.includes(String(args?.category || '').toLowerCase())
@@ -941,8 +946,9 @@ const writeTools = [
             } catch (_) {}
 
             let assignedTech = null;
-            if (args?.assign_to && String(args.assign_to).trim()) {
-                const rawAssign = String(args.assign_to).trim();
+            const rawAssignParam = args?.assign_to || args?.technician_query;
+            if (rawAssignParam && String(rawAssignParam).trim()) {
+                const rawAssign = String(rawAssignParam).trim();
                 if (identity.role === 'technician' && /^(saya|aku|sendiri|diri sendiri)$/i.test(rawAssign) && identity.tech_user_id) {
                     assignedTech = {
                         id: identity.tech_user_id,
@@ -1150,8 +1156,9 @@ const writeTools = [
             }
 
             let assignedTech = null;
-            if (args?.assign_to && String(args.assign_to).trim()) {
-                const techRes = await resolveTechnician(args.assign_to);
+            const rawUpdateAssign = args?.assign_to || args?.technician_query;
+            if (rawUpdateAssign && String(rawUpdateAssign).trim()) {
+                const techRes = await resolveTechnician(rawUpdateAssign);
                 if (!techRes.found) {
                     return { error: techRes.error, available_technicians: techRes.available };
                 }
