@@ -827,7 +827,7 @@ export default function InternalAgentTab() {
                 {[
                   'Tampilkan 5 tagihan belum lunas',
                   'Rekap pendapatan hari ini',
-                  'Cek status perangkat OLT dan NAS',
+                  'Cek daftar teknisi & tiket aktif',
                   'Daftar layanan yang sedang terisolir',
                   'Cek tiket gangguan yang masih open'
                 ].map((sample) => (

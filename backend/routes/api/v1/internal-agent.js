@@ -39,9 +39,21 @@ const WRITE_TOOL_METADATA = [
         roles: ['superadmin', 'admin', 'mitra']
     },
     {
+        name: 'create_support_ticket',
+        label: 'Buat Tiket Gangguan',
+        description: 'Membuat tiket laporan gangguan baru untuk pelanggan & opsional langsung tugaskan teknisi',
+        roles: ['superadmin', 'admin', 'mitra', 'technician']
+    },
+    {
+        name: 'assign_ticket',
+        label: 'Tugaskan Tiket ke Teknisi',
+        description: 'Menugaskan (dispatch) tiket gangguan ke teknisi & otomatis kirim notifikasi WA teknisi',
+        roles: ['superadmin', 'admin', 'mitra']
+    },
+    {
         name: 'update_ticket_status',
         label: 'Update Status Tiket',
-        description: 'Mengubah status tiket gangguan (in_progress, resolved, closed) & catatan',
+        description: 'Mengubah status tiket gangguan (in_progress, resolved, closed) & catatan penyelesaian',
         roles: ['superadmin', 'admin', 'mitra', 'technician']
     },
     {

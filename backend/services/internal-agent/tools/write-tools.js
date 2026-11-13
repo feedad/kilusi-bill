@@ -1,8 +1,111 @@
 const { query } = require('../../../config/database');
 const { getSetting } = require('../../../config/settingsManager');
 const { createPendingAction, formatRp } = require('../actions');
+const { canExecuteTool } = require('../identity');
 const { formatDateId } = require('./read-tools');
-const { resolveCustomerAndRegion } = require('./search-helper');
+const { resolveCustomerAndRegion, buildFuzzyNameRegex } = require('./search-helper');
+
+function parseDateParts(dateInput) {
+    if (!dateInput) return new Date();
+    if (dateInput instanceof Date) return new Date(dateInput.getFullYear(), dateInput.getMonth(), dateInput.getDate());
+    const str = String(dateInput).split('T')[0];
+    const parts = str.split('-');
+    if (parts.length === 3) return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    return new Date(dateInput);
+}
+
+function addMonthsToDate(dateInput, months, targetDay) {
+    const d = parseDateParts(dateInput);
+    const dayToUse = targetDay || d.getDate();
+    const y = d.getFullYear();
+    const m = d.getMonth() + months;
+    const adjY = y + Math.floor(m / 12);
+    const adjM = ((m % 12) + 12) % 12;
+    const lastDayOfMonth = new Date(adjY, adjM + 1, 0).getDate();
+    const day = Math.min(dayToUse, lastDayOfMonth);
+    return new Date(adjY, adjM, day);
+}
+
+async function resolveTechnician(rawQuery) {
+    const cleaned = String(rawQuery || '')
+        .trim()
+        .replace(/^(?:teknisi|kang|mas|pak|bang|bro|ke|sama|oleh)\s+/i, '')
+        .trim();
+
+    const allRes = await query(
+        `SELECT
+            u.id,
+            u.username,
+            COALESCE(m.name, u.username) AS name,
+            COALESCE(u.phone, m.phone) AS phone
+         FROM users u
+         LEFT JOIN ai_agent_members m ON m.member_type = 'technician' AND (m.ref_id = u.id::text OR LOWER(m.name) = LOWER(u.username)) AND m.enabled = true
+         WHERE u.role = 'technician'
+         ORDER BY u.username ASC`
+    );
+    const allTechs = allRes.rows || [];
+    const availableList = allTechs.map(t => `${t.username}${t.phone ? ' (' + t.phone + ')' : ''}`);
+
+    if (!cleaned) {
+        return {
+            found: false,
+            available: availableList,
+            error: `Nama teknisi belum disebutkan. Teknisi tersedia: ${availableList.join(', ') || 'Tidak ada'}.`
+        };
+    }
+
+    const low = cleaned.toLowerCase();
+
+    // 1. Exact ID, username, name, or phone
+    const exactMatches = allTechs.filter(t =>
+        String(t.id) === low ||
+        String(t.username || '').toLowerCase() === low ||
+        String(t.name || '').toLowerCase() === low ||
+        String(t.phone || '') === cleaned
+    );
+    if (exactMatches.length === 1) {
+        return { found: true, technician: exactMatches[0] };
+    }
+
+    // 2. Substring match
+    const subMatches = allTechs.filter(t =>
+        String(t.username || '').toLowerCase().includes(low) ||
+        String(t.name || '').toLowerCase().includes(low)
+    );
+    if (subMatches.length === 1) {
+        return { found: true, technician: subMatches[0] };
+    }
+    if (subMatches.length > 1) {
+        return {
+            found: false,
+            disambiguation: true,
+            candidates: subMatches,
+            available: availableList,
+            error: `Ditemukan beberapa teknisi yang cocok dengan "${cleaned}": ${subMatches.map(t => t.username).join(', ')}. Mohon sebutkan lebih spesifik.`
+        };
+    }
+
+    // 3. Fuzzy regex match
+    const fuzzyPattern = buildFuzzyNameRegex(cleaned);
+    if (fuzzyPattern) {
+        try {
+            const re = new RegExp(fuzzyPattern, 'i');
+            const fuzzyMatches = allTechs.filter(t =>
+                re.test(String(t.username || '')) || re.test(String(t.name || ''))
+            );
+            if (fuzzyMatches.length === 1) {
+                return { found: true, technician: fuzzyMatches[0] };
+            }
+        } catch (_) {}
+    }
+
+    return {
+        found: false,
+        available: availableList,
+        error: `Teknisi "${cleaned}" tidak ditemukan. Teknisi yang tersedia: ${availableList.join(', ') || 'Tidak ada'}.`
+    };
+}
+
 async function loadPaymentSettings() {
     let ps = getSetting('payment_settings', null);
     if (!ps || typeof ps !== 'object') {
@@ -114,6 +217,143 @@ async function resolvePaymentMethod(rawMethod, customerMitraId = null) {
     };
 }
 
+async function prepareRapelPendingAction({
+    ctx,
+    identity,
+    previewOnly,
+    targetCust,
+    numMonths = 1,
+    rawMethod = 'tunai',
+    svcNumber = '',
+    notes = '',
+    isAutoFallback = false
+}) {
+    const months = Math.max(1, Math.min(12, parseInt(numMonths, 10) || 1));
+    const methodResolved = await resolvePaymentMethod(rawMethod, targetCust.mitra_id);
+    if (methodResolved.error) {
+        return { error: methodResolved.error };
+    }
+
+    const targetSvcNum = String(svcNumber || targetCust.service_number || '').trim();
+    let svcQuery = `
+        SELECT s.id AS service_id, s.service_number, s.status AS service_status,
+               s.isolir_date, s.active_date, s.siklus,
+               p.id AS package_id, p.name AS package_name, p.price AS package_price
+        FROM services s
+        JOIN packages p ON s.package_id = p.id
+        WHERE s.customer_id = $1
+    `;
+    const svcParams = [targetCust.customer_id];
+    if (targetSvcNum && targetSvcNum !== '-') {
+        svcParams.push(targetSvcNum);
+        svcQuery += ` AND s.service_number = $${svcParams.length}`;
+    }
+    svcQuery += ` ORDER BY (s.status = 'active') DESC LIMIT 1`;
+
+    const svcRes = await query(svcQuery, svcParams);
+    if (!svcRes.rows || svcRes.rows.length === 0) {
+        return { error: `Layanan internet untuk pelanggan "${targetCust.customer_name}" tidak ditemukan.` };
+    }
+    const svc = svcRes.rows[0];
+    const price = parseFloat(svc.package_price) || 0;
+    const originalTotal = price * months;
+
+    let bulkSettings = {};
+    try {
+        const bulkRes = await query(`SELECT * FROM bulk_payment_settings WHERE id = 1`);
+        bulkSettings = bulkRes.rows?.[0] || {};
+    } catch (_) {}
+
+    const discountConfig = {
+        1: { type: bulkSettings.discount_1_month_type, value: parseFloat(bulkSettings.discount_1_month_value) || 0 },
+        2: { type: bulkSettings.discount_2_months_type, value: parseFloat(bulkSettings.discount_2_months_value) || 0 },
+        3: { type: bulkSettings.discount_3_months_type, value: parseFloat(bulkSettings.discount_3_months_value) || 0 },
+        6: { type: bulkSettings.discount_6_months_type, value: parseFloat(bulkSettings.discount_6_months_value) || 0 },
+        12: { type: bulkSettings.discount_12_months_type, value: parseFloat(bulkSettings.discount_12_months_value) || 0 }
+    };
+    const selectedDiscount = discountConfig[months] || { type: 'percentage', value: 0 };
+    let totalDiscount = 0;
+    if (selectedDiscount.type === 'percentage' && selectedDiscount.value > 0) {
+        totalDiscount = Math.round(originalTotal * selectedDiscount.value / 100);
+    } else if (selectedDiscount.type === 'free_months' && selectedDiscount.value > 0) {
+        totalDiscount = Math.round(price * selectedDiscount.value);
+    }
+    const finalTotal = Math.max(0, originalTotal - totalDiscount);
+
+    // Match billing.js POST /invoices/rapel date calculation
+    const lastPaidRes = await query(
+        `SELECT MAX(due_date) AS last_due_date
+         FROM invoices i
+         WHERE (i.service_number = $1 OR (i.service_number IS NULL AND i.customer_id = $2))
+           AND i.status = 'paid'`,
+        [svc.service_number, targetCust.customer_id]
+    );
+    const rawLastPaid = lastPaidRes.rows?.[0]?.last_due_date;
+
+    let baseDate;
+    if (svc.isolir_date) {
+        baseDate = parseDateParts(svc.isolir_date);
+    } else if (rawLastPaid) {
+        baseDate = addMonthsToDate(rawLastPaid, 1);
+    } else {
+        baseDate = new Date();
+    }
+    const billingDay = baseDate.getDate();
+    const nextIsolirDate = addMonthsToDate(baseDate, months, billingDay);
+    const estIsolirStr = formatDateId(nextIsolirDate);
+
+    const actionHeader = isAutoFallback
+        ? `Aksi: Catat Pembayaran Cepat / Rapel (${months} Bulan - Tidak Ada Tagihan Tertunggak)`
+        : 'Aksi: Catat Pembayaran Rapel (Bayar di Muka)';
+
+    const summary = [
+        actionHeader,
+        `Pelanggan: ${targetCust.customer_name} (${svc.service_number})`,
+        `Wilayah: ${targetCust.region_name || '-'} (Mitra: ${targetCust.mitra_name || '-'})`,
+        `Paket: ${svc.package_name} (${formatRp(price)}/bln)`,
+        `Periode: ${months} Bulan`,
+        `Subtotal: ${formatRp(originalTotal)}`,
+        totalDiscount > 0 ? `Diskon: ${formatRp(totalDiscount)}` : null,
+        `Total Tagihan: ${formatRp(finalTotal)}`,
+        `Metode Bayar: ${methodResolved.label}`,
+        `Perkiraan Masa Aktif Baru: s.d. ${estIsolirStr}`,
+        notes ? `Catatan: ${notes}` : null
+    ].filter(Boolean).join('\n');
+
+    const canUseRapelTool = canExecuteTool(identity, {
+        name: 'record_rapel_payment',
+        kind: 'write',
+        roles: ['superadmin', 'admin', 'mitra']
+    });
+    const pendingToolName = canUseRapelTool ? 'record_rapel_payment' : 'record_payment';
+
+    const pending = await createPendingAction({
+        identity,
+        tool: pendingToolName,
+        args: {
+            is_rapel: true,
+            customer_id: targetCust.customer_id,
+            service_id: svc.service_id,
+            service_number: svc.service_number,
+            customer_name: targetCust.customer_name,
+            customer_phone: targetCust.customer_phone,
+            package_name: svc.package_name,
+            months,
+            subtotal: originalTotal,
+            discount: totalDiscount,
+            total_amount: finalTotal,
+            payment_method_key: methodResolved.key,
+            payment_method_label: methodResolved.label,
+            notes: notes || ''
+        },
+        summary,
+        previewOnly
+    });
+
+    ctx.createdPendingAction = pending;
+    return pending;
+}
+
 const writeTools = [
     {
         name: 'record_payment',
@@ -195,6 +435,20 @@ const writeTools = [
 
                 if (resolved.found && resolved.customer) {
                     resolvedCustomer = resolved.customer;
+                    // If user explicitly asked for rapel / N months / bayar cepat via record_payment
+                    if (resolved.isRapel && ['superadmin', 'admin', 'mitra'].includes(identity.role)) {
+                        return await prepareRapelPendingAction({
+                            ctx,
+                            identity,
+                            previewOnly,
+                            targetCust: resolvedCustomer,
+                            numMonths: resolved.extractedMonths || 1,
+                            rawMethod,
+                            svcNumber: resolvedCustomer.service_number,
+                            notes: args?.notes || '',
+                            isAutoFallback: false
+                        });
+                    }
                 }
             }
 
@@ -261,6 +515,19 @@ const writeTools = [
 
             const rows = res.rows || [];
             if (rows.length === 0) {
+                if (resolvedCustomer && ['superadmin', 'admin', 'mitra'].includes(identity.role)) {
+                    return await prepareRapelPendingAction({
+                        ctx,
+                        identity,
+                        previewOnly,
+                        targetCust: resolvedCustomer,
+                        numMonths: 1,
+                        rawMethod,
+                        svcNumber: resolvedCustomer.service_number,
+                        notes: args?.notes || '',
+                        isAutoFallback: true
+                    });
+                }
                 if (resolvedCustomer) {
                     const checkInv = await query(
                         `SELECT COUNT(*) as total_inv,
@@ -274,7 +541,7 @@ const writeTools = [
                     const lastPaid = formatDateId(checkInv.rows?.[0]?.last_paid_at);
                     return {
                         found: false,
-                        error: `Pelanggan "${resolvedCustomer.customer_name}" (${resolvedCustomer.service_number}) saat ini tidak memiliki tagihan yang belum lunas. Dari ${totalInv} tagihan, ${paidInv} sudah lunas (terakhir dibayar ${lastPaid}). Status layanan: ${resolvedCustomer.service_status || 'aktif'}. Jika ingin membayar di muka, gunakan pembayaran rapel (record_rapel_payment).`
+                        error: `Pelanggan "${resolvedCustomer.customer_name}" (${resolvedCustomer.service_number}) saat ini tidak memiliki tagihan yang belum lunas (${paidInv}/${totalInv} lunas, terakhir dibayar ${lastPaid}).`
                     };
                 }
                 return {
@@ -453,107 +720,19 @@ const writeTools = [
             if (!numMonths || isNaN(numMonths)) {
                 numMonths = resolved.extractedMonths || 1;
             }
-            numMonths = Math.max(1, Math.min(12, numMonths));
-
             const rawMethod = String(args?.method || resolved.extractedMethod || 'tunai').trim();
-            const methodResolved = await resolvePaymentMethod(rawMethod, targetCust.mitra_id);
-            if (methodResolved.error) {
-                return { error: methodResolved.error };
-            }
 
-            // Fetch service & package details
-            const svcNumber = String(args?.service_number || targetCust.service_number || '').trim();
-            let svcQuery = `
-                SELECT s.id AS service_id, s.service_number, s.status AS service_status,
-                       s.isolir_date, s.active_date, s.siklus,
-                       p.id AS package_id, p.name AS package_name, p.price AS package_price
-                FROM services s
-                JOIN packages p ON s.package_id = p.id
-                WHERE s.customer_id = $1
-            `;
-            const svcParams = [targetCust.customer_id];
-            if (svcNumber && svcNumber !== '-') {
-                svcParams.push(svcNumber);
-                svcQuery += ` AND s.service_number = $${svcParams.length}`;
-            }
-            svcQuery += ` ORDER BY (s.status = 'active') DESC LIMIT 1`;
-
-            const svcRes = await query(svcQuery, svcParams);
-            if (!svcRes.rows || svcRes.rows.length === 0) {
-                return { error: `Layanan internet untuk pelanggan "${targetCust.customer_name}" tidak ditemukan.` };
-            }
-            const svc = svcRes.rows[0];
-            const price = parseFloat(svc.package_price) || 0;
-            const originalTotal = price * numMonths;
-
-            // Fetch bulk payment discount
-            let bulkSettings = {};
-            try {
-                const bulkRes = await query(`SELECT * FROM bulk_payment_settings WHERE id = 1`);
-                bulkSettings = bulkRes.rows?.[0] || {};
-            } catch (_) {}
-
-            const discountConfig = {
-                1: { type: bulkSettings.discount_1_month_type, value: parseFloat(bulkSettings.discount_1_month_value) || 0 },
-                2: { type: bulkSettings.discount_2_months_type, value: parseFloat(bulkSettings.discount_2_months_value) || 0 },
-                3: { type: bulkSettings.discount_3_months_type, value: parseFloat(bulkSettings.discount_3_months_value) || 0 },
-                6: { type: bulkSettings.discount_6_months_type, value: parseFloat(bulkSettings.discount_6_months_value) || 0 },
-                12: { type: bulkSettings.discount_12_months_type, value: parseFloat(bulkSettings.discount_12_months_value) || 0 }
-            };
-            const selectedDiscount = discountConfig[numMonths] || { type: 'percentage', value: 0 };
-            let totalDiscount = 0;
-            if (selectedDiscount.type === 'percentage' && selectedDiscount.value > 0) {
-                totalDiscount = Math.round(originalTotal * selectedDiscount.value / 100);
-            } else if (selectedDiscount.type === 'free_months' && selectedDiscount.value > 0) {
-                totalDiscount = Math.round(price * selectedDiscount.value);
-            }
-            const finalTotal = Math.max(0, originalTotal - totalDiscount);
-
-            // Compute estimated new isolir date
-            let baseDate = svc.isolir_date ? new Date(svc.isolir_date) : new Date();
-            if (isNaN(baseDate.getTime())) baseDate = new Date();
-            const estIsolir = new Date(baseDate);
-            estIsolir.setMonth(estIsolir.getMonth() + numMonths);
-            const estIsolirStr = formatDateId(estIsolir);
-
-            const summary = [
-                'Aksi: Catat Pembayaran Rapel (Bayar di Muka)',
-                `Pelanggan: ${targetCust.customer_name} (${svc.service_number})`,
-                `Wilayah: ${targetCust.region_name || '-'} (Mitra: ${targetCust.mitra_name || '-'})`,
-                `Paket: ${svc.package_name} (${formatRp(price)}/bln)`,
-                `Periode: ${numMonths} Bulan`,
-                `Subtotal: ${formatRp(originalTotal)}`,
-                totalDiscount > 0 ? `Diskon: ${formatRp(totalDiscount)}` : null,
-                `Total Tagihan: ${formatRp(finalTotal)}`,
-                `Metode Bayar: ${methodResolved.label}`,
-                `Perkiraan Masa Aktif Baru: s.d. ${estIsolirStr}`,
-                args?.notes ? `Catatan: ${args.notes}` : null
-            ].filter(Boolean).join('\n');
-
-            const pending = await createPendingAction({
+            return await prepareRapelPendingAction({
+                ctx,
                 identity,
-                tool: 'record_rapel_payment',
-                args: {
-                    customer_id: targetCust.customer_id,
-                    service_id: svc.service_id,
-                    service_number: svc.service_number,
-                    customer_name: targetCust.customer_name,
-                    customer_phone: targetCust.customer_phone,
-                    package_name: svc.package_name,
-                    months: numMonths,
-                    subtotal: originalTotal,
-                    discount: totalDiscount,
-                    total_amount: finalTotal,
-                    payment_method_key: methodResolved.key,
-                    payment_method_label: methodResolved.label,
-                    notes: args?.notes || ''
-                },
-                summary,
-                previewOnly
+                previewOnly,
+                targetCust,
+                numMonths,
+                rawMethod,
+                svcNumber: args?.service_number || targetCust.service_number,
+                notes: args?.notes || '',
+                isAutoFallback: false
             });
-
-            ctx.createdPendingAction = pending;
-            return pending;
         }
     },
     {
@@ -662,16 +841,286 @@ const writeTools = [
         }
     },
     {
-        name: 'update_ticket_status',
+        name: 'create_support_ticket',
         kind: 'write',
         roles: ['superadmin', 'admin', 'mitra', 'technician'],
-        description: 'Ubah status tiket support/gangguan (open, in_progress, pending, resolved, closed) beserta catatan penyelesaian. Wajib konfirmasi YA.',
+        description: 'Buat tiket laporan gangguan/support baru untuk pelanggan, opsional langsung menugaskan ke teknisi. Wajib konfirmasi YA sebelum tersimpan.',
+        parameters: {
+            type: 'object',
+            properties: {
+                customer_query: {
+                    type: 'string',
+                    description: 'Nama pelanggan, nomor HP, PPPoE username, atau nomor layanan pelanggan'
+                },
+                subject: {
+                    type: 'string',
+                    description: 'Judul singkat keluhan/gangguan (misal: "Internet Mati / LOS Merah", "Koneksi Lambat")'
+                },
+                description: {
+                    type: 'string',
+                    description: 'Detail keluhan/gangguan pelanggan (jika kosong akan diisi sama dengan subject)'
+                },
+                category: {
+                    type: 'string',
+                    enum: ['technical', 'billing', 'general', 'installation'],
+                    description: 'Kategori tiket (default: technical)'
+                },
+                priority: {
+                    type: 'string',
+                    enum: ['low', 'medium', 'high', 'urgent'],
+                    description: 'Prioritas tiket (default: medium)'
+                },
+                assign_to: {
+                    type: 'string',
+                    description: 'Nama/username teknisi jika ingin langsung ditugaskan saat tiket dibuat (opsional, misal: "Geding")'
+                }
+            },
+            required: ['customer_query', 'subject']
+        },
+        async run(ctx, args) {
+            const { identity, previewOnly } = ctx;
+            const custQuery = String(args?.customer_query || '').trim();
+            const subject = String(args?.subject || '').trim();
+            const description = String(args?.description || subject).trim();
+            const validCategories = ['technical', 'billing', 'general', 'installation'];
+            const validPriorities = ['low', 'medium', 'high', 'urgent'];
+            const category = validCategories.includes(String(args?.category || '').toLowerCase())
+                ? String(args.category).toLowerCase()
+                : 'technical';
+            const priority = validPriorities.includes(String(args?.priority || '').toLowerCase())
+                ? String(args.priority).toLowerCase()
+                : 'medium';
+
+            if (!custQuery) return { error: 'Mohon sebutkan nama atau nomor layanan pelanggan.' };
+            if (!subject) return { error: 'Subjek/keluhan tiket wajib diisi.' };
+
+            if (identity.role === 'mitra' && (!Array.isArray(identity.region_ids) || identity.region_ids.length === 0)) {
+                return { error: 'Akses ditolak: wilayah mitra tidak ditemukan.' };
+            }
+
+            const resolved = await resolveCustomerAndRegion(custQuery, {
+                identity,
+                limit: 10,
+                includeInvoices: false
+            });
+
+            if (resolved.candidateCount > 1) {
+                const candidates = resolved.candidates.map(c => ({
+                    customer_name: c.customer_name,
+                    service_number: c.service_number,
+                    pppoe_username: c.pppoe_username || '-',
+                    region_name: c.region_name,
+                    mitra_name: c.mitra_name
+                }));
+                return {
+                    status: 'disambiguation_required',
+                    message: `Ditemukan ${candidates.length} pelanggan yang cocok dengan "${custQuery}". Mohon sebutkan nama lengkap atau nomor layanan yang dimaksud:`,
+                    candidates
+                };
+            }
+
+            if (!resolved.found || !resolved.customer) {
+                return {
+                    found: false,
+                    error: `Pelanggan "${custQuery}" tidak ditemukan di wilayah akses Anda.`
+                };
+            }
+
+            const targetCust = resolved.customer;
+            let custAddress = targetCust.address || null;
+            let custEmail = null;
+            try {
+                const cRes = await query(`SELECT address, email, phone FROM customers WHERE id = $1 LIMIT 1`, [targetCust.customer_id]);
+                if (cRes.rows?.[0]) {
+                    custAddress = cRes.rows[0].address || custAddress;
+                    custEmail = cRes.rows[0].email || null;
+                    if (!targetCust.customer_phone && cRes.rows[0].phone) {
+                        targetCust.customer_phone = cRes.rows[0].phone;
+                    }
+                }
+            } catch (_) {}
+
+            let assignedTech = null;
+            if (args?.assign_to && String(args.assign_to).trim()) {
+                const rawAssign = String(args.assign_to).trim();
+                if (identity.role === 'technician' && /^(saya|aku|sendiri|diri sendiri)$/i.test(rawAssign) && identity.tech_user_id) {
+                    assignedTech = {
+                        id: identity.tech_user_id,
+                        username: identity.name,
+                        phone: identity.phone
+                    };
+                } else {
+                    const techRes = await resolveTechnician(rawAssign);
+                    if (!techRes.found) {
+                        return { error: techRes.error, available_technicians: techRes.available };
+                    }
+                    assignedTech = techRes.technician;
+                }
+            }
+
+            const summary = [
+                'Aksi: Buat Tiket Gangguan Baru',
+                `Pelanggan: ${targetCust.customer_name} (${targetCust.service_number || '-'})`,
+                `No. HP: ${targetCust.customer_phone || '-'}`,
+                `Wilayah: ${targetCust.region_name || '-'} (Mitra: ${targetCust.mitra_name || '-'})`,
+                `Subjek: ${subject}`,
+                `Deskripsi: ${description}`,
+                `Kategori / Prioritas: ${category} / ${priority}`,
+                `Ditugaskan ke: ${assignedTech ? `${assignedTech.username} (${assignedTech.phone || '-'})` : 'Belum ditugaskan (Status: open)'}`
+            ].join('\n');
+
+            const pending = await createPendingAction({
+                identity,
+                tool: 'create_support_ticket',
+                args: {
+                    customer_id: targetCust.customer_id,
+                    customer_name: targetCust.customer_name,
+                    customer_phone: targetCust.customer_phone || '',
+                    customer_email: custEmail || '',
+                    customer_address: custAddress || '',
+                    service_number: targetCust.service_number || '',
+                    subject,
+                    description,
+                    category,
+                    priority,
+                    assigned_to: assignedTech ? assignedTech.username : null,
+                    assigned_to_user: assignedTech ? assignedTech.id : null,
+                    technician_phone: assignedTech ? assignedTech.phone : null
+                },
+                summary,
+                previewOnly
+            });
+
+            ctx.createdPendingAction = pending;
+            return pending;
+        }
+    },
+    {
+        name: 'assign_ticket',
+        kind: 'write',
+        roles: ['superadmin', 'admin', 'mitra'],
+        description: 'Tugaskan (assign/dispatch) tiket gangguan ke teknisi tertentu dan otomatis kirim notifikasi WA ke teknisi. Wajib konfirmasi YA.',
         parameters: {
             type: 'object',
             properties: {
                 ticket_number: {
                     type: 'string',
-                    description: 'Nomor tiket atau ID tiket'
+                    description: 'Nomor tiket (misal: "TKT20260731490" atau ID tiket) atau nama pelanggan yang memiliki tiket aktif'
+                },
+                technician_query: {
+                    type: 'string',
+                    description: 'Nama atau username teknisi yang ditugaskan (misal: "Geding", "teknisi")'
+                },
+                note: {
+                    type: 'string',
+                    description: 'Catatan atau instruksi tambahan untuk teknisi (opsional)'
+                }
+            },
+            required: ['ticket_number', 'technician_query']
+        },
+        async run(ctx, args) {
+            const { identity, previewOnly } = ctx;
+            const rawNum = String(args?.ticket_number || args?.ticket_query || args?.customer_query || '').trim().replace(/^#/, '');
+            const rawTech = String(args?.technician_query || args?.assign_to || args?.technician || '').trim();
+            if (!rawNum) return { error: 'Nomor tiket atau nama pelanggan wajib diisi.' };
+            if (!rawTech) return { error: 'Nama teknisi tujuan wajib diisi.' };
+
+            if (identity.role === 'mitra' && (!Array.isArray(identity.region_ids) || identity.region_ids.length === 0)) {
+                return { error: 'Akses ditolak: wilayah mitra tidak ditemukan.' };
+            }
+
+            const techRes = await resolveTechnician(rawTech);
+            if (!techRes.found) {
+                return { error: techRes.error, available_technicians: techRes.available };
+            }
+            const tech = techRes.technician;
+
+            const params = [rawNum, `%${rawNum}%`];
+            const conditions = [
+                `(
+                    UPPER(COALESCE(st.ticket_number, '')) = UPPER($1)
+                    OR st.id::text = $1
+                    OR (st.status NOT IN ('resolved', 'closed') AND (st.customer_name ILIKE $2 OR s.service_number = $1))
+                )`
+            ];
+
+            if (identity.role === 'mitra') {
+                params.push(identity.region_ids);
+                conditions.push(`s.region_id = ANY($${params.length}::uuid[])`);
+            }
+
+            const res = await query(
+                `SELECT DISTINCT ON (st.id)
+                    st.id, st.ticket_number, st.customer_name, st.customer_phone,
+                    st.subject, st.status, st.assigned_to
+                 FROM support_tickets st
+                 LEFT JOIN services s ON s.customer_id = st.customer_id
+                 WHERE ${conditions.join(' AND ')}
+                 ORDER BY st.id DESC
+                 LIMIT 5`,
+                params
+            );
+
+            if (!res.rows || res.rows.length === 0) {
+                return { error: `Tiket aktif untuk "${rawNum}" tidak ditemukan di wilayah akses Anda.` };
+            }
+
+            if (res.rows.length > 1 && String(res.rows[0].ticket_number || '').toUpperCase() !== rawNum.toUpperCase() && String(res.rows[0].id) !== rawNum) {
+                return {
+                    status: 'disambiguation_required',
+                    message: `Ditemukan beberapa tiket aktif yang cocok dengan "${rawNum}". Mohon sebutkan nomor tiket yang spesifik:`,
+                    candidates: res.rows.map(t => ({
+                        ticket_number: t.ticket_number || `#${t.id}`,
+                        customer_name: t.customer_name,
+                        subject: t.subject,
+                        status: t.status
+                    }))
+                };
+            }
+
+            const ticket = res.rows[0];
+            const summary = [
+                'Aksi: Tugaskan Tiket Gangguan ke Teknisi',
+                `Tiket: ${ticket.ticket_number || '#' + ticket.id}`,
+                `Pelanggan: ${ticket.customer_name || '-'} (${ticket.customer_phone || '-'})`,
+                `Subjek: ${ticket.subject}`,
+                `Teknisi Tujuan: ${tech.username} (${tech.phone || '-'})`,
+                `Status Baru: in_progress`,
+                args?.note ? `Catatan: ${args.note}` : null
+            ].filter(Boolean).join('\n');
+
+            const pending = await createPendingAction({
+                identity,
+                tool: 'assign_ticket',
+                args: {
+                    ticket_id: ticket.id,
+                    ticket_number: ticket.ticket_number || `#${ticket.id}`,
+                    customer_name: ticket.customer_name,
+                    subject: ticket.subject,
+                    assigned_to: tech.username,
+                    assigned_to_user: tech.id,
+                    technician_phone: tech.phone || '',
+                    note: args?.note || ''
+                },
+                summary,
+                previewOnly
+            });
+
+            ctx.createdPendingAction = pending;
+            return pending;
+        }
+    },
+    {
+        name: 'update_ticket_status',
+        kind: 'write',
+        roles: ['superadmin', 'admin', 'mitra', 'technician'],
+        description: 'Ubah status tiket support/gangguan (open, in_progress, pending, resolved, closed) beserta catatan penyelesaian, dan opsional tugaskan teknisi. Wajib konfirmasi YA.',
+        parameters: {
+            type: 'object',
+            properties: {
+                ticket_number: {
+                    type: 'string',
+                    description: 'Nomor tiket, ID tiket, atau nama pelanggan yang memiliki tiket aktif'
                 },
                 status: {
                     type: 'string',
@@ -681,13 +1130,17 @@ const writeTools = [
                 note: {
                     type: 'string',
                     description: 'Catatan progres atau penyelesaian tiket'
+                },
+                assign_to: {
+                    type: 'string',
+                    description: 'Nama/username teknisi jika sekaligus ingin menugaskan tiket ke teknisi (opsional)'
                 }
             },
             required: ['ticket_number', 'status']
         },
         async run(ctx, args) {
             const { identity, previewOnly } = ctx;
-            const rawNum = String(args?.ticket_number || '').trim().replace(/^#/, '');
+            const rawNum = String(args?.ticket_number || args?.ticket_query || args?.customer_query || '').trim().replace(/^#/, '');
             const newStatus = String(args?.status || '').trim().toLowerCase();
             const validStatuses = ['open', 'in_progress', 'pending', 'resolved', 'closed'];
 
@@ -696,8 +1149,23 @@ const writeTools = [
                 return { error: `Status tidak valid. Pilih salah satu: ${validStatuses.join(', ')}` };
             }
 
-            const params = [rawNum];
-            const conditions = [`(UPPER(COALESCE(st.ticket_number, '')) = UPPER($1) OR st.id::text = $1)`];
+            let assignedTech = null;
+            if (args?.assign_to && String(args.assign_to).trim()) {
+                const techRes = await resolveTechnician(args.assign_to);
+                if (!techRes.found) {
+                    return { error: techRes.error, available_technicians: techRes.available };
+                }
+                assignedTech = techRes.technician;
+            }
+
+            const params = [rawNum, `%${rawNum}%`];
+            const conditions = [
+                `(
+                    UPPER(COALESCE(st.ticket_number, '')) = UPPER($1)
+                    OR st.id::text = $1
+                    OR (st.status NOT IN ('resolved', 'closed') AND (st.customer_name ILIKE $2 OR s.service_number = $1))
+                )`
+            ];
 
             if (identity.role === 'technician') {
                 params.push(identity.tech_user_id || -1);
@@ -714,16 +1182,31 @@ const writeTools = [
             }
 
             const res = await query(
-                `SELECT st.id, st.ticket_number, st.customer_name, st.subject, st.status
+                `SELECT DISTINCT ON (st.id)
+                    st.id, st.ticket_number, st.customer_name, st.subject, st.status, st.assigned_to
                  FROM support_tickets st
                  LEFT JOIN services s ON s.customer_id = st.customer_id
                  WHERE ${conditions.join(' AND ')}
-                 LIMIT 1`,
+                 ORDER BY st.id DESC
+                 LIMIT 5`,
                 params
             );
 
             if (!res.rows || res.rows.length === 0) {
                 return { error: `Tiket "${rawNum}" tidak ditemukan atau di luar cakupan tugas Anda.` };
+            }
+
+            if (res.rows.length > 1 && String(res.rows[0].ticket_number || '').toUpperCase() !== rawNum.toUpperCase() && String(res.rows[0].id) !== rawNum) {
+                return {
+                    status: 'disambiguation_required',
+                    message: `Ditemukan beberapa tiket aktif yang cocok dengan "${rawNum}". Mohon sebutkan nomor tiket yang spesifik:`,
+                    candidates: res.rows.map(t => ({
+                        ticket_number: t.ticket_number || `#${t.id}`,
+                        customer_name: t.customer_name,
+                        subject: t.subject,
+                        status: t.status
+                    }))
+                };
             }
 
             const ticket = res.rows[0];
@@ -733,6 +1216,7 @@ const writeTools = [
                 `Pelanggan: ${ticket.customer_name || '-'}`,
                 `Subjek: ${ticket.subject}`,
                 `Perubahan Status: ${ticket.status} -> ${newStatus}`,
+                assignedTech ? `Ditugaskan ke: ${assignedTech.username} (${assignedTech.phone || '-'})` : null,
                 args?.note ? `Catatan: ${args.note}` : null
             ].filter(Boolean).join('\n');
 
@@ -744,7 +1228,9 @@ const writeTools = [
                     ticket_number: ticket.ticket_number || `#${ticket.id}`,
                     customer_name: ticket.customer_name,
                     status: newStatus,
-                    note: args?.note || ''
+                    note: args?.note || '',
+                    assigned_to: assignedTech ? assignedTech.username : undefined,
+                    assigned_to_user: assignedTech ? assignedTech.id : undefined
                 },
                 summary,
                 previewOnly
@@ -994,5 +1480,6 @@ const writeTools = [
 
 module.exports = {
     writeTools,
-    resolvePaymentMethod
+    resolvePaymentMethod,
+    resolveTechnician
 };

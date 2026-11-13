@@ -123,10 +123,11 @@ function buildSystemPrompt(identity) {
         '3. Untuk pertanyaan keuangan (total omzet, pendapatan, rekap pembayaran/kas, per metode/mitra pada bulan atau tanggal tertentu), panggil tool `get_financial_report`.',
         '4. Untuk daftar tagihan belum lunas / tunggakan, panggil `list_unpaid_invoices` (bisa difilter bulan, mitra, atau wilayah).',
         '5. Untuk daftar pelanggan terisolir pada bulan/tanggal tertentu atau yang sedang terisolir, panggil `list_suspended_services`.',
-        '6. Untuk pembayaran tagihan bulanan biasa, panggil `record_payment`. Jika pelanggan ingin bayar di muka (rapel beberapa bulan, misal "3 bulan bca"), panggil `record_rapel_payment`.',
-        '7. Setiap aksi tulis (record_payment, record_rapel_payment, resend_invoice, update_ticket_status, suspend_service, restore_service) wajib melalui mekanisme kode konfirmasi YA <KODE>.',
-        '8. Jika tool mengembalikan beberapa kandidat pelanggan (disambiguation_required), tampilkan daftar kandidat tersebut dan minta pengirim menyebutkan nomor layanan atau nomor invoice yang dimaksud.',
-        '9. Jangan pernah menyatakan pembayaran atau perubahan telah berhasil disimpan ke database sebelum pengirim mengonfirmasi dengan YA <KODE>.'
+        '6. Untuk pembayaran tagihan bulanan biasa, panggil `record_payment`. Jika pelanggan ingin bayar di muka / rapel (misal "3 bulan bca") atau bayar cepat ketika tidak ada tagihan tertunggak, panggil `record_rapel_payment` (atau `record_payment` yang akan otomatis menyiapkan bayar cepat 1 bulan).',
+        '7. Untuk manajemen tiket gangguan & teknisi: gunakan `list_technicians` untuk melihat daftar teknisi dan beban tiketnya, `list_tickets` untuk mencari tiket (bisa filter status, nama pelanggan, atau teknisi), `create_support_ticket` untuk membuat tiket gangguan baru (bisa langsung assign teknisi), `assign_ticket` untuk menugaskan tiket ke teknisi (otomatis kirim WA ke teknisi), dan `update_ticket_status` untuk mengubah status/menyelesaikan tiket.',
+        '8. Setiap aksi tulis (record_payment, record_rapel_payment, resend_invoice, create_support_ticket, assign_ticket, update_ticket_status, suspend_service, restore_service) wajib melalui mekanisme kode konfirmasi YA <KODE>.',
+        '9. Jika tool mengembalikan beberapa kandidat pelanggan atau tiket (disambiguation_required), tampilkan daftar kandidat tersebut dan minta pengirim menyebutkan nomor layanan, nomor invoice, atau nomor tiket yang dimaksud.',
+        '10. Jangan pernah menyatakan pembayaran, tiket, atau perubahan telah berhasil disimpan ke database sebelum pengirim mengonfirmasi dengan YA <KODE>.'
     ].join('\n');
 }
 

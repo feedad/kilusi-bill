@@ -201,7 +201,11 @@ router.post('/tickets', upload.array('attachments', 5), asyncHandler(async (req,
         description,
         category = 'general',
         priority = 'medium',
-        initial_message
+        initial_message,
+        assigned_to,
+        assigned_agent,
+        assigned_to_user,
+        created_by
     } = req.body;
 
     // Validation
@@ -226,15 +230,33 @@ router.post('/tickets', upload.array('attachments', 5), asyncHandler(async (req,
     }
 
     const ticketNumber = await generateTicketNumber();
+    const assignedToName = assigned_to || assigned_agent || null;
+    const assignedToUserId = assigned_to_user ? Number(assigned_to_user) : null;
+    const initialStatus = (assignedToUserId || assignedToName) ? 'in_progress' : 'open';
+    const creatorName = created_by || req.user?.username || req.user?.name || customer_name || 'System';
 
     const result = await query(`
         INSERT INTO support_tickets (
             ticket_number, customer_id, customer_name, customer_phone, customer_email,
-            customer_address, customer_code, subject, description,
-            category, priority, status
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'open')
+            subject, description, category, priority, status,
+            assigned_to, assigned_to_user, created_by
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         RETURNING *
-    `, [ticketNumber, customer_id || null, customer_name || null, customer_phone || null, customer_email || null, customer_address || null, customer_code || null, subject, description, category, priority]);
+    `, [
+        ticketNumber,
+        customer_id || null,
+        customer_name || null,
+        customer_phone || null,
+        customer_email || null,
+        subject,
+        description,
+        category,
+        priority,
+        initialStatus,
+        assignedToName,
+        assignedToUserId,
+        creatorName
+    ]);
 
     const ticket = result.rows[0];
 
@@ -304,6 +326,27 @@ router.post('/tickets', upload.array('attachments', 5), asyncHandler(async (req,
     } catch (notifError) {
         logger.error(`Failed to send admin/mitra notification for ticket ${ticketNumber}:`, notifError.message);
         // Don't fail the request if notification fails
+    }
+
+    // Send technician notification if assigned during creation
+    if (assignedToUserId) {
+        try {
+            const whatsappNotifications = require('../../../config/whatsapp-notifications');
+            await whatsappNotifications.notifyTechnicianTicketAssignment(assignedToUserId, {
+                ticketNumber: ticketNumber,
+                customerName: customer_name,
+                customerPhone: customer_phone,
+                customerAddress: customer_address,
+                subject: subject,
+                category: category,
+                priority: priority,
+                description: description,
+                status: initialStatus
+            });
+            logger.info(`📱 Technician (${assignedToUserId}) notified about new ticket ${ticketNumber}`);
+        } catch (notifError) {
+            logger.error(`Failed to send technician notification for new ticket ${ticketNumber}:`, notifError.message);
+        }
     }
     return res.sendCreated({ ticket }, meta);
 }));
@@ -437,8 +480,8 @@ router.post('/tickets/:id/messages', async (req, res) => {
 // PUT /api/v1/support/tickets/:id - Update ticket status
 router.put('/tickets/:id', asyncHandler(async (req, res) => {
     const ticketId = req.params.id;
-    const { status, assigned_agent, assigned_to_user, taken_over_reason, resolution_time } = req.body;
-
+    const { status, assigned_agent, assigned_to, assigned_to_user, taken_over_reason, resolution_time } = req.body;
+    const effectiveAssignedTo = assigned_to !== undefined ? assigned_to : assigned_agent;
     const validStatuses = ['open', 'in_progress', 'pending', 'resolved', 'closed'];
     if (status && !validStatuses.includes(status)) {
         return res.sendValidationErrors([{
@@ -472,9 +515,9 @@ router.put('/tickets/:id', asyncHandler(async (req, res) => {
         updates.push(`status = $${paramIndex++}`);
         values.push(status);
     }
-    if (assigned_agent) {
-        updates.push(`assigned_agent = $${paramIndex++}`);
-        values.push(assigned_agent);
+    if (effectiveAssignedTo !== undefined) {
+        updates.push(`assigned_to = $${paramIndex++}`);
+        values.push(effectiveAssignedTo);
     }
     if (assigned_to_user !== undefined) {
         updates.push(`assigned_to_user = $${paramIndex++}`);
@@ -530,7 +573,7 @@ router.put('/tickets/:id', asyncHandler(async (req, res) => {
                         customerName: customerResult.rows[0].customer_name,
                         ticketNumber: updatedTicket.ticket_number,
                         newStatus: statusText,
-                        assignedAgent: assigned_agent || customerResult.rows[0].assigned_to || 'Tim Support',
+                        assignedAgent: effectiveAssignedTo || customerResult.rows[0].assigned_to || 'Tim Support',
                         updateMessage: resolution_time || 'Terima kasih telah melapor.'
                     }
                 );
@@ -554,7 +597,7 @@ router.put('/tickets/:id', asyncHandler(async (req, res) => {
                 customerAddress: updatedTicket.customer_address,
                 subject: updatedTicket.subject,
                 category: updatedTicket.category,
-                technicianName: assigned_agent || updatedTicket.assigned_to || 'Tim Support',
+                technicianName: effectiveAssignedTo || updatedTicket.assigned_to || 'Tim Support',
                 resolutionNotes: req.body.resolution || req.body.notes || 'Kendala telah diselesaikan oleh tim teknisi.'
             });
             logger.info(`📱 Admin & Mitra notified about resolved ticket ${updatedTicket.ticket_number}`);
@@ -568,11 +611,12 @@ router.put('/tickets/:id', asyncHandler(async (req, res) => {
         try {
             // Get full ticket details for technician notification
             const ticketDetailsResult = await query(`
-                SELECT st.*, u.name as admin_name
+                SELECT st.*, u.username as admin_name, c.address as customer_address
                 FROM support_tickets st
                 LEFT JOIN users u ON u.id = $1
+                LEFT JOIN customers c ON c.id = st.customer_id
                 WHERE st.id = $2
-            `, [adminId, ticketId]);
+            `, [adminId || null, ticketId]);
 
             if (ticketDetailsResult.rows.length > 0) {
                 const ticketData = ticketDetailsResult.rows[0];
@@ -585,6 +629,7 @@ router.put('/tickets/:id', asyncHandler(async (req, res) => {
                     ticketNumber: ticketData.ticket_number,
                     customerName: ticketData.customer_name,
                     customerPhone: ticketData.customer_phone,
+                    customerAddress: ticketData.customer_address,
                     subject: ticketData.subject,
                     category: ticketData.category,
                     priority: ticketData.priority,

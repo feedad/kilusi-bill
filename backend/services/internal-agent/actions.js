@@ -150,7 +150,7 @@ async function executeWriteAction(identity, pendingRow) {
         'Content-Type': 'application/json'
     };
 
-    if (tool === 'record_payment') {
+    if (tool === 'record_payment' && !args.is_rapel) {
         const invoices = Array.isArray(args.invoices) && args.invoices.length > 0
             ? args.invoices
             : [{
@@ -201,7 +201,7 @@ async function executeWriteAction(identity, pendingRow) {
         };
     }
 
-    if (tool === 'record_rapel_payment') {
+    if (tool === 'record_rapel_payment' || (tool === 'record_payment' && args.is_rapel)) {
         const noteParts = [];
         if (args.notes) noteParts.push(args.notes);
         noteParts.push(`Rapel ${args.months} bulan via Asisten WA oleh ${identity.name} (${identity.role})`);
@@ -256,6 +256,76 @@ async function executeWriteAction(identity, pendingRow) {
         };
     }
 
+    if (tool === 'create_support_ticket') {
+        const payload = {
+            customer_id: args.customer_id || null,
+            customer_name: args.customer_name || null,
+            customer_phone: args.customer_phone || null,
+            customer_email: args.customer_email || null,
+            customer_address: args.customer_address || null,
+            subject: args.subject,
+            description: args.description || args.subject,
+            category: args.category || 'technical',
+            priority: args.priority || 'medium',
+            assigned_to: args.assigned_to || null,
+            assigned_to_user: args.assigned_to_user || null,
+            created_by: `${identity.name} (WA Agent)`
+        };
+
+        const res = await axios.post(`${baseUrl}/support/tickets`, payload, {
+            headers,
+            timeout: 20000
+        });
+
+        const ticket = res.data?.data?.ticket || {};
+        return {
+            ok: true,
+            message: [
+                'TIKET GANGGUAN BERHASIL DIBUAT',
+                `No. Tiket: ${ticket.ticket_number || '-'}`,
+                `Pelanggan: ${args.customer_name || '-'} (${args.service_number || '-'})`,
+                `Subjek: ${args.subject}`,
+                `Kategori / Prioritas: ${args.category || 'technical'} / ${args.priority || 'medium'}`,
+                `Status: ${ticket.status || (args.assigned_to ? 'in_progress' : 'open')}`,
+                `Teknisi: ${args.assigned_to ? `${args.assigned_to} (${args.technician_phone || '-'})` : 'Belum ditugaskan'}`,
+                `Dibuat oleh: ${identity.name}`
+            ].join('\n'),
+            data: res.data
+        };
+    }
+
+    if (tool === 'assign_ticket') {
+        const reasonText = args.note
+            ? `${args.note} (Ditugaskan oleh ${identity.name} via Asisten WA)`
+            : `Ditugaskan ke ${args.assigned_to} oleh ${identity.name} via Asisten WA`;
+
+        const payload = {
+            status: 'in_progress',
+            assigned_to: args.assigned_to,
+            assigned_to_user: args.assigned_to_user,
+            taken_over_reason: reasonText
+        };
+
+        const res = await axios.put(
+            `${baseUrl}/support/tickets/${encodeURIComponent(args.ticket_id)}`,
+            payload,
+            { headers, timeout: 15000 }
+        );
+        return {
+            ok: true,
+            message: [
+                'TIKET BERHASIL DITUGASKAN KE TEKNISI',
+                `Tiket: ${args.ticket_number || '#' + args.ticket_id}`,
+                `Pelanggan: ${args.customer_name || '-'}`,
+                `Subjek: ${args.subject || '-'}`,
+                `Teknisi: ${args.assigned_to} (${args.technician_phone || '-'})`,
+                `Status: in_progress`,
+                `Catatan: ${reasonText}`
+            ].join('\n'),
+            data: res.data
+        };
+    }
+
     if (tool === 'update_ticket_status') {
         const noteText = args.note
             ? `${args.note} (oleh ${identity.name} via Asisten WA)`
@@ -265,6 +335,12 @@ async function executeWriteAction(identity, pendingRow) {
             status: args.status,
             resolution_time: noteText
         };
+        if (args.assigned_to !== undefined) {
+            payload.assigned_to = args.assigned_to;
+        }
+        if (args.assigned_to_user !== undefined) {
+            payload.assigned_to_user = args.assigned_to_user;
+        }
         const res = await axios.put(
             `${baseUrl}/support/tickets/${encodeURIComponent(args.ticket_id)}`,
             payload,
@@ -277,8 +353,9 @@ async function executeWriteAction(identity, pendingRow) {
                 `Tiket: ${args.ticket_number || '#' + args.ticket_id}`,
                 `Pelanggan: ${args.customer_name || '-'}`,
                 `Status Baru: ${args.status}`,
+                args.assigned_to ? `Teknisi: ${args.assigned_to}` : null,
                 `Catatan: ${noteText}`
-            ].join('\n'),
+            ].filter(Boolean).join('\n'),
             data: res.data
         };
     }

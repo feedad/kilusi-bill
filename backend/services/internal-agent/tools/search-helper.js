@@ -25,6 +25,7 @@ const NOISE_WORDS = [
     'proses', 'proseskan', 'tagihan', 'tagihannya', 'invoice',
     'sudah', 'telah', 'udah', 'udh', 'sdh',
     'bayar', 'dibayar', 'bayarkan', 'lunas', 'melunasi',
+    'rapel', 'rapelkan', 'cepat', 'dimuka', 'muka', 'perpanjang', 'perpanjangan', 'bulan', 'bln',
     'via', 'lewat', 'melalui', 'pake', 'pakai',
     'atas', 'nama', 'an', 'a.n', 'a/n', 'pelanggan', 'customer', 'cust',
     'tolong', 'mohon', 'bantu', 'min', 'bot', 'admin', 'tolong bantu',
@@ -229,7 +230,7 @@ async function parseShorthandQuery(text) {
     let extractedMethod = null;
     let extractedRegion = null;
 
-    // 1. Detect rapel period: "N bulan" / "N bln" / "rapel N"
+    // 1. Detect rapel period: "N bulan" / "N bln" / "rapel N" / "bayar cepat" / "bayar di muka" / "perpanjang"
     const rapelMatch = working.match(/\b(?:rapel\s*)?(\d{1,2})\s*(?:bulan|bln)\b/i) ||
                        working.match(/\brapel\s+(\d{1,2})\b/i);
     if (rapelMatch) {
@@ -237,6 +238,12 @@ async function parseShorthandQuery(text) {
         if (m >= 1 && m <= 12) {
             extractedMonths = m;
             working = working.replace(rapelMatch[0], ' ');
+        }
+    } else {
+        const quickPayMatch = working.match(/\b(bayar\s+cepat|bayar\s+di\s*muka|rapelkan|rapel|perpanjangan|perpanjang)\b/i);
+        if (quickPayMatch) {
+            extractedMonths = 1;
+            working = working.replace(quickPayMatch[0], ' ');
         }
     }
 
@@ -533,9 +540,9 @@ async function resolveCustomerAndRegion(queryText, options = {}) {
         extractedMethod: parsed.extractedMethod,
         extractedMonths: parsed.extractedMonths,
         extractedRegion: parsed.extractedRegion,
+        isRapel: parsed.isRapel,
         found: true,
         customer: isSingleMatch ? uniqueCandidates[0] : null,
-        candidates: uniqueCandidates,
         candidateCount: uniqueCandidates.length
     };
 }

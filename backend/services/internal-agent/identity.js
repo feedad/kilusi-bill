@@ -5,6 +5,8 @@ const ALL_WRITE_TOOLS = [
     'record_payment',
     'record_rapel_payment',
     'resend_invoice',
+    'create_support_ticket',
+    'assign_ticket',
     'update_ticket_status',
     'suspend_service',
     'restore_service'

@@ -951,6 +951,14 @@ const readTools = [
                 status: {
                     type: 'string',
                     description: 'Filter status tiket: open, in_progress, pending, resolved, closed, atau kosongkan untuk tiket aktif'
+                },
+                customer_query: {
+                    type: 'string',
+                    description: 'Filter nama pelanggan, nomor HP, nomor layanan, atau nomor tiket (opsional)'
+                },
+                technician_query: {
+                    type: 'string',
+                    description: 'Filter nama/username teknisi yang ditugaskan (opsional, misal: "geding")'
                 }
             }
         },
@@ -969,6 +977,20 @@ const readTools = [
             } else {
                 conditions.push(`st.status NOT IN ('resolved', 'closed')`);
             }
+            if (args?.customer_query && String(args.customer_query).trim()) {
+                const cq = String(args.customer_query).trim();
+                params.push(cq);
+                const exactIdx = params.length;
+                params.push(`%${cq}%`);
+                const likeIdx = params.length;
+                conditions.push(`(st.customer_name ILIKE $${likeIdx} OR st.customer_phone ILIKE $${likeIdx} OR st.ticket_number ILIKE $${likeIdx} OR s.service_number = $${exactIdx})`);
+            }
+
+            if (args?.technician_query && String(args.technician_query).trim()) {
+                params.push(`%${String(args.technician_query).trim()}%`);
+                const tIdx = params.length;
+                conditions.push(`(u.username ILIKE $${tIdx} OR st.assigned_to ILIKE $${tIdx})`);
+            }
 
             if (identity.role === 'technician') {
                 params.push(identity.tech_user_id || -1);
@@ -980,7 +1002,6 @@ const readTools = [
                 params.push(identity.region_ids);
                 conditions.push(`s.region_id = ANY($${params.length}::uuid[])`);
             }
-
             const whereSql = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
             const res = await query(
                 `SELECT DISTINCT ON (st.id)
@@ -1021,6 +1042,43 @@ const readTools = [
                     assigned_to: t.assigned_username || t.assigned_to || '-',
                     region_name: t.region_name || '-',
                     created_at: formatDateId(t.created_at)
+                }))
+            };
+        }
+    },
+    {
+        name: 'list_technicians',
+        kind: 'read',
+        roles: ['superadmin', 'admin', 'mitra', 'technician'],
+        description: 'Daftar teknisi yang terdaftar beserta nomor HP dan jumlah tiket aktif (open/in_progress) yang sedang ditangani.',
+        parameters: {
+            type: 'object',
+            properties: {}
+        },
+        async run() {
+            const res = await query(
+                `SELECT
+                    u.id,
+                    u.username,
+                    COALESCE(m.name, u.username) AS name,
+                    COALESCE(u.phone, m.phone, '-') AS phone,
+                    COUNT(DISTINCT st.id) FILTER (WHERE st.status NOT IN ('resolved', 'closed'))::int AS active_tickets
+                 FROM users u
+                 LEFT JOIN ai_agent_members m ON m.member_type = 'technician' AND (m.ref_id = u.id::text OR LOWER(m.name) = LOWER(u.username)) AND m.enabled = true
+                 LEFT JOIN support_tickets st ON (st.assigned_to_user = u.id OR LOWER(COALESCE(st.assigned_to, '')) = LOWER(u.username))
+                 WHERE u.role = 'technician'
+                 GROUP BY u.id, u.username, m.name, u.phone, m.phone
+                 ORDER BY u.username ASC`
+            );
+
+            return {
+                count: res.rows?.length || 0,
+                technicians: (res.rows || []).map(t => ({
+                    id: t.id,
+                    username: t.username,
+                    name: t.name,
+                    phone: t.phone || '-',
+                    active_tickets: t.active_tickets || 0
                 }))
             };
         }

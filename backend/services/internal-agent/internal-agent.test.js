@@ -130,6 +130,12 @@ describe('Internal WhatsApp AI Agent - Smart Search Helper & Date Parser', () =>
         const q3 = await parseShorthandQuery('lunas pakde bri');
         expect(q3.cleanedName).toBe('pakde');
         expect(q3.extractedMethod).toBe('bri');
+
+        const q4 = await parseShorthandQuery('bayar cepat dhonny bca');
+        expect(q4.cleanedName).toBe('dhonny');
+        expect(q4.extractedMonths).toBe(1);
+        expect(q4.extractedMethod).toBe('bca');
+        expect(q4.isRapel).toBe(true);
     });
 
     test('buildFuzzyNameRegex matches phonetic and doubled consonants variants', () => {
@@ -199,5 +205,26 @@ describe('Internal WhatsApp AI Agent - New Tools Registration & Permissions', ()
             allowed_write_tools: ['record_rapel_payment']
         };
         expect(canExecuteTool(technician, tool)).toBe(false);
+    });
+
+    test('list_technicians, create_support_ticket, and assign_ticket tools are registered with proper role guards', () => {
+        const listTechs = TOOL_MAP.get('list_technicians');
+        const createTicket = TOOL_MAP.get('create_support_ticket');
+        const assignTicket = TOOL_MAP.get('assign_ticket');
+
+        expect(listTechs).toBeDefined();
+        expect(listTechs.kind).toBe('read');
+        expect(canExecuteTool({ role: 'superadmin', can_read: true }, listTechs)).toBe(true);
+        expect(canExecuteTool({ role: 'mitra', can_read: true }, listTechs)).toBe(true);
+        expect(canExecuteTool({ role: 'technician', can_read: true }, listTechs)).toBe(true);
+
+        expect(createTicket).toBeDefined();
+        expect(createTicket.kind).toBe('write');
+        expect(canExecuteTool({ role: 'technician', can_read: true, can_write: true, allowed_write_tools: ['create_support_ticket'] }, createTicket)).toBe(true);
+
+        expect(assignTicket).toBeDefined();
+        expect(assignTicket.kind).toBe('write');
+        expect(canExecuteTool({ role: 'admin', can_read: true, can_write: true, allowed_write_tools: ['assign_ticket'] }, assignTicket)).toBe(true);
+        expect(canExecuteTool({ role: 'technician', can_read: true, can_write: true, allowed_write_tools: ['assign_ticket'] }, assignTicket)).toBe(false);
     });
 });
