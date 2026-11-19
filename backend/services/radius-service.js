@@ -4,6 +4,7 @@ const snmpMonitor = require('../config/snmp-monitor');
 const radiusDb = require('../config/radius-postgres');
 const { exec } = require('child_process');
 const util = require('util');
+const { SESSION_STALE_SQL } = require('../config/radius-window');
 const execPromise = util.promisify(exec);
 
 class RadiusService {
@@ -298,7 +299,7 @@ class RadiusService {
      * Get Active Sessions (from radacct)
      */
     async getActiveSessions() {
-        const result = await query("SELECT * FROM radacct WHERE acctstoptime IS NULL AND acctupdatetime IS NOT NULL AND acctupdatetime >= NOW() - INTERVAL '30 minutes' ORDER BY acctstarttime DESC");
+        const result = await query(`SELECT * FROM radacct WHERE acctstoptime IS NULL AND acctupdatetime IS NOT NULL AND acctupdatetime >= NOW() - ${SESSION_STALE_SQL} ORDER BY acctstarttime DESC`);
         return result.rows;
     }
 
@@ -348,7 +349,7 @@ class RadiusService {
                 WHERE username = $1
                 AND acctstoptime IS NULL
                 AND acctupdatetime IS NOT NULL
-                AND acctupdatetime >= NOW() - INTERVAL '30 minutes'
+                AND acctupdatetime >= NOW() - ${SESSION_STALE_SQL}
                 ORDER BY radacctid DESC
                 LIMIT 1
             `;

@@ -10,6 +10,7 @@ const { query } = require('../../../config/database');
 const { asyncHandler } = require('../../../middleware/response');
 const genieacsApi = require('../../../config/genieacs');
 const axios = require('axios');
+const { SESSION_STALE_SQL } = require('../../../config/radius-window');
 
 // Helper function to validate MAC address format
 function isValidMacAddress(mac) {
@@ -386,7 +387,7 @@ router.get('/online-customers', async (req, res) => {
                 FROM radacct
                 WHERE acctstoptime IS NULL
                   AND acctupdatetime IS NOT NULL
-                  AND acctupdatetime >= NOW() - INTERVAL '30 minutes'
+                  AND acctupdatetime >= NOW() - ${SESSION_STALE_SQL}
                 ORDER BY username, acctstarttime DESC
             `;
 
@@ -844,7 +845,7 @@ router.post('/coa', async (req, res) => {
             WHERE username = $1
             AND acctstoptime IS NULL
             AND acctupdatetime IS NOT NULL
-            AND acctupdatetime >= NOW() - INTERVAL '30 minutes'
+            AND acctupdatetime >= NOW() - ${SESSION_STALE_SQL}
             ORDER BY acctstarttime DESC
             LIMIT 1
         `;
@@ -1382,7 +1383,7 @@ router.get('/online-status', asyncHandler(async (req, res) => {
             FROM radacct
             WHERE acctstoptime IS NULL
               AND acctupdatetime IS NOT NULL
-              AND acctupdatetime >= NOW() - INTERVAL '30 minutes'
+              AND acctupdatetime >= NOW() - ${SESSION_STALE_SQL}
             ORDER BY acctstarttime DESC
         `;
 

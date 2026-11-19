@@ -5,6 +5,7 @@
 
 const { query, getOne, getAll, transaction } = require('./database');
 const { logger } = require('./logger');
+const { SESSION_STALE_SQL } = require('./radius-window');
 
 let initialized = false;
 
@@ -270,7 +271,7 @@ async function getActivePPPoEConnections() {
             FROM radacct
             WHERE acctstoptime IS NULL
               AND acctupdatetime IS NOT NULL
-              AND acctupdatetime >= NOW() - INTERVAL '30 minutes'
+              AND acctupdatetime >= NOW() - ${SESSION_STALE_SQL}
             ORDER BY acctstarttime DESC
         `);
 
@@ -306,7 +307,7 @@ async function getUserConnectionStatus(username) {
             FROM radacct
             WHERE username = $1 AND acctstoptime IS NULL
               AND acctupdatetime IS NOT NULL
-              AND acctupdatetime >= NOW() - INTERVAL '30 minutes'
+              AND acctupdatetime >= NOW() - ${SESSION_STALE_SQL}
             ORDER BY acctstarttime DESC
             LIMIT 1
         `, [username]);
@@ -482,7 +483,7 @@ async function getOnlineUsersByGroup() {
             JOIN radgroup rg ON rug.groupname = rg.groupname
             WHERE ra.acctstoptime IS NULL
               AND ra.acctupdatetime IS NOT NULL
-              AND ra.acctupdatetime >= NOW() - INTERVAL '30 minutes'
+              AND ra.acctupdatetime >= NOW() - ${SESSION_STALE_SQL}
             GROUP BY rg.groupname
             ORDER BY rg.groupname
         `);

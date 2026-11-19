@@ -641,7 +641,10 @@ async function createVoucherRadiusEntries(voucher) {
  * again match and update the row.
  *
  * SAFETY: Only reopens sessions stopped recently (<2 days) for customers with
- *         active service status and no existing active radacct entry.
+ *         active service status and no existing active radacct entry, and only
+ *         when the stop reason is a restart artifact ('NAS-Reboot'). Ordinary
+ *         disconnects and legitimate stale-cleanup closures stay closed, so
+ *         recovering them does not fake an online status for offline customers.
  */
 async function reopenStoppedSessions() {
   const { query } = require('./database');
@@ -658,8 +661,8 @@ async function reopenStoppedSessions() {
         JOIN technical_details td ON td.pppoe_username = r2.username
         JOIN services s ON s.id = td.service_id
         WHERE s.status = 'active'
-          AND r2.acctstoptime IS NOT NULL
           AND r2.acctstoptime > NOW() - INTERVAL '2 days'
+          AND r2.acctterminatecause IN ('NAS-Reboot', 'Reopened-After-Restart')
           AND NOT EXISTS (
             SELECT 1 FROM radacct r3
             WHERE r3.username = r2.username

@@ -6,16 +6,22 @@
  * in radacct table with acctstoptime = NULL forever.
  * 
  * Solution: Periodically clean up sessions that haven't received
- * an interim update within the configured threshold (default: 30 minutes).
+ * an interim update within the configured threshold.
+ *
+ * The threshold comes from config/radius-window.js and must stay above the
+ * NAS Accounting Interim-Update interval (currently 1 hour). A shorter
+ * threshold closes live sessions every hour and makes every customer look
+ * offline in the billing UI.
  */
 
 const { query } = require('../config/database');
 const { logger } = require('../config/logger');
+const { SESSION_STALE_MINUTES, SESSION_STALE_SQL } = require('../config/radius-window');
 
 class RadiusSessionCleanup {
     constructor() {
         // Sessions older than this without update are considered stale
-        this.staleThresholdMinutes = parseInt(process.env.RADIUS_STALE_THRESHOLD_MINUTES) || 30;
+        this.staleThresholdMinutes = SESSION_STALE_MINUTES;
         // Run cleanup every this many minutes
         this.cleanupIntervalMinutes = parseInt(process.env.RADIUS_CLEANUP_INTERVAL_MINUTES) || 15;
         this.timer = null;
@@ -71,7 +77,7 @@ class RadiusSessionCleanup {
                 SELECT COUNT(*) as stale_count, COUNT(DISTINCT username) as stale_users
                 FROM radacct
                 WHERE acctstoptime IS NULL
-                  AND acctupdatetime < NOW() - INTERVAL '${this.staleThresholdMinutes} minutes'
+                  AND acctupdatetime < NOW() - ${SESSION_STALE_SQL}
             `);
             const staleCount = parseInt(countResult.rows[0].stale_count);
             const staleUsers = parseInt(countResult.rows[0].stale_users);
@@ -94,7 +100,7 @@ class RadiusSessionCleanup {
                     acctsessiontime = EXTRACT(EPOCH FROM (acctupdatetime - acctstarttime)),
                     acctterminatecause = 'Stale Session Cleanup'
                 WHERE acctstoptime IS NULL
-                  AND acctupdatetime < NOW() - INTERVAL '${this.staleThresholdMinutes} minutes'
+                  AND acctupdatetime < NOW() - ${SESSION_STALE_SQL}
             `);
 
             const cleanedCount = updateResult.rowCount;
