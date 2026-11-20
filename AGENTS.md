@@ -288,6 +288,8 @@ Production runs on 3 servers:
 - **ISOLIR group**: UPPERCASE `ISOLIR` is the standard (matches MikroTik PPPoE profile). Lowercase `isolir` entries are legacy/wrong. Valid groups in `radgroup`: `ISOLIR`, `HOTSPOT_DEFAULT`, `UPTO-10M`, `UPTO-15M`, `UPTO-25M`, `UPTO-40M`.
 - **Suspension/restore search pattern**: Find RADIUS username via `SELECT username FROM radcheck WHERE LOWER(username) LIKE LOWER(service_number || '%')` — prefix match, not exact match.
 - **Upgrade/downgrade package**: `PUT /customers/:id` (package change) → `customer-service.js` updates `radusergroup` + sends CoA. But `POST /customers/:id/services` (add service) originally did NOT emit `customer:upsert` → PPPoE not synced to `radcheck`. **FIXED**: now emits event after service creation.
+- **Accounting timestamps**: NAS (KILUSI-TLG 192.168.99.6) advertises `Event-Timestamp` ~7h behind real UTC (WIB clock labelled UTC). `/etc/freeradius/3.0/mods-config/sql/main/postgresql/queries.conf` MUST use `NOW()` instead of `${....event_timestamp}` — otherwise every radacct row looks stale and cleanup closes live sessions. Patched copy versioned at `freeradius/config/mods-config/sql/main/postgresql/queries.conf`, installed by `freeradius/install-freeradius.sh`.
+- **interim-update = upsert**: `INSERT ... ON CONFLICT (AcctUniqueId) DO UPDATE SET AcctStopTime = NULL, ...`. MikroTik often sends only Interim-Update (no Start), so an UPDATE-only interim query leaves closed/purged sessions permanently missing → all customers show offline. Verify: `SELECT count(*) FILTER (WHERE acctstoptime IS NULL) FROM radacct` and `max(acctupdatetime) ≈ now()`.
 
 ### Payment System
 
