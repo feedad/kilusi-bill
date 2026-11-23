@@ -42,6 +42,8 @@ type OnuChangeItem = {
     pppoe_username?: string | null
     old_mac?: string | null
     new_mac?: string | null
+    write_supported?: boolean
+    write_note?: string | null
     message?: string | null
 }
 
@@ -87,8 +89,11 @@ export function OnuChangeDialog({
     const itemKey = (item: OnuChangeItem, index: number) =>
         `${item.action}|${item.olt_id || '-'}|${item.onu_index || '-'}|${item.customer_id || '-'}|${index}`
 
+    const isSelectable = (item: OnuChangeItem) =>
+        item.action !== 'skip' && item.write_supported !== false
+
     const actionable = useMemo(
-        () => items.filter((item) => item.action !== 'skip'),
+        () => items.filter((item) => isSelectable(item)),
         [items]
     )
 
@@ -104,7 +109,7 @@ export function OnuChangeDialog({
 
             const nextSelected: Record<string, boolean> = {}
             list.forEach((item, index) => {
-                nextSelected[itemKey(item, index)] = item.action !== 'skip'
+                nextSelected[itemKey(item, index)] = isSelectable(item)
             })
             setSelected(nextSelected)
         } catch (error: any) {
@@ -134,13 +139,15 @@ export function OnuChangeDialog({
     const toggleAll = () => {
         const next: Record<string, boolean> = {}
         items.forEach((item, index) => {
-            next[itemKey(item, index)] = item.action !== 'skip' ? !allSelected : false
+            next[itemKey(item, index)] = isSelectable(item) ? !allSelected : false
         })
         setSelected(next)
     }
 
     const handleApply = async () => {
-        const chosen = items.filter((item, index) => item.action !== 'skip' && selected[itemKey(item, index)])
+        const chosen = items.filter(
+            (item, index) => isSelectable(item) && selected[itemKey(item, index)]
+        )
         if (chosen.length === 0) {
             toast({ variant: 'destructive', title: 'Tidak ada item', description: 'Pilih minimal satu perubahan.' })
             return
@@ -197,6 +204,9 @@ export function OnuChangeDialog({
                         {summary ? (
                             <>
                                 {summary.total} temuan: {summary.rename_new} ONU baru, {summary.mark_old} ONU lama, {summary.sync_mac} sinkron MAC
+                                {items.some((item) => item.write_supported === false)
+                                    ? ` · ${items.filter((item) => item.write_supported === false).length} perlu diubah manual di web UI OLT`
+                                    : ''}
                                 {summary.olt_errors?.length ? ` · ${summary.olt_errors.length} OLT tidak terbaca` : ''}
                             </>
                         ) : 'Memindai...'}
@@ -252,7 +262,7 @@ export function OnuChangeDialog({
                                         <TableCell>
                                             <Checkbox
                                                 checked={Boolean(selected[key])}
-                                                disabled={item.action === 'skip'}
+                                                disabled={!isSelectable(item)}
                                                 onCheckedChange={() => toggle(key)}
                                             />
                                         </TableCell>
@@ -263,9 +273,16 @@ export function OnuChangeDialog({
                                             </div>
                                         </TableCell>
                                         <TableCell>
-                                            <Badge variant={ACTION_VARIANT[item.action] || 'outline'}>
-                                                {ACTION_LABEL[item.action] || item.action}
-                                            </Badge>
+                                            <div className="flex flex-col gap-1">
+                                                <Badge variant={ACTION_VARIANT[item.action] || 'outline'}>
+                                                    {ACTION_LABEL[item.action] || item.action}
+                                                </Badge>
+                                                {item.write_supported === false && (
+                                                    <Badge variant="outline" className="border-amber-400 text-amber-700">
+                                                        Manual (web UI)
+                                                    </Badge>
+                                                )}
+                                            </div>
                                         </TableCell>
                                         <TableCell className="text-xs">
                                             <div>{item.olt_name || '-'}</div>
@@ -277,7 +294,9 @@ export function OnuChangeDialog({
                                             <div className="font-medium">{item.new_name || '-'}</div>
                                         </TableCell>
                                         <TableCell className="max-w-[260px] text-xs text-muted-foreground">
-                                            {item.message || '-'}
+                                            {item.write_supported === false && item.write_note
+                                                ? item.write_note
+                                                : item.message || '-'}
                                         </TableCell>
                                     </TableRow>
                                 )

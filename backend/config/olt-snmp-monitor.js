@@ -318,6 +318,28 @@ async function findOnuBySn(config, targetSn) {
  * @param {string} index - ONU Index (from findOnuBySn)
  * @param {string} name - New Name/Description
  */
+/**
+ * Whether an OLT accepts SNMP SET for the ONU name.
+ *
+ * HSGQ (EPON) firmware answers every SNMP SET — including a no-op write of the
+ * current value — with `GeneralError` on both read and write communities, so
+ * ONU names there must be changed from the OLT web UI. Verified 2026-11-23 on
+ * 192.168.99.202 (`rlradiusrw`): `1.3.6.1.4.1.50224.3.3.2.1.2.16779298` and
+ * `1.3.6.1.4.1.50224.3.2.1.1.2.16777472` both rejected. Hioso (`.37`) and
+ * C-DATA (`.2`) accept a no-op SET, so writes work there.
+ */
+const RENAME_UNSUPPORTED = {
+  hsgq: 'OLT HSGQ menolak SNMP SET (write community bersifat read-only) — ubah nama ONU lewat web UI OLT.'
+};
+
+function isRenameSupported(vendor) {
+  return !RENAME_UNSUPPORTED[String(vendor || '').toLowerCase()];
+}
+
+function renameUnsupportedReason(vendor) {
+  return RENAME_UNSUPPORTED[String(vendor || '').toLowerCase()] || null;
+}
+
 async function setOnuName(config, index, name) {
   const { host, community = 'private', version = '2c', port = 161, vendor = 'zte' } = config;
   const session = createSession(host, community, version, port);
@@ -328,6 +350,12 @@ async function setOnuName(config, index, name) {
     if (!nameOidBase) {
       session.close();
       return { success: false, message: 'Write not supported for this vendor' };
+    }
+
+    const unsupportedReason = renameUnsupportedReason(vendor);
+    if (unsupportedReason) {
+      session.close();
+      return { success: false, message: unsupportedReason };
     }
 
     const targetOid = `${nameOidBase}.${index}`;
@@ -1161,5 +1189,7 @@ module.exports = {
   getSignalForUsernames,
   isSignalCacheStale,
   rebootOnu,
+  isRenameSupported,
+  renameUnsupportedReason,
   OLT_OIDS
 };

@@ -234,6 +234,14 @@ function macDistance(a, b) {
  *   - customerId: limit to one customer
  * @returns {Object} { items, summary, olts }
  */
+function writeCapability(olt) {
+    const supported = oltMonitor.isRenameSupported(olt?.type);
+    return {
+        write_supported: supported,
+        write_note: supported ? null : oltMonitor.renameUnsupportedReason(olt?.type)
+    };
+}
+
 async function scanOnuChanges(options = {}) {
     const { oltId = null, customerId = null } = options;
 
@@ -358,7 +366,9 @@ async function scanOnuChanges(options = {}) {
                     olt_name: olt.name,
                     olt_ip: olt.host,
                     onu_index: onu.index,
+                    raw_index: onu.rawIndex || null,
                     onu_sn: onu.sn,
+                    ...writeCapability(olt),
                     current_name: currentName,
                     new_name: desiredName,
                     customer_id: row.customer_id,
@@ -381,7 +391,9 @@ async function scanOnuChanges(options = {}) {
             olt_name: olt.name,
             olt_ip: olt.host,
             onu_index: onu.index,
+            raw_index: onu.rawIndex || null,
             onu_sn: onu.sn,
+            ...writeCapability(olt),
             current_name: currentName || null,
             new_name: desiredName,
             customer_id: row.customer_id,
@@ -418,7 +430,9 @@ async function scanOnuChanges(options = {}) {
                 olt_name: olt.name,
                 olt_ip: olt.host,
                 onu_index: oldOnu.index,
+                raw_index: oldOnu.rawIndex || null,
                 onu_sn: oldOnu.sn,
+                ...writeCapability(olt),
                 current_name: String(oldOnu.name || '').trim() || null,
                 new_name: buildOldName(desiredName),
                 customer_id: row.customer_id,
@@ -567,6 +581,20 @@ async function applyOnuChanges(items = [], options = {}) {
             continue;
         }
 
+        const unsupportedReason = oltMonitor.renameUnsupportedReason(olt.type);
+        if (unsupportedReason || item.write_supported === false) {
+            const record = {
+                ...item,
+                status: 'manual',
+                dry_run: dryRun,
+                message: unsupportedReason || item.write_note || 'OLT tidak mendukung rename via SNMP.'
+            };
+            if (!dryRun) await logChange({ ...record, source });
+            results.push(record);
+            skipped++;
+            continue;
+        }
+
         const safeName = sanitizeName(item.new_name);
         if (!safeName) {
             const record = { ...item, status: 'error', dry_run: dryRun, message: 'Nama baru kosong setelah sanitasi.' };
@@ -586,9 +614,12 @@ async function applyOnuChanges(items = [], options = {}) {
         try {
             // Small gap so OLT SNMP agent is not flooded.
             await new Promise(r => setTimeout(r, 250));
+            // `onu_index` can be a human label on some vendors (HSGQ: "8/34"),
+            // while SNMP needs the numeric index (`rawIndex`: 16779298).
+            const snmpIndex = item.raw_index || item.rawIndex || item.onu_index;
             const writeRes = await oltMonitor.setOnuName(
                 oltConfig(olt, { write: true }),
-                item.onu_index,
+                snmpIndex,
                 safeName
             );
             if (!writeRes?.success) {
@@ -600,7 +631,7 @@ async function applyOnuChanges(items = [], options = {}) {
                 new_name: safeName,
                 status: 'success',
                 dry_run: false,
-                message: `Diubah dari "${item.current_name || '-'}" menjadi "${safeName}".`
+                message: `Diubah dari "${item.current_name || '-'}" menjadi "${safeName}" (index SNMP ${snmpIndex}).`
             };
             await logChange({ ...record, source });
 
@@ -660,6 +691,7 @@ async function runAutoSync() {
     const markOld = await isMarkOldEnabled();
     const scan = await scanOnuChanges();
     const actionable = scan.items.filter(item => {
+        if (item.write_supported === false) return false;
         if (item.action === 'rename_new') return true;
         if (item.action === 'mark_old') return markOld;
         return item.action === 'sync_mac';
