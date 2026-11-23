@@ -401,6 +401,42 @@ async function processMessage({ identity, text, previewOnly = false }) {
     };
 }
 
+/**
+ * Keep WhatsApp showing "typing..." while the agent works.
+ *
+ * Baileys presence expires after ~10 seconds, and the agent loop can easily run
+ * 20-60 seconds for multi-tool questions, so the presence is refreshed on an
+ * interval and always paused again in `finally` (also on error).
+ */
+async function withTypingPresence(sock, remoteJid, fn, { refreshMs = 8000 } = {}) {
+    const canPresence = typeof sock?.sendPresenceUpdate === 'function';
+    if (!canPresence) {
+        return fn();
+    }
+
+    const ping = (state) => {
+        try {
+            const maybePromise = sock.sendPresenceUpdate(state, remoteJid);
+            if (maybePromise && typeof maybePromise.catch === 'function') {
+                maybePromise.catch(() => {});
+            }
+        } catch (_) {
+            // presence is best-effort only
+        }
+    };
+
+    ping('composing');
+    const timer = setInterval(() => ping('composing'), refreshMs);
+    if (typeof timer.unref === 'function') timer.unref();
+
+    try {
+        return await fn();
+    } finally {
+        clearInterval(timer);
+        ping('paused');
+    }
+}
+
 async function handleWhatsAppIncoming(sock, remoteJid, senderNumber, messageText) {
     try {
         const cfg = await getAgentConfig();
@@ -439,19 +475,22 @@ async function handleWhatsAppIncoming(sock, remoteJid, senderNumber, messageText
         }
         logger.info(`[InternalAgent] Incoming WA from ${identity.phone} (${identity.role}: ${identity.name}): "${cleanText.slice(0, 120)}"`);
 
-        const result = await processMessage({
-            identity,
-            text: cleanText,
-            previewOnly: false
+        // Show "typing..." in WhatsApp while the agent runs (can take up to ~60s).
+        return await withTypingPresence(sock, remoteJid, async () => {
+            const result = await processMessage({
+                identity,
+                text: cleanText,
+                previewOnly: false
+            });
+
+            if (result.handled && result.reply) {
+                await sock.sendMessage(remoteJid, { text: result.reply });
+                logger.info(`[InternalAgent] Replied to ${remoteJid} (${identity.role}: ${identity.name}, tools: ${result.toolCalls?.length || 0}, tokens: ${result.tokensUsed || 0})`);
+                return { handled: true };
+            }
+
+            return { handled: false };
         });
-
-        if (result.handled && result.reply) {
-            await sock.sendMessage(remoteJid, { text: result.reply });
-            logger.info(`[InternalAgent] Replied to ${remoteJid} (${identity.role}: ${identity.name}, tools: ${result.toolCalls?.length || 0}, tokens: ${result.tokensUsed || 0})`);
-            return { handled: true };
-        }
-
-        return { handled: false };
     } catch (err) {
         logger.error(`[InternalAgent] Error in handleWhatsAppIncoming: ${err.message}`);
         return { handled: false };
@@ -460,6 +499,7 @@ async function handleWhatsAppIncoming(sock, remoteJid, senderNumber, messageText
 
 module.exports = {
     processMessage,
+    withTypingPresence,
     handleWhatsAppIncoming,
     clearSession,
     resolveIdentityByPhone,
