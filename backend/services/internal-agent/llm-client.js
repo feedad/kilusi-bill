@@ -183,7 +183,7 @@ function shouldRetryError(err) {
     return code === 'ECONNABORTED' || code === 'ETIMEDOUT' || code === 'ECONNRESET' || code === 'EAI_AGAIN';
 }
 
-async function chatCompletion({ model, messages, tools = [], toolChoice, tool_choice, temperature = 0.2, overrideConfig = null }) {
+async function chatCompletion({ model, messages, tools = [], toolChoice, tool_choice, temperature = 0.2, max_tokens, maxTokens, overrideConfig = null }) {
     const cfg = overrideConfig ? { ...(await getAgentConfig()), ...overrideConfig } : await getAgentConfig();
     const usageState = await getDailyTokenUsage();
 
@@ -207,6 +207,11 @@ async function chatCompletion({ model, messages, tools = [], toolChoice, tool_ch
         temperature,
         stream: false
     };
+
+    const tokenLimit = Number(max_tokens ?? maxTokens);
+    if (Number.isFinite(tokenLimit) && tokenLimit > 0) {
+        payload.max_tokens = tokenLimit;
+    }
 
     if (Array.isArray(tools) && tools.length > 0) {
         payload.tools = tools;

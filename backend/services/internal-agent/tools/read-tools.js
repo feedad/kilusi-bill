@@ -1,7 +1,15 @@
 const { query } = require('../../../config/database');
 const radiusPostgres = require('../../../config/radius-postgres');
+const { SESSION_STALE_SQL } = require('../../../config/radius-window');
 const { formatRp } = require('../actions');
-const { parseDateRange } = require('./search-helper');
+const { parseDateRange, resolveCustomerAndRegion } = require('./search-helper');
+const {
+    classifyRx,
+    normalizeRx,
+    resolveOnuSignal,
+    hasFreshCache,
+    refreshSignalCache
+} = require('./onu-signal-helper');
 
 function formatDateId(val) {
     if (!val) return '-';
@@ -27,13 +35,17 @@ const readTools = [
         name: 'search_customers',
         kind: 'read',
         roles: ['superadmin', 'admin', 'mitra', 'technician'],
-        description: 'Cari pelanggan berdasarkan nama, nomor HP, nomor layanan (service_number), PPPoE username, atau alamat.',
+        description: 'Cari pelanggan berdasarkan nama, nomor HP, nomor layanan (service_number), PPPoE username, alamat, atau wilayah/region.',
         parameters: {
             type: 'object',
             properties: {
                 q: {
                     type: 'string',
                     description: 'Kata kunci pencarian (nama pelanggan, nomor HP, nomor layanan, PPPoE, atau alamat)'
+                },
+                region: {
+                    type: 'string',
+                    description: 'Filter wilayah/region opsional (misal "BUKIT CILAJA", "JANALOKA", "PONCOL 1").'
                 }
             },
             required: ['q']
@@ -51,6 +63,13 @@ const readTools = [
             if (identity.role === 'mitra') {
                 params.push(identity.region_ids);
                 scopeClause = `AND s.region_id = ANY($${params.length}::uuid[])`;
+            }
+
+            const regionFilter = String(args?.region || '').trim();
+            if (regionFilter) {
+                params.push(`%${regionFilter}%`);
+                const idx = params.length;
+                scopeClause += ` AND (r.name ILIKE $${idx} OR m.name ILIKE $${idx} OR s.area ILIKE $${idx} OR c.address ILIKE $${idx})`;
             }
 
             const sql = `
@@ -1241,6 +1260,349 @@ const readTools = [
                     mitra_name: row.mitra_name || '-',
                     isolir_date: formatDateId(row.isolir_date)
                 }))
+            };
+        }
+    },
+    {
+        name: 'list_offline_active_customers',
+        kind: 'read',
+        roles: ['superadmin', 'admin', 'mitra', 'technician'],
+        description: 'Daftar pelanggan yang layanannya aktif tetapi koneksi PPPoE-nya sedang offline (tidak ada sesi RADIUS aktif). Bisa difilter per wilayah/region atau mitra. Gunakan ini untuk pertanyaan seperti "pelanggan mana yang aktif tapi offline di Janaloka 8".',
+        parameters: {
+            type: 'object',
+            properties: {
+                region: {
+                    type: 'string',
+                    description: 'Filter wilayah/region (misal "JANALOKA", "BUKIT CILAJA", "PONCOL 2"). Kosongkan untuk semua wilayah.'
+                },
+                mitra: {
+                    type: 'string',
+                    description: 'Filter nama mitra opsional (misal "TALAGA SUNDA").'
+                },
+                limit: {
+                    type: 'number',
+                    description: 'Maksimal baris yang ditampilkan (default 25, maksimal 50).'
+                }
+            }
+        },
+        async run(ctx, args) {
+            const { identity } = ctx;
+            if (!assertMitraHasRegions(identity)) {
+                return { count: 0, total: 0, customers: [], note: 'Tidak ada wilayah mitra yang terhubung.' };
+            }
+
+            const limit = Math.min(50, Math.max(1, parseInt(args?.limit, 10) || 25));
+            const params = [];
+            const conditions = [
+                `s.status = 'active'`,
+                `td.pppoe_username IS NOT NULL`,
+                `NOT EXISTS (
+                    SELECT 1 FROM radacct ra
+                    WHERE LOWER(ra.username) = LOWER(td.pppoe_username)
+                      AND ra.acctstoptime IS NULL
+                      AND ra.acctupdatetime IS NOT NULL
+                      AND ra.acctupdatetime >= NOW() - ${SESSION_STALE_SQL}
+                )`
+            ];
+
+            if (identity.role === 'mitra') {
+                params.push(identity.region_ids);
+                conditions.push(`s.region_id = ANY($${params.length}::uuid[])`);
+            }
+
+            const regionFilter = String(args?.region || '').trim();
+            if (regionFilter) {
+                params.push(`%${regionFilter}%`);
+                const idx = params.length;
+                conditions.push(`(r.name ILIKE $${idx} OR r.name ILIKE $${idx} OR s.area ILIKE $${idx} OR c.address ILIKE $${idx})`);
+            }
+
+            const mitraFilter = String(args?.mitra || '').trim();
+            if (mitraFilter) {
+                params.push(`%${mitraFilter}%`);
+                conditions.push(`m.name ILIKE $${params.length}`);
+            }
+
+            const whereClause = `WHERE ${conditions.join(' AND ')}`;
+            const fromClause = `
+                FROM services s
+                JOIN customers c ON s.customer_id::text = c.id
+                LEFT JOIN technical_details td ON td.service_id = s.id
+                LEFT JOIN packages p ON s.package_id = p.id
+                LEFT JOIN regions r ON s.region_id = r.id
+                LEFT JOIN mitra m ON r.mitra_id = m.id
+            `;
+
+            const countRes = await query(`SELECT COUNT(*) AS total ${fromClause} ${whereClause}`, params);
+            const total = parseInt(countRes.rows?.[0]?.total, 10) || 0;
+
+            const listParams = [...params, limit];
+            const res = await query(`
+                SELECT
+                    c.name AS customer_name,
+                    c.phone AS customer_phone,
+                    s.service_number,
+                    s.package_id,
+                    p.name AS package_name,
+                    td.pppoe_username,
+                    td.mac_address,
+                    r.name AS region_name,
+                    m.name AS mitra_name,
+                    (
+                        SELECT MAX(ra.acctstoptime)
+                        FROM radacct ra
+                        WHERE LOWER(ra.username) = LOWER(td.pppoe_username)
+                          AND ra.acctstoptime IS NOT NULL
+                    ) AS last_seen
+                ${fromClause}
+                ${whereClause}
+                ORDER BY r.name ASC NULLS LAST, c.name ASC
+                LIMIT $${listParams.length}
+            `, listParams);
+
+            const customers = (res.rows || []).map(row => ({
+                customer_name: row.customer_name,
+                customer_phone: row.customer_phone || '-',
+                service_number: row.service_number || '-',
+                package_name: row.package_name || '-',
+                pppoe_username: row.pppoe_username || '-',
+                region_name: row.region_name || '-',
+                mitra_name: row.mitra_name || '-',
+                last_seen: row.last_seen ? formatDateId(row.last_seen) : 'belum pernah'
+            }));
+
+            return {
+                total,
+                count: customers.length,
+                scope: regionFilter || mitraFilter || 'semua wilayah',
+                customers
+            };
+        }
+    },
+    {
+        name: 'get_onu_signal',
+        kind: 'read',
+        roles: ['superadmin', 'admin', 'mitra', 'technician'],
+        description: 'Cek redaman / daya optik (RX power dBm) ONU satu pelanggan. Sumber berlapis: cache OLT, GenieACS, lalu SNMP OLT langsung. Gunakan untuk pertanyaan seperti "berapa redaman pak Budi".',
+        parameters: {
+            type: 'object',
+            properties: {
+                identifier: {
+                    type: 'string',
+                    description: 'Nama pelanggan, nomor layanan, nomor HP, atau PPPoE username.'
+                }
+            },
+            required: ['identifier']
+        },
+        async run(ctx, args) {
+            const { identity } = ctx;
+            const identifier = String(args?.identifier || '').trim();
+            if (!identifier) return { error: 'Sebutkan nama pelanggan, nomor layanan, atau PPPoE username.' };
+            if (!assertMitraHasRegions(identity)) {
+                return { error: 'Akses ditolak: wilayah mitra tidak ditemukan.' };
+            }
+
+            const resolved = await resolveCustomerAndRegion(identifier, { identity, limit: 5 });
+            if (!resolved?.found) {
+                return { found: false, reason: resolved?.error || `Pelanggan "${identifier}" tidak ditemukan.` };
+            }
+
+            if (!resolved.customer) {
+                return {
+                    found: false,
+                    disambiguation_required: true,
+                    reason: 'Ada beberapa pelanggan yang cocok. Sebutkan nomor layanan atau nama lebih lengkap.',
+                    candidates: (resolved.candidates || []).map(c => ({
+                        name: c.name,
+                        service_number: c.service_number,
+                        region_name: c.region_name,
+                        pppoe_username: c.pppoe_username
+                    }))
+                };
+            }
+
+            const customer = resolved.customer;
+            const pppoeUsername = customer.pppoe_username && customer.pppoe_username !== '-'
+                ? customer.pppoe_username
+                : null;
+
+            let sessionRow = null;
+            if (customer.service_id) {
+                try {
+                    const sessRes = await query(
+                        `SELECT ra.username, ra.framedipaddress, ra.callingstationid, ra.acctstarttime, ra.acctstoptime,
+                                ra.acctupdatetime
+                         FROM radacct ra
+                         WHERE LOWER(ra.username) = LOWER($1)
+                         ORDER BY ra.acctstarttime DESC NULLS LAST
+                         LIMIT 1`,
+                        [pppoeUsername || customer.service_number]
+                    );
+                    sessionRow = sessRes.rows?.[0] || null;
+                } catch (err) {
+                    // non fatal
+                }
+            }
+
+            const techRes = customer.service_id
+                ? await query(
+                    `SELECT device_serial_number, device_model FROM technical_details WHERE service_id = $1 LIMIT 1`,
+                    [customer.service_id]
+                )
+                : { rows: [] };
+            const tech = techRes.rows?.[0] || {};
+
+            const signal = await resolveOnuSignal({
+                pppoeUsername,
+                macAddress: sessionRow?.callingstationid || customer.mac_address,
+                sessionIp: sessionRow?.framedipaddress,
+                serialNumber: tech.device_serial_number
+            });
+
+            const sessionOnline = Boolean(
+                sessionRow && !sessionRow.acctstoptime
+            );
+
+            return {
+                found: Boolean(signal.found),
+                customer_name: customer.name,
+                service_number: customer.service_number || '-',
+                pppoe_username: pppoeUsername || '-',
+                region_name: customer.region_name || '-',
+                package_name: customer.package_name || '-',
+                online: sessionOnline,
+                ip_address: sessionRow?.framedipaddress || null,
+                device_model: tech.device_model || '-',
+                rx_power: signal.rx_power,
+                rx_power_unit: 'dBm',
+                quality: signal.quality,
+                olt_name: signal.olt_name || null,
+                onu_index: signal.onu_index || null,
+                source: signal.source || null,
+                measured_at: signal.polled_at || null,
+                reason: signal.found ? null : signal.reason
+            };
+        }
+    },
+    {
+        name: 'list_weak_onu_signals',
+        kind: 'read',
+        roles: ['superadmin', 'admin', 'mitra', 'technician'],
+        description: 'Daftar ONU dengan redaman jelek (RX power rendah) dari cache OLT. Filter severity "warning" (< -24 dBm) atau "critical" (< -27 dBm), bisa per OLT atau wilayah. Gunakan untuk pertanyaan seperti "pelanggan mana yang redaman jelek di HSGQ".',
+        parameters: {
+            type: 'object',
+            properties: {
+                severity: {
+                    type: 'string',
+                    description: 'Tingkat keparahan: "critical" (default, < -27 dBm) atau "warning" (< -24 dBm).'
+                },
+                olt: {
+                    type: 'string',
+                    description: 'Filter nama OLT (misal "HSGQ", "Hioso").'
+                },
+                region: {
+                    type: 'string',
+                    description: 'Filter wilayah/region opsional.'
+                },
+                limit: {
+                    type: 'number',
+                    description: 'Maksimal baris yang ditampilkan (default 20, maksimal 50).'
+                }
+            }
+        },
+        async run(ctx, args) {
+            const { identity } = ctx;
+            if (!assertMitraHasRegions(identity)) {
+                return { count: 0, total: 0, items: [], note: 'Tidak ada wilayah mitra yang terhubung.' };
+            }
+
+            const severity = String(args?.severity || 'critical').toLowerCase() === 'warning' ? 'warning' : 'critical';
+            const threshold = severity === 'critical' ? -27 : -24;
+            const limit = Math.min(50, Math.max(1, parseInt(args?.limit, 10) || 20));
+
+            let cacheReady = await hasFreshCache();
+            if (!cacheReady) {
+                await refreshSignalCache();
+                cacheReady = await hasFreshCache();
+            }
+
+            const params = [threshold];
+            const conditions = [
+                `c.rx_power IS NOT NULL`,
+                `c.rx_power < $1`
+            ];
+
+            if (identity.role === 'mitra') {
+                params.push(identity.region_ids);
+                conditions.push(`s.region_id = ANY($${params.length}::uuid[])`);
+            }
+
+            const oltFilter = String(args?.olt || '').trim();
+            if (oltFilter) {
+                params.push(`%${oltFilter}%`);
+                conditions.push(`c.olt_name ILIKE $${params.length}`);
+            }
+
+            const regionFilter = String(args?.region || '').trim();
+            if (regionFilter) {
+                params.push(`%${regionFilter}%`);
+                const idx = params.length;
+                conditions.push(`(r.name ILIKE $${idx} OR s.area ILIKE $${idx} OR cu.address ILIKE $${idx})`);
+            }
+
+            const whereClause = `WHERE ${conditions.join(' AND ')}`;
+            const fromClause = `
+                FROM olt_signal_cache c
+                JOIN technical_details td ON LOWER(td.pppoe_username) = LOWER(c.pppoe_username)
+                JOIN services s ON td.service_id = s.id
+                JOIN customers cu ON s.customer_id::text = cu.id
+                LEFT JOIN regions r ON s.region_id = r.id
+                LEFT JOIN mitra m ON r.mitra_id = m.id
+            `;
+
+            const countRes = await query(`SELECT COUNT(*) AS total ${fromClause} ${whereClause}`, params);
+            const total = parseInt(countRes.rows?.[0]?.total, 10) || 0;
+
+            const listParams = [...params, limit];
+            const res = await query(`
+                SELECT
+                    cu.name AS customer_name,
+                    s.service_number,
+                    c.pppoe_username,
+                    c.rx_power,
+                    c.tx_power,
+                    c.olt_name,
+                    c.onu_index,
+                    c.polled_at,
+                    r.name AS region_name,
+                    m.name AS mitra_name
+                ${fromClause}
+                ${whereClause}
+                ORDER BY c.rx_power ASC
+                LIMIT $${listParams.length}
+            `, listParams);
+
+            const items = (res.rows || []).map(row => ({
+                customer_name: row.customer_name,
+                service_number: row.service_number || '-',
+                pppoe_username: row.pppoe_username,
+                rx_power: normalizeRx(row.rx_power),
+                quality: classifyRx(row.rx_power),
+                olt_name: row.olt_name || '-',
+                onu_index: row.onu_index || null,
+                region_name: row.region_name || '-',
+                mitra_name: row.mitra_name || '-',
+                measured_at: row.polled_at ? formatDateId(row.polled_at) : null
+            }));
+
+            return {
+                severity,
+                threshold_dbm: threshold,
+                total,
+                count: items.length,
+                cache_fresh: cacheReady,
+                note: cacheReady ? null : 'Cache sinyal OLT belum tersedia/basi; angka mungkin tidak lengkap.',
+                items
             };
         }
     }

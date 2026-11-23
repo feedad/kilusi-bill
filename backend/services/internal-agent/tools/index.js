@@ -24,21 +24,49 @@ function toOpenAiToolsSchema(toolDefs) {
     }));
 }
 
-function truncateToolOutput(obj, maxBytes = 2400) {
+function truncateToolOutput(obj, maxBytes = 4000) {
     const json = JSON.stringify(obj);
     if (json.length <= maxBytes) return json;
-    if (obj && typeof obj === 'object') {
-        const clone = { ...obj, _truncated: true };
-        for (const key of Object.keys(clone)) {
-            if (Array.isArray(clone[key]) && clone[key].length > 5) {
-                clone[key] = clone[key].slice(0, 5);
+
+    // Structural trimming: always keep the payload valid JSON so the model can
+    // still reason about it instead of receiving a broken fragment.
+    if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+        const listKey = Object.keys(obj).find(key => Array.isArray(obj[key]));
+        const base = { ...obj, _truncated: true };
+
+        if (listKey) {
+            const fullList = obj[listKey];
+            base.total = obj.total !== undefined ? obj.total : fullList.length;
+
+            let keep = fullList.length;
+            while (keep > 0) {
+                const candidate = { ...base, [listKey]: fullList.slice(0, keep), shown: keep };
+                if (JSON.stringify(candidate).length <= maxBytes) {
+                    return JSON.stringify(candidate);
+                }
+                keep = Math.floor(keep / 2) || 0;
+                if (keep === 0) break;
             }
+
+            const empty = { ...base, [listKey]: [], shown: 0 };
+            return JSON.stringify(empty);
         }
-        const retry = JSON.stringify(clone);
-        if (retry.length <= maxBytes) return retry;
-        return retry.slice(0, maxBytes - 20) + '..."_cut":true}';
+
+        // No array to trim: drop the longest string fields until it fits.
+        const clone = { ...base };
+        const stringKeys = Object.keys(obj)
+            .filter(key => typeof obj[key] === 'string')
+            .sort((a, b) => (obj[b] || '').length - (obj[a] || '').length);
+
+        for (const key of stringKeys) {
+            clone[key] = String(obj[key]).slice(0, 200) + '…';
+            if (JSON.stringify(clone).length <= maxBytes) return JSON.stringify(clone);
+        }
+
+        return JSON.stringify({ _truncated: true, _cut: true });
     }
-    return json.slice(0, maxBytes);
+
+    return JSON.stringify({ _truncated: true, _cut: true, preview: json.slice(0, Math.max(0, maxBytes - 80)) });
 }
 
 async function executeToolCall(ctx, toolName, rawArgs) {

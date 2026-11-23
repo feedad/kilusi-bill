@@ -228,3 +228,60 @@ describe('Internal WhatsApp AI Agent - New Tools Registration & Permissions', ()
         expect(canExecuteTool({ role: 'technician', can_read: true, can_write: true, allowed_write_tools: ['assign_ticket'] }, assignTicket)).toBe(false);
     });
 });
+
+describe('Internal WhatsApp AI Agent - ONU signal & aggregate tools', () => {
+    const { classifyRx, normalizeRx } = require('./tools/onu-signal-helper');
+    const { truncateToolOutput } = require('./tools');
+
+    test('classifyRx uses -24 and -27 dBm thresholds', () => {
+        expect(classifyRx(-20)).toBe('normal');
+        expect(classifyRx(-24)).toBe('normal');
+        expect(classifyRx(-24.01)).toBe('warning');
+        expect(classifyRx(-26.9)).toBe('warning');
+        expect(classifyRx(-27)).toBe('warning');
+        expect(classifyRx(-27.1)).toBe('critical');
+        expect(classifyRx(null)).toBeNull();
+    });
+
+    test('normalizeRx handles decimals, raw integers, and junk values', () => {
+        expect(normalizeRx('-16.69')).toBe(-16.69);
+        expect(normalizeRx('-1619')).toBe(-16.19);
+        expect(normalizeRx('n/a')).toBeNull();
+        expect(normalizeRx(15)).toBeNull();
+    });
+
+    test('new read tools are registered with role guards', () => {
+        const offline = TOOL_MAP.get('list_offline_active_customers');
+        const onu = TOOL_MAP.get('get_onu_signal');
+        const weak = TOOL_MAP.get('list_weak_onu_signals');
+
+        expect(offline).toBeDefined();
+        expect(onu).toBeDefined();
+        expect(weak).toBeDefined();
+
+        for (const tool of [offline, onu, weak]) {
+            expect(tool.kind).toBe('read');
+            expect(canExecuteTool({ role: 'superadmin', can_read: true }, tool)).toBe(true);
+            expect(canExecuteTool({ role: 'technician', can_read: true }, tool)).toBe(true);
+        }
+    });
+
+    test('truncateToolOutput keeps valid JSON when trimming', () => {
+        const big = {
+            total: 100,
+            items: Array.from({ length: 100 }, (_, i) => ({
+                customer_name: `PELANGGAN PANJANG NOMOR ${i}`,
+                service_number: `2500000${i}`,
+                rx_power: -20 - i / 1000,
+                region_name: 'PRIMA TALAGA SUNDA RT 66 RW 22'
+            }))
+        };
+
+        const out = truncateToolOutput(big, 1000);
+        const parsed = JSON.parse(out);
+        expect(parsed._truncated).toBe(true);
+        expect(Array.isArray(parsed.items)).toBe(true);
+        expect(parsed.items.length).toBeLessThan(100);
+        expect(parsed.total).toBe(100);
+    });
+});

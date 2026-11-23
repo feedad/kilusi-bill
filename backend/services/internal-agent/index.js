@@ -18,7 +18,8 @@ const {
 } = require('./tools');
 const { tryHandleConfirmationReply } = require('./actions');
 
-const MAX_TOOL_ITERATIONS = 3;
+const MAX_TOOL_ITERATIONS = 8;
+const TOOL_LOOP_BUDGET_MS = 60000;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT_MAX_MESSAGES = 15;
 const rateLimitMap = new Map();
@@ -127,7 +128,11 @@ function buildSystemPrompt(identity) {
         '7. Untuk manajemen tiket gangguan & teknisi: gunakan `list_technicians` untuk melihat daftar teknisi dan beban tiketnya, `list_tickets` untuk mencari tiket (bisa filter status, nama pelanggan, atau teknisi), `create_support_ticket` untuk membuat tiket gangguan baru (bisa langsung assign teknisi), `assign_ticket` untuk menugaskan tiket ke teknisi (otomatis kirim WA ke teknisi), dan `update_ticket_status` untuk mengubah status/menyelesaikan tiket.',
         '8. Setiap aksi tulis (record_payment, record_rapel_payment, resend_invoice, create_support_ticket, assign_ticket, update_ticket_status, suspend_service, restore_service) wajib melalui mekanisme kode konfirmasi YA <KODE>.',
         '9. Jika tool mengembalikan beberapa kandidat pelanggan atau tiket (disambiguation_required), tampilkan daftar kandidat tersebut dan minta pengirim menyebutkan nomor layanan, nomor invoice, atau nomor tiket yang dimaksud.',
-        '10. Jangan pernah menyatakan pembayaran, tiket, atau perubahan telah berhasil disimpan ke database sebelum pengirim mengonfirmasi dengan YA <KODE>.'
+        '10. Jangan pernah menyatakan pembayaran, tiket, atau perubahan telah berhasil disimpan ke database sebelum pengirim mengonfirmasi dengan YA <KODE>.',
+        '11. Untuk pertanyaan daftar pelanggan (misal "pelanggan aktif tapi offline di wilayah X", "siapa saja yang offline di Janaloka"), panggil `list_offline_active_customers` dengan filter region/mitra. JANGAN memanggil `get_connection_status` per pelanggan untuk menyusun daftar; tool itu hanya untuk satu pelanggan spesifik dan maksimal 3 kali per pertanyaan.',
+        '12. Untuk redaman / daya optik / RX power satu pelanggan, panggil `get_onu_signal` (nama, nomor layanan, atau PPPoE). Untuk daftar ONU dengan redaman jelek, panggil `list_weak_onu_signals` (filter severity "warning" atau "critical", bisa per OLT atau wilayah).',
+        '13. Nilai redaman: normal >= -24 dBm, warning -24 sampai -27 dBm, critical < -27 dBm. Sebutkan satuannya (dBm) dan kualitasnya saat menjawab.',
+        '14. Jika sebuah tool mengembalikan `reason` (misal ONU belum terdaftar atau data cache belum ada), sampaikan alasannya apa adanya, jangan mengarang angka.'
     ].join('\n');
 }
 
@@ -232,9 +237,18 @@ async function processMessage({ identity, text, previewOnly = false }) {
     const executedToolCalls = [];
     let totalTokensUsed = 0;
     let finalReply = '';
+    let iterationsUsed = 0;
+    let lastFinishReason = null;
 
     try {
+        const loopStartedAt = Date.now();
         for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
+            if (Date.now() - loopStartedAt > TOOL_LOOP_BUDGET_MS) {
+                logger.warn(`[InternalAgent] Tool loop budget exhausted for ${identity.phone} after ${iter} iterations`);
+                break;
+            }
+            iterationsUsed = iter + 1;
+
             const llmRes = await chatCompletion({
                 messages,
                 tools: openAiTools,
@@ -243,6 +257,7 @@ async function processMessage({ identity, text, previewOnly = false }) {
                 max_tokens: 700
             });
 
+            lastFinishReason = llmRes.finishReason || null;
             totalTokensUsed += Number(llmRes.usage?.total_tokens || 0);
             const assistantMsg = llmRes.message || { role: 'assistant', content: '' };
             const toolCalls = Array.isArray(assistantMsg.tool_calls) ? assistantMsg.tool_calls : [];
@@ -306,8 +321,42 @@ async function processMessage({ identity, text, previewOnly = false }) {
         };
     }
 
+    // The tool loop can end without a text answer (iteration/time budget hit while the
+    // model still wanted to call tools). Ask once more, tools disabled, so the data
+    // collected so far is still summarised for the user.
     if (!finalReply) {
-        finalReply = 'Maaf, saya tidak dapat memproses permintaan tersebut saat ini.';
+        try {
+            const recap = await chatCompletion({
+                messages: [
+                    ...messages,
+                    {
+                        role: 'user',
+                        content: 'Rangkum hasil tool di atas menjadi jawaban akhir yang singkat dan jelas dalam Bahasa Indonesia. Jangan memanggil tool lagi. Jika data yang didapat belum lengkap, jelaskan apa yang sudah ditemukan dan bagian mana yang belum.'
+                    }
+                ],
+                temperature: 0.1,
+                max_tokens: 700
+            });
+            totalTokensUsed += Number(recap.usage?.total_tokens || 0);
+            finalReply = String(recap.message?.content || '').trim();
+        } catch (recapErr) {
+            logger.warn(`[InternalAgent] Final recap failed for ${identity.phone}: ${recapErr.message}`);
+        }
+    }
+
+    const loopMeta = ` [iter=${iterationsUsed}, finish=${lastFinishReason || '-'}, tools=${executedToolCalls.length}]`;
+
+    if (!finalReply) {
+        finalReply = 'Maaf, pertanyaan ini butuh terlalu banyak langkah data. Coba persempit pertanyaannya (misal sebut satu wilayah atau satu pelanggan).';
+        await logAuditEntry({
+            identity,
+            userMessage: cleanText,
+            toolName: 'loop_exhausted',
+            toolArgs: { prompt: cleanText.slice(0, 200) },
+            status: 'exhausted',
+            resultSummary: `No final answer${loopMeta}`,
+            tokensUsed: totalTokensUsed
+        });
     }
 
     // Record audit logs
@@ -323,7 +372,7 @@ async function processMessage({ identity, text, previewOnly = false }) {
                 toolName: tc.name,
                 toolArgs: tc.args,
                 status: tc.status,
-                resultSummary: summaryText,
+                resultSummary: `${summaryText}${i === 0 ? loopMeta : ''}`,
                 tokensUsed: i === 0 ? totalTokensUsed : 0
             });
         }

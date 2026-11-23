@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { logger } = require('../../../config/logger');
+const oltMonitor = require('../../../config/olt-snmp-monitor');
 const { query, transaction } = require('../../../config/database');
 
 // GET /api/v1/technician/dashboard - Get dashboard stats
@@ -309,41 +310,188 @@ router.post('/odps', async (req, res) => {
     }
 });
 
+// Hard timeout so a silent/unreachable OLT cannot hang the request.
+function withTimeout(promise, ms, label) {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timeout ${ms}ms`)), ms))
+    ]);
+}
+
+// Resolve ONT SN / MAC for a customer and look it up on every active OLT.
+// `customers` has no device_id / olt_ip columns, so the lookup goes through
+// technical_details (serial) and the latest RADIUS session (callingstationid).
+async function resolveCustomerOnuStatus(customerId) {
+    const customerResult = await query(
+        `SELECT c.id, c.name, td.device_serial_number, td.pppoe_username, td.mac_address
+         FROM customers c
+         JOIN services s ON s.customer_id::text = c.id
+         LEFT JOIN technical_details td ON td.service_id = s.id
+         WHERE c.id = $1
+         ORDER BY (s.status = 'active') DESC NULLS LAST
+         LIMIT 1`,
+        [customerId]
+    );
+
+    if (customerResult.rows.length === 0) {
+        return { notFound: true };
+    }
+
+    const row = customerResult.rows[0];
+
+    let sessionMac = null;
+    if (row.pppoe_username) {
+        try {
+            const sessRes = await query(
+                `SELECT callingstationid
+                 FROM radacct
+                 WHERE LOWER(username) = LOWER($1)
+                 ORDER BY acctstarttime DESC NULLS LAST
+                 LIMIT 1`,
+                [row.pppoe_username]
+            );
+            sessionMac = sessRes.rows?.[0]?.callingstationid || null;
+        } catch (err) {
+            logger.warn(`ONU lookup: radacct read failed for ${row.pppoe_username}: ${err.message}`);
+        }
+    }
+
+    const cleanMac = (value) => String(value || '').replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
+    const prettyMac = (value) => {
+        const clean = cleanMac(value);
+        return clean.length === 12 ? clean.match(/.{2}/g).join(':') : null;
+    };
+
+    const targets = [
+        row.device_serial_number,
+        prettyMac(sessionMac),
+        cleanMac(sessionMac),
+        prettyMac(row.mac_address),
+        cleanMac(row.mac_address)
+    ].filter(Boolean);
+
+    // Cached OLT signal (polled every 5 minutes) gives us the exact ONU index and
+    // the OLT that actually serves this customer.
+    let cacheRow = null;
+    if (row.pppoe_username) {
+        try {
+            const cacheRes = await query(
+                `SELECT olt_name, onu_index, polled_at
+                 FROM olt_signal_cache
+                 WHERE pppoe_username = $1
+                 LIMIT 1`,
+                [row.pppoe_username]
+            );
+            cacheRow = cacheRes.rows?.[0] || null;
+        } catch (err) {
+            logger.debug(`ONU lookup: cache read failed for ${row.pppoe_username}: ${err.message}`);
+        }
+    }
+
+    if (targets.length === 0 && !cacheRow) {
+        return {
+            success: false,
+            data: { status: 'unknown', reason: 'no_identifier' },
+            message: 'Serial ONT / MAC belum tercatat untuk pelanggan ini.'
+        };
+    }
+
+    const oltList = await query(
+        `SELECT host, snmp_community as community, snmp_version as version, snmp_port as port, type, description, name
+         FROM olts
+         WHERE status = 'active'`
+    );
+
+    if (oltList.rows.length === 0) {
+        return {
+            success: false,
+            data: { status: 'unknown', reason: 'no_olt' },
+            message: 'Tidak ada OLT aktif yang terkonfigurasi.'
+        };
+    }
+
+    // Put the cached OLT first so the common case is a single SNMP walk.
+    const orderedOlts = [...oltList.rows].sort((a, b) => {
+        const wanted = String(cacheRow?.olt_name || '').toLowerCase();
+        if (!wanted) return 0;
+        const aHit = String(a.name || '').toLowerCase() === wanted ? 0 : 1;
+        const bHit = String(b.name || '').toLowerCase() === wanted ? 0 : 1;
+        return aHit - bHit;
+    });
+
+    for (const olt of orderedOlts) {
+        const config = {
+            host: olt.host,
+            community: olt.community || 'public',
+            version: olt.version || '2c',
+            port: olt.port || 161,
+            vendor: olt.type
+        };
+
+        try {
+            const result = await withTimeout(
+                oltMonitor.findOnuByAny(config, {
+                    indexes: cacheRow?.onu_index ? [cacheRow.onu_index] : [],
+                    serials: targets
+                }),
+                10000,
+                `ONU lookup ${olt.name || olt.host}`
+            );
+            if (!result?.success) continue;
+
+            const rx = parseFloat(result.rxPower);
+            let signalQuality = 'unknown';
+            if (Number.isFinite(rx)) {
+                if (rx < -27) signalQuality = 'critical';
+                else if (rx < -25) signalQuality = 'warning';
+                else signalQuality = 'good';
+            }
+
+            return {
+                success: true,
+                data: {
+                    customer_name: row.name,
+                    status: result.status,
+                    rxPower: result.rxPower,
+                    signalQuality,
+                    oltParam: {
+                        name: olt.name || olt.description || olt.host,
+                        ip: olt.host
+                    },
+                    onuIndex: result.index,
+                    onuName: result.name || null,
+                    onuDistance: result.distance || null,
+                    matched_identifier: result.sn || null
+                }
+            };
+        } catch (e) {
+            logger.debug(`ONU lookup on ${olt.host} failed: ${e.message}`);
+        }
+    }
+
+    return {
+        success: false,
+        data: { status: 'offline', reason: 'not_found' },
+        message: 'ONU tidak ditemukan di OLT manapun.'
+    };
+}
+
 // GET /api/v1/technician/onu-status/:customer_id - Get ONU Status
 router.get('/onu-status/:customer_id', async (req, res) => {
     try {
-        const { customer_id } = req.params;
+        const result = await resolveCustomerOnuStatus(req.params.customer_id);
 
-        const customerResult = await query(
-            `SELECT device_id, olt_ip, olt_community FROM customers WHERE id = $1`,
-            [customer_id]
-        );
-
-        if (customerResult.rows.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: 'Pelanggan tidak ditemukan'
-            });
+        if (result.notFound) {
+            return res.status(404).json({ success: false, message: 'Pelanggan tidak ditemukan' });
         }
 
-        const { device_id: ont_sn, olt_ip, olt_community } = customerResult.rows[0];
-
-        if (!ont_sn || !olt_ip || !olt_community) {
-            return res.status(400).json({
-                success: false,
-                message: 'Informasi ONT SN, OLT IP, atau OLT Community tidak lengkap untuk pelanggan ini.'
-            });
-        }
-
-        const onuStatus = await oltMonitor.getOnuStatus(olt_ip, olt_community, ont_sn);
-
-        res.json({
-            success: true,
-            data: onuStatus
+        return res.json({
+            success: Boolean(result.success),
+            data: result.data,
+            message: result.message
         });
-
     } catch (error) {
-        logger.error(`Error fetching ONU status for customer ${req.params.customer_id}:`, error);
+        logger.error(`Error fetching ONU status for customer ${req.params.customer_id}: ${error.message}`);
         res.status(500).json({
             success: false,
             message: 'Gagal mengambil status ONU'
@@ -361,101 +509,20 @@ router.get('/system-status', (req, res) => {
 
 // GET /api/v1/technician/customers/:id/onu-status
 router.get('/customers/:id/onu-status', async (req, res) => {
-    const { id } = req.params;
-
     try {
-        // 1. Get Customer ONT SN
-        const customerResult = await query('SELECT device_id, name FROM customers WHERE id = $1', [id]);
-        if (customerResult.rows.length === 0) {
+        const result = await resolveCustomerOnuStatus(req.params.id);
+
+        if (result.notFound) {
             return res.status(404).json({ success: false, message: 'Customer not found' });
         }
 
-        const { device_id: ontSn, name } = customerResult.rows[0];
-
-        if (!ontSn) {
-            return res.json({
-                success: false,
-                message: 'ONT Serial Number not found for this customer',
-                data: { status: 'unknown', reason: 'no_sn' }
-            });
-        }
-
-        // 2. Get All SNMP-enabled OLTs
-        // We now use the dedicated 'olts' table
-        const oltList = await query(`
-            SELECT host, snmp_community as community, snmp_version as version, snmp_port as port, type, description, name
-            FROM olts 
-            WHERE status = 'active'
-        `);
-
-        if (oltList.rows.length === 0) {
-            // Fallback to NAS if OLTs table empty (for migration period)?
-            // Or just return empty
-            // Let's keep it strict to new table as requested
-            return res.json({
-                success: false,
-                message: 'No active OLTs configured',
-                data: { status: 'unknown', reason: 'no_olt' }
-            });
-        }
-
-        // 3. Search for ONU on each OLT
-        let foundOnu = null;
-        let usedOlt = null;
-
-        for (const olt of oltList.rows) {
-            const config = {
-                host: olt.host,
-                community: olt.community || 'public',
-                version: olt.version || '2c',
-                port: olt.port || 161,
-                vendor: olt.type
-            };
-
-            try {
-                const result = await oltMonitor.findOnuBySn(config, ontSn);
-                if (result.success) {
-                    foundOnu = result;
-                    usedOlt = olt;
-                    break;
-                }
-            } catch (e) {
-                logger.warn(`Failed to check OLT ${olt.host}: ${e.message}`);
-                continue;
-            }
-        }
-
-        if (foundOnu) {
-            // Determine signal quality
-            let signalQuality = 'good';
-            const rx = parseFloat(foundOnu.rxPower);
-            if (rx < -27) signalQuality = 'critical';
-            else if (rx < -25) signalQuality = 'warning';
-
-            return res.json({
-                success: true,
-                data: {
-                    status: foundOnu.status, // online/offline
-                    rxPower: foundOnu.rxPower,
-                    signalQuality,
-                    oltParam: {
-                        name: usedOlt.description || usedOlt.host,
-                        ip: usedOlt.host
-                    },
-                    onuIndex: foundOnu.index,
-                    rawRx: foundOnu.rawRx
-                }
-            });
-        } else {
-            return res.json({
-                success: false,
-                message: 'ONU not found on any active OLT',
-                data: { status: 'offline', reason: 'not_found' }
-            });
-        }
-
+        return res.json({
+            success: Boolean(result.success),
+            data: result.data,
+            message: result.message
+        });
     } catch (error) {
-        logger.error(`Error checking ONU status for customer ${id}:`, error);
+        logger.error(`Error checking ONU status for customer ${req.params.id}: ${error.message}`);
         res.status(500).json({ success: false, message: 'Internal Server Error' });
     }
 });
@@ -485,47 +552,79 @@ router.get('/olts', async (req, res) => {
 router.post('/customers/:id/sync-olt-name', async (req, res) => {
     try {
         const { id } = req.params;
-        const result = await query('SELECT * FROM customers WHERE id = $1', [id]);
+        const customerRes = await query(
+            `SELECT c.id, c.name, td.device_serial_number, td.pppoe_username, td.mac_address
+             FROM customers c
+             JOIN services s ON s.customer_id::text = c.id
+             LEFT JOIN technical_details td ON td.service_id = s.id
+             WHERE c.id = $1
+             ORDER BY (s.status = 'active') DESC NULLS LAST
+             LIMIT 1`,
+            [id]
+        );
 
-        if (result.rows.length === 0) return res.status(404).json({ success: false, message: 'Customer not found' });
+        if (customerRes.rows.length === 0) return res.status(404).json({ success: false, message: 'Customer not found' });
 
-        const customer = result.rows[0];
+        const customer = customerRes.rows[0];
 
-        // Use device_id as SN (fallback to existing logic)
-        // Note: In real world, we might want a dedicated serial_number column
-        const ontSn = customer.device_id || customer.notes?.match(/SN:([A-Z0-9]+)/)?.[1];
-
-        if (!ontSn) {
-            return res.status(400).json({ success: false, message: 'Customer has no Serial Number (device_id)' });
+        let sessionMac = null;
+        if (customer.pppoe_username) {
+            const sessRes = await query(
+                `SELECT callingstationid FROM radacct
+                 WHERE LOWER(username) = LOWER($1)
+                 ORDER BY acctstarttime DESC NULLS LAST LIMIT 1`,
+                [customer.pppoe_username]
+            );
+            sessionMac = sessRes.rows?.[0]?.callingstationid || null;
         }
 
-        // 1. Find the ONU first to get OLT and Index
+        const cleanMac = (value) => String(value || '').replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
+        const prettyMac = (value) => {
+            const clean = cleanMac(value);
+            return clean.length === 12 ? clean.match(/.{2}/g).join(':') : null;
+        };
+
+        const targets = [
+            customer.device_serial_number,
+            prettyMac(sessionMac),
+            cleanMac(sessionMac),
+            prettyMac(customer.mac_address),
+            cleanMac(customer.mac_address)
+        ].filter(Boolean);
+
+        if (targets.length === 0) {
+            return res.status(400).json({ success: false, message: 'Serial ONT / MAC belum tercatat untuk pelanggan ini' });
+        }
+
         const oltList = await query(`
             SELECT host, snmp_community as community, snmp_write_community, snmp_version as version, snmp_port as port, type, description, name
-            FROM olts 
+            FROM olts
             WHERE status = 'active'
         `);
 
         let foundOnu = null;
         let usedOlt = null;
 
-        for (const olt of oltList.rows) {
-            const config = {
-                host: olt.host,
-                community: olt.community || 'public',
-                version: olt.version || '2c',
-                port: olt.port || 161,
-                vendor: olt.type
-            };
+        for (const target of targets) {
+            for (const olt of oltList.rows) {
+                const config = {
+                    host: olt.host,
+                    community: olt.community || 'public',
+                    version: olt.version || '2c',
+                    port: olt.port || 161,
+                    vendor: olt.type
+                };
 
-            try {
-                const res = await oltMonitor.findOnuBySn(config, ontSn);
-                if (res.success) {
-                    foundOnu = res;
-                    usedOlt = olt;
-                    break;
-                }
-            } catch (ignored) { }
+                try {
+                    const found = await oltMonitor.findOnuBySn(config, target);
+                    if (found?.success) {
+                        foundOnu = found;
+                        usedOlt = olt;
+                        break;
+                    }
+                } catch (ignored) { }
+            }
+            if (foundOnu) break;
         }
 
         if (!foundOnu) {

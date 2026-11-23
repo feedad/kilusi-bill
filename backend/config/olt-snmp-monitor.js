@@ -250,37 +250,60 @@ async function findOnuBySn(config, targetSn) {
       return { success: false, message: 'ONT not found on this OLT' };
     }
 
-    // 2. Get Status and Rx Power using index
+    // 2. Get Status and Rx Power using index.
+    // Some vendors expose the Rx power under an extra sub-index (HSGQ EPON uses
+    // `<rxOid>.<index>.0.0`), so probe the plain and the suffixed OID.
     const targetStatusOid = `${statusOid}.${foundIndex}`;
-    const targetRxOid = `${rxStartOid}.${foundIndex}`;
+    const rxCandidates = [`${rxStartOid}.${foundIndex}`, `${rxStartOid}.${foundIndex}.0.0`];
 
-    const results = await snmpGet(session, [targetStatusOid, targetRxOid]);
+    const results = await snmpGet(session, [targetStatusOid, ...rxCandidates]);
 
-    session.close();
+    try { session.close(); } catch (_) { /* already closed */ }
 
-    let statusVal = results[targetStatusOid];
-    let rxVal = results[targetRxOid];
-    let rxDbm = rxVal;
-
-    // Conversion Logic (Approximate)
-    if (Math.abs(rxVal) > 1000) rxDbm = rxVal / 100;
-    if (rxVal > 60000 || rxVal === 2147483647) rxDbm = -Infinity;
+    const statusVal = results[targetStatusOid];
+    let rxVal;
+    for (const oid of rxCandidates) {
+      const val = results[oid];
+      if (val !== null && val !== undefined && !(typeof val === 'object' && Object.keys(val).length === 0)) {
+        rxVal = val;
+        break;
+      }
+    }
 
     let statusStr = 'offline';
-    if (statusVal === 1) statusStr = 'online';
+    if (Number(statusVal) === 1) statusStr = 'online';
+
+    if (rxVal === null || rxVal === undefined || Number.isNaN(Number(rxVal))) {
+      return {
+        success: true,
+        sn: foundSn,
+        index: foundIndex,
+        status: statusStr,
+        rxPower: null,
+        rawRx: null,
+        vendor: vendor,
+        message: 'ONU ditemukan, tetapi nilai Rx power tidak tersedia dari OLT ini'
+      };
+    }
+
+    const numericRx = Number(rxVal);
+    let rxDbm = numericRx;
+    // Conversion Logic (Approximate)
+    if (Math.abs(numericRx) > 1000) rxDbm = numericRx / 100;
+    if (numericRx > 60000 || numericRx === 2147483647) rxDbm = -Infinity;
 
     return {
       success: true,
       sn: foundSn,
       index: foundIndex,
       status: statusStr,
-      rxPower: rxDbm.toFixed(2),
+      rxPower: Number.isFinite(rxDbm) ? rxDbm.toFixed(2) : null,
       rawRx: rxVal,
       vendor: vendor
     };
 
   } catch (err) {
-    session.close();
+    try { session.close(); } catch (_) { /* already closed */ }
     return { success: false, message: err.message };
   }
 }
@@ -1064,6 +1087,61 @@ function getSignalForUsernames(usernames) {
   return result;
 }
 
+/**
+ * Locate one ONU inside the cached ONU list of an OLT using several identifiers.
+ * Much more reliable than findOnuBySn for EPON, where the radacct MAC belongs to
+ * the customer router and not to the ONU serial.
+ *
+ * @param {Object} config - OLT SNMP config
+ * @param {Object} identifiers
+ *   - indexes: array of ONU index labels from olt_signal_cache (e.g. "1/1")
+ *   - serials: array of serial numbers / MACs
+ * @returns {Object} { success, sn, index, rawIndex, status, rxPower, name, distance, temperature }
+ */
+async function findOnuByAny(config, identifiers = {}) {
+  const normalized = (value) => String(value || '').replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
+  const wantedIndexes = (identifiers.indexes || []).filter(Boolean).map(String);
+  const wantedSerials = (identifiers.serials || []).filter(Boolean).map(normalized).filter(Boolean);
+
+  let onus = [];
+  try {
+    onus = await getOnuList(config);
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+
+  let onu = null;
+
+  if (wantedIndexes.length > 0) {
+    onu = onus.find(item => wantedIndexes.includes(String(item.index))) || null;
+  }
+
+  if (!onu && wantedSerials.length > 0) {
+    onu = onus.find(item => {
+      const sn = normalized(item.sn);
+      if (!sn) return false;
+      return wantedSerials.some(target => sn === target || sn.includes(target) || target.includes(sn));
+    }) || null;
+  }
+
+  if (!onu) {
+    return { success: false, message: 'ONU tidak ditemukan di daftar OLT' };
+  }
+
+  return {
+    success: true,
+    sn: onu.sn,
+    index: onu.index,
+    rawIndex: onu.rawIndex,
+    status: onu.status,
+    rxPower: onu.rxPower,
+    txPower: onu.txPower,
+    name: onu.name,
+    distance: onu.distance,
+    temperature: onu.temperature
+  };
+}
+
 module.exports = {
   getOLTDeviceInfo,
   getPONPorts,
@@ -1071,6 +1149,7 @@ module.exports = {
   getONUsOnPort,
   getOLTStatistics,
   findOnuBySn,
+  findOnuByAny,
   setOnuName,
   getOnuList,
   getCachedOnuList,
