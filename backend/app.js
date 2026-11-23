@@ -333,6 +333,7 @@ const authLimiter = rateLimit({
 
 // Input sanitization and security
 const { sanitizeInput, xssProtection } = require('./middleware/validation');
+const { jwtAuth } = require('./middleware/jwtAuth');
 app.use(sanitizeInput);
 app.use(xssProtection);
 
@@ -546,6 +547,10 @@ app.use('/api/v1', apiV1Router);
 // Register OLT routes (New Separation)
 const oltRouter = require('./routes/api/v1/olts');
 app.use('/api/v1/olts', oltRouter);
+
+// ONU lifecycle: detect ONU swaps, auto rename, audit log
+const onuLifecycleRouter = require('./routes/api/v1/onu-lifecycle');
+app.use('/api/v1/onu-lifecycle', jwtAuth, onuLifecycleRouter);
 // Native Autopay mobile inbound aliases (supports /api/mobile/inbound and /mobile/inbound)
 const autopayRouter = require('./routes/api/v1/autopay');
 app.use('/api/mobile', autopayRouter);

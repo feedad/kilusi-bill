@@ -72,10 +72,14 @@ const OLT_OIDS = {
   cdata: {
     uptime: '1.3.6.1.2.1.1.3.0',
     model: '1.3.6.1.2.1.1.1.0',
-    onuStatus: '1.3.6.1.4.1.17409.1.11.2.1.1',
-    onuSn: '1.3.6.1.4.1.17409.1.3.1.2.1',
-    onuRxPower: '1.3.6.1.4.1.17409.1.11.5.1.1',
-    onuName: '1.3.6.1.4.1.17409.1.3.1.2.1',
+    // Verified on C-DATA FD1602S-B1 (V3.1.30) via SNMP walk of 1.3.6.1.4.1.17409
+    onuStatus: '1.3.6.1.4.1.17409.2.8.4.1.1.4',  // 1=Online, 2=Offline
+    onuSn: '1.3.6.1.4.1.17409.2.8.4.1.1.3',      // 8-byte hex, e.g. 43 44 54 43 A6 D5 C9 03
+    onuName: '1.3.6.1.4.1.17409.2.8.4.1.1.2',
+    onuRxPower: '1.3.6.1.4.1.17409.2.8.4.4.1.4', // centi-dBm, suffix <index>.0.0
+    onuDistance: '1.3.6.1.4.1.17409.2.8.4.4.1.8', // meters, suffix <index>.0.0
+    onuTemperature: null,
+    onuTxPower: null
   }
 };
 
@@ -603,7 +607,7 @@ async function _fetchOnuList(config, cacheKey, opts = {}) {
     // Merge Status
     statusList.forEach(item => {
       let suffix = getSuffix(item.oid, onuStatus);
-      if (vendor === 'hsgq' && suffix.endsWith('.0.0')) suffix = suffix.replace('.0.0', '');
+      if ((vendor === 'hsgq' || vendor === 'cdata') && suffix.endsWith('.0.0')) suffix = suffix.replace('.0.0', '');
 
       if (onuMap[suffix]) {
         let status = 'offline';
@@ -620,7 +624,7 @@ async function _fetchOnuList(config, cacheKey, opts = {}) {
     // Merge Rx Power
     rxList.forEach(item => {
       let suffix = getSuffix(item.oid, onuRxPower);
-      if (vendor === 'hsgq' && suffix.endsWith('.0.0')) suffix = suffix.replace('.0.0', '');
+      if ((vendor === 'hsgq' || vendor === 'cdata') && suffix.endsWith('.0.0')) suffix = suffix.replace('.0.0', '');
 
       if (onuMap[suffix]) {
         let val = item.value;
@@ -643,7 +647,7 @@ async function _fetchOnuList(config, cacheKey, opts = {}) {
     if (txList.length > 0) {
       txList.forEach(item => {
         let suffix = getSuffix(item.oid, onuTxPower);
-        if (vendor === 'hsgq' && suffix.endsWith('.0.0')) suffix = suffix.replace('.0.0', '');
+        if ((vendor === 'hsgq' || vendor === 'cdata') && suffix.endsWith('.0.0')) suffix = suffix.replace('.0.0', '');
         if (onuMap[suffix]) {
           let val = item.value;
           let txDbm = parseFloat(val);
@@ -667,7 +671,7 @@ async function _fetchOnuList(config, cacheKey, opts = {}) {
     // Merge Name
     for (const item of nameList) {
       let suffix = getSuffix(item.oid, onuName);
-      if (vendor === 'hsgq' && suffix.endsWith('.0.0')) suffix = suffix.replace('.0.0', '');
+      if ((vendor === 'hsgq' || vendor === 'cdata') && suffix.endsWith('.0.0')) suffix = suffix.replace('.0.0', '');
 
       if (onuMap[suffix]) {
         const rawName = Buffer.isBuffer(item.value) ? item.value.toString('latin1') : String(item.value);
@@ -698,7 +702,7 @@ async function _fetchOnuList(config, cacheKey, opts = {}) {
     if (distList.length > 0) {
       distList.forEach(item => {
         let suffix = getSuffix(item.oid, onuDistance);
-        if (vendor === 'hsgq' && suffix.endsWith('.0.0')) suffix = suffix.replace('.0.0', '');
+        if ((vendor === 'hsgq' || vendor === 'cdata') && suffix.endsWith('.0.0')) suffix = suffix.replace('.0.0', '');
         if (onuMap[suffix]) {
           onuMap[suffix].distance = item.value.toString() + 'm';
         }
@@ -709,7 +713,7 @@ async function _fetchOnuList(config, cacheKey, opts = {}) {
     if (tempList.length > 0) {
       tempList.forEach(item => {
         let suffix = getSuffix(item.oid, onuTemperature);
-        if (vendor === 'hsgq' && suffix.endsWith('.0.0')) suffix = suffix.replace('.0.0', '');
+        if ((vendor === 'hsgq' || vendor === 'cdata') && suffix.endsWith('.0.0')) suffix = suffix.replace('.0.0', '');
 
         if (onuMap[suffix]) {
           // Skip if ONU is offline (HSGQ specific request)

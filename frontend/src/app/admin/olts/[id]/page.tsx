@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/table'
 import { ArrowLeft, RefreshCw, Signal, Search, Wifi, WifiOff, ChevronLeft, ChevronRight, Wand2 } from 'lucide-react'
 import { SyncNameDialog } from '@/components/admin/olts/SyncNameDialog'
+import { OnuChangeDialog } from '@/components/admin/olts/OnuChangeDialog'
 import { RebootOnuDialog } from '@/components/admin/olts/RebootOnuDialog'
 import { useToast } from '@/components/ui/use-toast'
 import { toast } from 'react-hot-toast'
@@ -107,6 +108,7 @@ export default function OltMonitorPage() {
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
+                    <OnuChangeDialog oltId={id} onApplied={() => refetch()} />
                     <Button size="sm" variant="outline" onClick={handleAutoRename} disabled={syncing}>
                         <Wand2 className={`mr-1 h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
                         {syncing ? 'Syncing...' : 'Sync All Names'}

@@ -108,6 +108,18 @@ class InvoiceScheduler {
         }, { scheduled: true, timezone: "Asia/Jakarta" });
         logger.info('OLT signal cache poller initialized - runs every 5 minutes');
 
+        // 4e. ONU lifecycle (ONU swap detection + auto rename) — every 10 minutes.
+        // Disabled by default: enable with app_config onu_auto_sync_enabled = true.
+        cron.schedule('*/10 * * * *', async () => {
+            try {
+                const onuLifecycle = require('./onu-lifecycle');
+                await onuLifecycle.runAutoSync();
+            } catch (error) {
+                logger.error('Error in ONU lifecycle sync:', error);
+            }
+        }, { scheduled: true, timezone: "Asia/Jakarta" });
+        logger.info('ONU lifecycle scheduler initialized - runs every 10 minutes (disabled unless onu_auto_sync_enabled=true)');
+
         // 5. Voucher usage check every 1 minute
         cron.schedule('* * * * *', async () => {
             try { await this.checkVoucherUsage(); } 
