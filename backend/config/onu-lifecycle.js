@@ -28,6 +28,19 @@ function sanitizeName(raw) {
         .substring(0, NAME_MAX);
 }
 
+/**
+ * HSGQ firmware rejects spaces in ONU names (web UI limitation, the SNMP name
+ * column itself is read-only). Spaces are therefore written as underscores so
+ * the name can be copied straight into the HSGQ web UI.
+ */
+function nameForOlt(vendor, name) {
+    const clean = sanitizeName(name);
+    if (String(vendor || '').toLowerCase() === 'hsgq') {
+        return clean.replace(/ /g, '_');
+    }
+    return clean;
+}
+
 function normalizeMac(value) {
     return String(value || '').replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
 }
@@ -236,10 +249,11 @@ function macDistance(a, b) {
  */
 function writeCapability(olt) {
     const supported = oltMonitor.isRenameSupported(olt?.type);
-    return {
-        write_supported: supported,
-        write_note: supported ? null : oltMonitor.renameUnsupportedReason(olt?.type)
-    };
+    const base = supported ? null : oltMonitor.renameUnsupportedReason(olt?.type);
+    const note = base && String(olt?.type || '').toLowerCase() === 'hsgq'
+        ? `${base} Nama tanpa spasi (pakai garis bawah), contoh: A_HENDRA.`
+        : base;
+    return { write_supported: supported, write_note: note };
 }
 
 async function scanOnuChanges(options = {}) {
@@ -395,7 +409,7 @@ async function scanOnuChanges(options = {}) {
             onu_sn: onu.sn,
             ...writeCapability(olt),
             current_name: currentName || null,
-            new_name: desiredName,
+            new_name: nameForOlt(olt.type, desiredName),
             customer_id: row.customer_id,
             customer_name: row.customer_name,
             service_id: row.service_id,
@@ -434,7 +448,7 @@ async function scanOnuChanges(options = {}) {
                 onu_sn: oldOnu.sn,
                 ...writeCapability(olt),
                 current_name: String(oldOnu.name || '').trim() || null,
-                new_name: buildOldName(desiredName),
+                new_name: nameForOlt(olt.type, buildOldName(desiredName)),
                 customer_id: row.customer_id,
                 customer_name: row.customer_name,
                 service_id: row.service_id,
@@ -717,6 +731,7 @@ async function recentChanges(limit = 50) {
 
 module.exports = {
     sanitizeName,
+    nameForOlt,
     normalizeMac,
     isPlaceholderName,
     buildOldName,

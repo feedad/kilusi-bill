@@ -383,6 +383,9 @@ Address matching uses `LIKE '%keyword%'` with `LOWER()` case-insensitive. Apply 
 #### ONU Name Format
 - **setOnuName()**: Sanitized: only `[a-zA-Z0-9\s-_]`, max 30 chars, sent via SNMP SET OctetString
 - **Per-vendor OID**: Each vendor has different `onuName` OID (defined in `OLT_OIDS`)
+- **HSGQ (192.168.99.202)**: SNMP SET rejected for every name column (`GeneralError` with `rlradiusrw`, `NoAccess` with `rlradiusro`), even for a no-op write of the current value — ONU names must be changed in the HSGQ web UI. HSGQ web UI also rejects spaces, so names use underscores (`A_HENDRA`). `onu-lifecycle.js` sets `write_supported=false` for HSGQ and renders `new_name` with `_`.
+- **Hioso (`.37`) / C-DATA (`.2`)**: SET accepted, verified with no-op writes.
+- **Write index**: HSGQ `onu.index` is a label (`8/34`), the SNMP target is `rawIndex` (`16779298`) — always write with `rawIndex`.
 
 #### ONU Pagination (OLT Detail Page)
 - **Issue**: `GET /api/v1/olts/:id/onus` returns ALL ONUs without pagination — can be 2000+ rows
