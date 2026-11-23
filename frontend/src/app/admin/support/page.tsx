@@ -26,7 +26,9 @@ import {
   HeadsetIcon,
   Loader2,
   Phone,
-  Mail
+  Mail,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { adminApi, handleApiError } from '@/lib/api-clients'
@@ -72,9 +74,13 @@ export default function AdminSupportPage() {
   const [stats, setStats] = useState<SupportStats | null>(null)
   const [categories, setCategories] = useState<CategoryData[]>([])
   const [searchQuery, setSearchQuery] = useState('')
+  const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [refreshKey, setRefreshKey] = useState(0)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const [totalItems, setTotalItems] = useState(0)
 
   // Create ticket modal states
   const [showCreateTicketModal, setShowCreateTicketModal] = useState(false)
@@ -88,12 +94,33 @@ export default function AdminSupportPage() {
     category: 'general' as 'technical' | 'billing' | 'general' | 'complaint',
     priority: 'medium' as 'low' | 'medium' | 'high' | 'urgent',
     initial_message: ''
+  } as {
+    customer_name: string
+    customer_phone: string
+    customer_email: string
+    subject: string
+    description: string
+    category: 'technical' | 'billing' | 'general' | 'complaint'
+    priority: 'low' | 'medium' | 'high' | 'urgent'
+    initial_message: string
+    assigned_to?: string
   })
 
   useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearchTerm(searchQuery.trim())
+      setCurrentPage(1)
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
+  useEffect(() => {
     fetchTickets()
+  }, [statusFilter, categoryFilter, searchTerm, currentPage, pageSize, refreshKey])
+
+  useEffect(() => {
     fetchStats()
-  }, [statusFilter, categoryFilter, refreshKey])
+  }, [refreshKey])
 
   const fetchTickets = async () => {
     try {
@@ -101,9 +128,13 @@ export default function AdminSupportPage() {
       const params = new URLSearchParams()
       if (statusFilter !== 'all') params.append('status', statusFilter)
       if (categoryFilter !== 'all') params.append('category', categoryFilter)
+      if (searchTerm) params.append('search', searchTerm)
+      params.append('limit', String(pageSize))
+      params.append('offset', String((currentPage - 1) * pageSize))
 
       const response = await adminApi.get(`/api/v1/support/tickets?${params}`)
       setTickets(response.data.data)
+      setTotalItems(response.data.pagination?.total ?? response.data.data.length)
     } catch (error: any) {
       console.error('Error fetching tickets:', error)
       toast.error('❌ ' + handleApiError(error, 'Gagal memuat data tiket'))
@@ -225,14 +256,26 @@ export default function AdminSupportPage() {
     })
   }
 
-  const filteredTickets = tickets.filter(ticket => {
-    const matchesSearch = searchQuery === '' ||
-      ticket.ticket_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      ticket.subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      ticket.customer_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      ticket.description.toLowerCase().includes(searchQuery.toLowerCase())
-    return matchesSearch
-  })
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize))
+
+  const getPageNumbers = () => {
+    const delta = 2
+    const pages: (number | string)[] = []
+    let last: number | null = null
+    for (let i = 1; i <= totalPages; i++) {
+      if (i === 1 || i === totalPages || (i >= currentPage - delta && i <= currentPage + delta)) {
+        if (last !== null && i - last > 1) pages.push('...')
+        pages.push(i)
+        last = i
+      }
+    }
+    return pages
+  }
+
+  const changePage = (newPage: number) => {
+    if (newPage < 1 || newPage > totalPages || newPage === currentPage) return
+    setCurrentPage(newPage)
+  }
 
   const updateTicketStatus = async (ticketId: number, newStatus: string) => {
     try {
@@ -273,7 +316,7 @@ export default function AdminSupportPage() {
             Buat Tiket Manual
           </Button>
           <Button
-            onClick={() => setRefreshKey(prev => prev + 1)}
+            onClick={() => { setCurrentPage(1); setRefreshKey(prev => prev + 1) }}
             variant="outline"
           >
             Refresh
@@ -379,7 +422,7 @@ export default function AdminSupportPage() {
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
               </div>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setCurrentPage(1) }}>
                 <SelectTrigger className="w-[140px]">
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
@@ -391,7 +434,7 @@ export default function AdminSupportPage() {
                   <SelectItem value="closed">Ditutup</SelectItem>
                 </SelectContent>
               </Select>
-              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <Select value={categoryFilter} onValueChange={(v) => { setCategoryFilter(v); setCurrentPage(1) }}>
                 <SelectTrigger className="w-[140px]">
                   <SelectValue placeholder="Kategori" />
                 </SelectTrigger>
@@ -407,14 +450,18 @@ export default function AdminSupportPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {filteredTickets.length === 0 ? (
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : tickets.length === 0 ? (
             <div className="text-center py-8">
               <MessageSquare className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
               <p className="text-muted-foreground">Tidak ada tiket yang ditemukan</p>
             </div>
           ) : (
             <div className="space-y-4">
-              {filteredTickets.map((ticket) => (
+              {tickets.map((ticket) => (
                 <div key={ticket.id} className="border rounded-lg p-4 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
                   <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
                     <div className="flex-1 min-w-0">
@@ -489,6 +536,64 @@ export default function AdminSupportPage() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Pagination */}
+          {!loading && totalItems > 0 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-6 pt-4 border-t">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <span>
+                  Menampilkan {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, totalItems)} dari {totalItems} tiket
+                </span>
+                <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(parseInt(v)); setCurrentPage(1) }}>
+                  <SelectTrigger className="w-[90px] h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="10">10</SelectItem>
+                    <SelectItem value="20">20</SelectItem>
+                    <SelectItem value="50">50</SelectItem>
+                    <SelectItem value="100">100</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => changePage(currentPage - 1)}
+                  disabled={currentPage <= 1}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+
+                {getPageNumbers().map((page, index) => (
+                  typeof page === 'number' ? (
+                    <Button
+                      key={page}
+                      variant={page === currentPage ? 'default' : 'outline'}
+                      size="sm"
+                      className="w-9"
+                      onClick={() => changePage(page)}
+                    >
+                      {page}
+                    </Button>
+                  ) : (
+                    <span key={`ellipsis-${index}`} className="px-1 text-muted-foreground">…</span>
+                  )
+                ))}
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => changePage(currentPage + 1)}
+                  disabled={currentPage >= totalPages}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
           )}
         </CardContent>

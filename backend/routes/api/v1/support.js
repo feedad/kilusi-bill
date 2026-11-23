@@ -68,7 +68,14 @@ async function generateTicketNumber() {
 
 // GET /api/v1/support/tickets - Get all tickets (for admin)
 router.get('/tickets', asyncHandler(async (req, res) => {
-    const { status, category, customer_id, limit = 50, offset = 0 } = req.query;
+    const { status, category, customer_id, search } = req.query;
+
+    const parsedLimit = parseInt(req.query.limit, 10);
+    const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 200) : 20;
+
+    const parsedOffset = parseInt(req.query.offset, 10);
+    const offset = Number.isFinite(parsedOffset) ? Math.max(parsedOffset, 0) : 0;
+
     const page = Math.floor(offset / limit) + 1;
 
     let whereClause = 'WHERE 1=1';
@@ -90,13 +97,23 @@ router.get('/tickets', asyncHandler(async (req, res) => {
         params.push(category);
     }
 
+    if (search && String(search).trim() !== '') {
+        whereClause += ` AND (
+            st.ticket_number ILIKE $${paramIndex}
+            OR st.subject ILIKE $${paramIndex}
+            OR c.name ILIKE $${paramIndex}
+            OR st.description ILIKE $${paramIndex}
+        )`;
+        params.push(`%${String(search).trim()}%`);
+        paramIndex++;
+    }
+
     // Get total count
-    const countParams = [...params];
     const countResult = await query(`
         SELECT COUNT(*) as total FROM support_tickets st
         LEFT JOIN customers_view c ON st.customer_id = c.customer_id
         ${whereClause}
-    `, countParams);
+    `, params);
 
     const total = parseInt(countResult.rows[0].total);
 
@@ -105,8 +122,9 @@ router.get('/tickets', asyncHandler(async (req, res) => {
     const limitParam = paramIndex++;
     const offsetParam = paramIndex++;
 
+    // Newest activity first (updated_at), newest ticket wins ties
     const result = await query(`
-        SELECT DISTINCT ON (st.id)
+        SELECT
             st.*,
             c.name as customer_name,
             c.phone as customer_phone,
@@ -116,15 +134,21 @@ router.get('/tickets', asyncHandler(async (req, res) => {
             stm.created_at as last_message_at
         FROM support_tickets st
         LEFT JOIN customers_view c ON st.customer_id = c.customer_id
-        LEFT JOIN support_ticket_messages stm ON st.id = stm.ticket_id
+        LEFT JOIN LATERAL (
+            SELECT sender_name, message, created_at
+            FROM support_ticket_messages
+            WHERE ticket_id = st.id
+            ORDER BY created_at DESC
+            LIMIT 1
+        ) stm ON true
         ${whereClause}
-        ORDER BY st.id, stm.created_at DESC, st.updated_at DESC
+        ORDER BY st.updated_at DESC, st.id DESC
         LIMIT $${limitParam} OFFSET $${offsetParam}
     `, params);
 
     const pagination = {
         page,
-        limit: parseInt(limit),
+        limit,
         total,
         totalPages: Math.ceil(total / limit),
         hasNext: offset + limit < total,
@@ -135,10 +159,12 @@ router.get('/tickets', asyncHandler(async (req, res) => {
         status: status || undefined,
         category: category || undefined,
         customer_id: customer_id || undefined,
+        search: search || undefined,
         filters_applied: {
             status: !!status,
             category: !!category,
-            customer_id: !!customer_id
+            customer_id: !!customer_id,
+            search: !!search
         }
     };
 
